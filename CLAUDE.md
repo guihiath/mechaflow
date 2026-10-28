@@ -16,7 +16,7 @@ Sistema de ordens de serviço para oficinas diesel. Next.js (App Router) + TypeS
 - **RLS sempre**: toda tabela nova nasce com RLS ativado e políticas por oficina. Sem exceção.
 - **Sem segredos no código**: chaves em `.env.local` / Vercel. Modelo em `.env.example`. Nunca usar a chave secret/service_role no navegador.
 - Supabase: usar `@/lib/supabase/server` (servidor) e `@/lib/supabase/client` (navegador).
-- Cor primária e tokens em `src/app/globals.css`; constantes de marca em `src/lib/brand.ts`. Ícones: `npm run icons`.
+- Visual segue `../docs/DESIGN.md`. Tokens em `src/app/globals.css` (classes `bg-primaria`, `text-texto`, `h-toque-principal` etc.); constantes de marca em `src/lib/brand.ts`; tema via `data-tema` (`src/lib/tema.ts`). Botões: `@/components/ui/botao`. Ícones: `npm run icons`.
 - Service worker (`public/sw.js`): nunca cachear `/api`, `/auth` nem páginas com dados da oficina.
 - Antes de entregar: `npm run lint` e `npm run build` sem erro.
 - Perguntar antes de apagar arquivos, rodar migração em produção ou fazer deploy.

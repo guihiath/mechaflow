@@ -1,41 +1,152 @@
 @import "tailwindcss";
 
 /*
- * Tokens de design do MechaFlow (provisorios).
- * Quando docs/DESIGN.md estiver pronto, troque os valores aqui.
- * A cor primaria fica em UM token so: --primary.
- * Se mudar --primary, rode `npm run icons` e ajuste THEME_COLOR em src/lib/brand.ts.
+ * Identidade visual do MechaFlow. Fonte de verdade: ../docs/DESIGN.md (secao 8).
+ * Tema escuro controlado por data-tema="escuro" no <html> (ver src/lib/tema.ts).
+ * Constantes usadas fora do CSS (manifest, metadata, icones): src/lib/brand.ts.
  */
+@custom-variant dark (&:where([data-tema="escuro"], [data-tema="escuro"] *));
+
 :root {
-  --primary: #1e3a5f;
-  --primary-foreground: #ffffff;
-  --background: #f8fafc;
-  --foreground: #0f172a;
-  --muted: #64748b;
-  --surface: #ffffff;
-  --border: #e2e8f0;
-  --radius: 0.75rem;
+  /* Superficies e texto: modo claro (padrao) */
+  --mf-fundo: #F2F0EB;
+  --mf-superficie: #FFFFFF;
+  --mf-superficie-2: #E6E3DC;
+  --mf-texto: #14161A;
+  --mf-texto-suave: #4A4F57;
+  --mf-borda: #6B6F76;
+  --mf-borda-sutil: #B9B4AA;
+  --mf-grafite: #14161A;
+  --mf-foco: #1D5FA8;
+
+  /* Estados como texto/icone (sobre fundo/superficie) */
+  --mf-sucesso-texto: #1E7B34;
+  --mf-alerta-texto: #B54708;
+  --mf-erro-texto: #B42318;
+  --mf-info-texto: #1D5FA8;
+
+  /* Status cancelada (contorno) */
+  --mf-status-cancelada-texto: #B42318;
+  color-scheme: light;
+}
+
+[data-tema="escuro"] {
+  --mf-fundo: #121417;
+  --mf-superficie: #1C1F24;
+  --mf-superficie-2: #262A31;
+  --mf-texto: #EDEBE6;
+  --mf-texto-suave: #B4B0A8;
+  --mf-borda: #7A7F88;
+  --mf-borda-sutil: #3A3F47;
+  --mf-grafite: #0B0C0E;
+  --mf-foco: #7DB5F5;
+
+  --mf-sucesso-texto: #5BD07A;
+  --mf-alerta-texto: #FFB35C;
+  --mf-erro-texto: #FF8A80;
+  --mf-info-texto: #7DB5F5;
+
+  --mf-status-cancelada-texto: #FF8A80;
+  color-scheme: dark;
 }
 
 @theme inline {
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-muted: var(--muted);
-  --color-surface: var(--surface);
-  --color-border: var(--border);
-  --radius-app: var(--radius);
-  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
-    Arial, sans-serif;
+  /* Fontes (variaveis criadas pelo next/font em src/app/layout.tsx) */
+  --font-sans: var(--font-barlow), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-barlow-condensed), var(--font-barlow), sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
+
+  /* Cores que mudam com o tema */
+  --color-fundo: var(--mf-fundo);
+  --color-superficie: var(--mf-superficie);
+  --color-superficie-2: var(--mf-superficie-2);
+  --color-texto: var(--mf-texto);
+  --color-texto-suave: var(--mf-texto-suave);
+  --color-borda: var(--mf-borda);
+  --color-borda-sutil: var(--mf-borda-sutil);
+  --color-grafite: var(--mf-grafite);
+  --color-foco: var(--mf-foco);
+  --color-sucesso-texto: var(--mf-sucesso-texto);
+  --color-alerta-texto: var(--mf-alerta-texto);
+  --color-erro-texto: var(--mf-erro-texto);
+  --color-info-texto: var(--mf-info-texto);
+  --color-status-cancelada-texto: var(--mf-status-cancelada-texto);
 }
 
-html {
-  -webkit-tap-highlight-color: transparent;
+@theme {
+  /* Marca (igual nos dois temas) */
+  --color-primaria: #F5B800;
+  --color-primaria-forte: #D49E00;
+  --color-primaria-texto: #14161A;
+
+  /* Estados solidos (fundo de botao/faixa, texto branco por cima) */
+  --color-sucesso: #1E7B34;
+  --color-alerta: #B54708;
+  --color-erro: #B42318;
+  --color-info: #1D5FA8;
+
+  /* Status da OS: fundo + texto */
+  --color-status-aguardando-orcamento: #FFE08A;
+  --color-status-aguardando-orcamento-texto: #14161A;
+  --color-status-orcamento-enviado: #1D5FA8;
+  --color-status-orcamento-enviado-texto: #FFFFFF;
+  --color-status-aprovada: #0F766E;
+  --color-status-aprovada-texto: #FFFFFF;
+  --color-status-em-andamento: #14161A;
+  --color-status-em-andamento-texto: #F5B800;
+  --color-status-pronta: #1E7B34;
+  --color-status-pronta-texto: #FFFFFF;
+  --color-status-entregue: #4A4F57;
+  --color-status-entregue-texto: #FFFFFF;
+  --color-status-cancelada: #B42318; /* usar como borda; fundo transparente */
+
+  /* Escala de texto (nada abaixo de 14px) */
+  --text-xs: 0.875rem;   --text-xs--line-height: 1.25rem;
+  --text-sm: 0.9375rem;  --text-sm--line-height: 1.375rem;
+  --text-base: 1rem;     --text-base--line-height: 1.5rem;
+  --text-lg: 1.125rem;   --text-lg--line-height: 1.625rem;
+  --text-xl: 1.25rem;    --text-xl--line-height: 1.75rem;
+  --text-2xl: 1.5rem;    --text-2xl--line-height: 1.875rem;
+  --text-3xl: 2rem;      --text-3xl--line-height: 2.25rem;
+  --text-4xl: 2.75rem;   --text-4xl--line-height: 2.875rem;
+
+  /* Areas de toque */
+  --spacing-toque: 3rem;             /* 48px: minimo */
+  --spacing-toque-principal: 3.5rem; /* 56px: botao principal */
+  --spacing-barra: 4rem;             /* 64px: barra inferior / camera */
+
+  /* Raio */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+
+  /* Sombras (so barra, barra de acoes e bottom sheet) */
+  --shadow-barra: 0 -1px 0 rgb(20 22 26 / 0.10), 0 -6px 20px rgb(20 22 26 / 0.12);
+  --shadow-folha: 0 -8px 32px rgb(20 22 26 / 0.25);
+
+  /* Movimento */
+  --default-transition-duration: 150ms;
+  --default-transition-timing-function: cubic-bezier(0, 0, 0.2, 1);
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-sans);
+@layer base {
+  html { background: var(--mf-fundo); color: var(--mf-texto); }
+  body {
+    font-family: var(--font-sans);
+    font-weight: 500;
+    font-size: 1rem;
+    line-height: 1.5rem;
+    -webkit-tap-highlight-color: transparent;
+  }
+  h1, h2, h3 { font-family: var(--font-display); font-weight: 700; }
+  :focus-visible { outline: 3px solid var(--mf-foco); outline-offset: 2px; }
+  input, select, textarea { font-size: 1.125rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0ms !important;
+    transition-duration: 0ms !important;
+  }
 }

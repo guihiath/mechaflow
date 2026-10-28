@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import { BotaoLink } from "@/components/ui/botao";
 
 export const metadata: Metadata = {
   title: "Entrar",
@@ -7,15 +7,19 @@ export const metadata: Metadata = {
 
 export default function LoginPage() {
   return (
-    <main className="flex flex-1 flex-col items-center justify-center gap-6 px-6 text-center">
-      <h1 className="text-3xl font-bold tracking-tight">Entrar</h1>
-      <p className="text-lg text-muted">Em breve.</p>
-      <Link
-        href="/"
-        className="flex h-12 items-center justify-center rounded-app border border-border bg-surface px-6 font-semibold"
-      >
-        Voltar
-      </Link>
+    <main className="flex flex-1 flex-col px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-[max(2rem,env(safe-area-inset-top))]">
+      <div className="flex w-full max-w-[560px] flex-1 flex-col justify-center gap-3">
+        <h1 className="text-3xl">Entrar</h1>
+        <p className="text-lg text-texto-suave">
+          Em breve. O acesso da oficina ainda está sendo preparado.
+        </p>
+      </div>
+
+      <div className="w-full max-w-[560px]">
+        <BotaoLink href="/" variante="secundario">
+          Voltar ao início
+        </BotaoLink>
+      </div>
     </main>
   );
 }

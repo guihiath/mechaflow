@@ -1,8 +1,9 @@
 /**
  * Constantes de marca usadas fora do CSS (manifest, metadata, icones).
- * Manter em sincronia com --primary e --background em src/app/globals.css.
+ * Fonte de verdade: ../docs/DESIGN.md (secoes 2 e 7).
  */
 export const APP_NAME = "MechaFlow";
 export const APP_TAGLINE = "Ordens de serviço para oficina diesel";
-export const THEME_COLOR = "#1e3a5f";
-export const BACKGROUND_COLOR = "#f8fafc";
+/** Grafite: theme-color e tela de abertura do PWA, iguais nos dois temas. */
+export const THEME_COLOR = "#14161A";
+export const BACKGROUND_COLOR = "#14161A";

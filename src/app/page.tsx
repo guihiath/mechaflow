@@ -1,30 +1,27 @@
 import Image from "next/image";
-import Link from "next/link";
+import { BotaoLink } from "@/components/ui/botao";
 import { APP_NAME, APP_TAGLINE } from "@/lib/brand";
 
 export default function Home() {
   return (
-    <main className="flex flex-1 flex-col justify-between px-6 pb-[max(2rem,env(safe-area-inset-bottom))] pt-[max(3rem,env(safe-area-inset-top))]">
-      <div className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center gap-4">
+    <main className="flex flex-1 flex-col px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-[max(2rem,env(safe-area-inset-top))]">
+      <div className="flex w-full max-w-[560px] flex-1 flex-col justify-center gap-3">
         <Image
           src="/icons/icon.svg"
           alt=""
           width={72}
           height={72}
           priority
-          className="rounded-app"
+          className="mb-3 rounded-lg"
         />
-        <h1 className="text-4xl font-bold tracking-tight">{APP_NAME}</h1>
-        <p className="text-lg text-muted">{APP_TAGLINE}</p>
+        <h1 className="text-4xl">{APP_NAME}</h1>
+        <p className="text-lg text-texto-suave">{APP_TAGLINE}</p>
       </div>
 
-      <div className="mx-auto w-full max-w-md">
-        <Link
-          href="/login"
-          className="flex h-14 w-full items-center justify-center rounded-app bg-primary text-lg font-semibold text-primary-foreground transition-opacity active:opacity-80"
-        >
+      <div className="w-full max-w-[560px]">
+        <BotaoLink href="/login" variante="primario">
           Entrar
-        </Link>
+        </BotaoLink>
       </div>
     </main>
   );
