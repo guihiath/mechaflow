@@ -490,6 +490,7 @@ export type Database = {
           autorizacao_registrada_por: string | null
           autorizado_por_nome: string | null
           autorizado_por_telefone: string | null
+          motivo_cancelamento_texto: string | null
           forma_pagamento: Database["public"]["Enums"]["forma_pagamento"] | null
           oficina_id: string
           orcamento_aprovacao_canal: Database["public"]["Enums"]["canal_resposta"] | null
@@ -506,6 +507,7 @@ export type Database = {
           autorizacao_registrada_por?: string | null
           autorizado_por_nome?: string | null
           autorizado_por_telefone?: string | null
+          motivo_cancelamento_texto?: string | null
           forma_pagamento?: Database["public"]["Enums"]["forma_pagamento"] | null
           oficina_id?: string
           orcamento_aprovacao_canal?: Database["public"]["Enums"]["canal_resposta"] | null
@@ -521,6 +523,7 @@ export type Database = {
           autorizacao_registrada_por?: string | null
           autorizado_por_nome?: string | null
           autorizado_por_telefone?: string | null
+          motivo_cancelamento_texto?: string | null
           forma_pagamento?: Database["public"]["Enums"]["forma_pagamento"] | null
           oficina_id?: string
           orcamento_aprovacao_canal?: Database["public"]["Enums"]["canal_resposta"] | null
@@ -582,6 +585,33 @@ export type Database = {
             columns: ["os_id", "oficina_id"]
             isOneToOne: false
             referencedRelation: "ordens_servico"
+            referencedColumns: ["id", "oficina_id"]
+          },
+        ]
+      }
+      os_historico_textos: {
+        Row: {
+          historico_id: string
+          observacao: string
+          oficina_id: string
+        }
+        // Escrita so pelas RPCs. So dono e atendente leem (texto livre do balcao).
+        Insert: {
+          historico_id: string
+          observacao: string
+          oficina_id: string
+        }
+        Update: {
+          historico_id?: string
+          observacao?: string
+          oficina_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "os_historico_textos_historico_fk"
+            columns: ["historico_id", "oficina_id"]
+            isOneToOne: true
+            referencedRelation: "os_historico"
             referencedColumns: ["id", "oficina_id"]
           },
         ]

@@ -10,7 +10,9 @@
 --   * maquina de status: transicoes proibidas, status de origem conferido,
 --     papel do mecanico (comecar / pronta / desfazer so na OS dele);
 --   * modo direto nao anda sem autorizacao (RPC e check constraint);
---   * OS entregue/cancelada travada; pagamento por dono/atendente.
+--   * OS entregue/cancelada travada; pagamento por dono/atendente;
+--   * texto livre de recusa/cancelamento (pode ter valor) nao chega ao
+--     mecanico por tabela, view nem RPC; dono/atendente leem (migracao 04, I5).
 --
 -- Como rodar: SQL Editor do Supabase STAGING (usuario postgres), DEPOIS das
 -- migracoes da Fase 2. Colar tudo e executar.
@@ -509,6 +511,155 @@ begin
 end $$;
 
 -- =============================================================================
+-- 7b) Texto livre do balcao (motivo de recusa/cancelamento) fora do alcance do
+--     mecanico (REVISAO-FASE2 I5, migracao 04). Dono/atendente leem tudo.
+-- =============================================================================
+do $$
+declare
+  mec uuid := '00000000-0000-4000-8000-0000000002a2';
+  r   record;
+begin
+  -- OS 5: recusa com motivo (sem mudar status) e depois cancelamento com "Outro motivo"
+  select * into r from public.abrir_os('eeeeeeee-0000-4000-8000-000000000005',
+    p_veiculo_id => current_setting('teste.veiculo_a')::uuid, p_mecanico_id => mec);
+  perform set_config('teste.os5', r.os_id::text, true);
+  perform public.registrar_resposta_orcamento(r.os_id, 'aguardando_orcamento', false, 'whatsapp',
+                                              p_motivo => 'Achou caro, o outro cobrou R$ 2.800');
+  perform public.mudar_status_os(r.os_id, 'aguardando_orcamento', 'cancelada', 'Cliente pagou R$ 500 do diagnostico');
+
+  -- OS 6: recusa que ja cancela
+  select * into r from public.abrir_os('eeeeeeee-0000-4000-8000-000000000006',
+    p_veiculo_id => current_setting('teste.veiculo_a')::uuid, p_mecanico_id => mec);
+  perform set_config('teste.os6', r.os_id::text, true);
+  perform public.registrar_resposta_orcamento(r.os_id, 'aguardando_orcamento', false, 'telefone',
+                                              p_motivo => 'R$ 3.100 ficou caro', p_cancelar => true);
+
+  -- OS 7: direta cancelada com motivo FIXO (o mecanico pode ver)
+  select * into r from public.abrir_os('eeeeeeee-0000-4000-8000-000000000007',
+    p_veiculo_id => current_setting('teste.veiculo_a')::uuid, p_mecanico_id => mec,
+    p_modo => 'direto', p_autorizado_por_nome => 'Joao motorista');
+  perform set_config('teste.os7', r.os_id::text, true);
+  perform public.mudar_status_os(r.os_id, 'em_andamento', 'cancelada', 'Aberta por engano');
+
+  -- OS 8: direta; o mecanico vai marcar pronta mandando texto livre
+  select * into r from public.abrir_os('eeeeeeee-0000-4000-8000-000000000008',
+    p_veiculo_id => current_setting('teste.veiculo_a')::uuid, p_mecanico_id => mec,
+    p_modo => 'direto', p_autorizado_por_nome => 'Joao motorista');
+  perform set_config('teste.os8', r.os_id::text, true);
+
+  -- o banco so aceita motivo fixo na OS (texto livre fica em os_comercial)
+  assert (select motivo_cancelamento from public.ordens_servico where id = current_setting('teste.os5')::uuid) = 'Outro motivo',
+    'OS 5: motivo fixo deveria ser Outro motivo';
+  assert (select motivo_cancelamento from public.ordens_servico where id = current_setting('teste.os6')::uuid) = 'Orçamento recusado',
+    'OS 6: motivo fixo deveria ser Orçamento recusado';
+  assert (select motivo_cancelamento from public.ordens_servico where id = current_setting('teste.os3')::uuid) = 'Cliente desistiu',
+    'OS 3: motivo fixo deveria continuar Cliente desistiu';
+end $$;
+
+-- MECANICO A (a2): ve as OS 5..8, mas nenhum texto livre
+select set_config('request.jwt.claims',
+  '{"sub":"00000000-0000-4000-8000-0000000002a2","role":"authenticated","email":"f2.mec.a@teste.invalid"}', true);
+do $$
+declare
+  os5 uuid := current_setting('teste.os5')::uuid;
+  os6 uuid := current_setting('teste.os6')::uuid;
+  os7 uuid := current_setting('teste.os7')::uuid;
+  os8 uuid := current_setting('teste.os8')::uuid;
+begin
+  -- texto livre mandado pelo proprio mecanico tambem nao volta pela API
+  perform public.mudar_status_os(os8, 'em_andamento', 'pronta', 'R$ 50 de gorjeta');
+
+  assert (select count(*) from public.ordens_servico where id in (os5, os6, os7, os8)) = 4,
+    'mecanico deveria ver as OS 5..8 (senao o teste abaixo nao prova nada)';
+  assert (select count(*) from public.os_historico where os_id in (os5, os6, os7, os8)) >= 8,
+    'mecanico deveria ver o historico das OS 5..8';
+
+  -- nenhuma coluna de nenhuma linha que ele le tem o texto livre
+  assert not exists (select 1 from public.ordens_servico o where row_to_json(o)::text like '%R$%'),
+    'MECANICO LE TEXTO LIVRE EM ordens_servico';
+  assert not exists (select 1 from public.os_historico h where row_to_json(h)::text like '%R$%'),
+    'MECANICO LE TEXTO LIVRE EM os_historico';
+  assert not exists (select 1 from public.vw_os v where row_to_json(v)::text like '%R$%'),
+    'MECANICO LE TEXTO LIVRE EM vw_os';
+  assert not exists (select 1 from public.vw_os_historico v where row_to_json(v)::text like '%R$%'),
+    'MECANICO LE TEXTO LIVRE EM vw_os_historico';
+  assert not exists (select 1 from public.dados_da_placa('ABC1D23') d where row_to_json(d)::text like '%R$%'),
+    'MECANICO LE TEXTO LIVRE EM dados_da_placa';
+  assert not exists (select 1 from public.vw_os_historico where os_id = current_setting('teste.os4')::uuid
+                      and observacao like '%Achou caro%'), 'MECANICO LE O MOTIVO DA RECUSA DA OS 4';
+  assert (select count(*) from public.os_historico_textos) = 0, 'MECANICO LE os_historico_textos';
+  assert (select count(*) from public.os_comercial) = 0, 'MECANICO LE os_comercial';
+
+  -- o que ele pode ver: motivo fixo e texto do sistema
+  assert (select motivo_cancelamento from public.vw_os where id = os5) = 'Outro motivo', 'mecanico: OS 5 sem motivo fixo';
+  assert (select motivo_cancelamento from public.vw_os where id = os6) = 'Orçamento recusado', 'mecanico: OS 6 sem motivo fixo';
+  assert (select motivo_cancelamento from public.vw_os where id = os7) = 'Aberta por engano', 'mecanico: OS 7 sem motivo fixo';
+  assert (select observacao from public.vw_os_historico where os_id = os7 and evento = 'cancelada') = 'Aberta por engano',
+    'mecanico: historico da OS 7 deveria mostrar o motivo fixo';
+  assert (select observacao from public.vw_os_historico where os_id = os5 and evento = 'recusa') = 'Cliente recusou por whatsapp',
+    'mecanico: recusa da OS 5 deveria ser so o texto do sistema';
+  assert (select observacao from public.vw_os_historico where os_id = os5 and evento = 'cancelada') = 'Outro motivo',
+    'mecanico: cancelamento da OS 5 deveria ser so Outro motivo';
+end $$;
+
+-- ATENDENTE A: le o texto livre como antes
+select set_config('request.jwt.claims',
+  '{"sub":"00000000-0000-4000-8000-0000000002a3","role":"authenticated","email":"f2.atd.a@teste.invalid"}', true);
+do $$
+begin
+  assert (select motivo_cancelamento from public.vw_os where id = current_setting('teste.os5')::uuid)
+    = 'Cliente pagou R$ 500 do diagnostico', 'atendente deveria ler o motivo digitado';
+  assert (select observacao from public.vw_os_historico where os_id = current_setting('teste.os5')::uuid and evento = 'recusa')
+    = 'Cliente recusou por whatsapp: Achou caro, o outro cobrou R$ 2.800', 'atendente deveria ler o motivo da recusa';
+end $$;
+
+-- DONO A: le tudo, no mesmo formato de antes da migracao 04
+select set_config('request.jwt.claims',
+  '{"sub":"00000000-0000-4000-8000-0000000002a1","role":"authenticated","email":"f2.dono.a@teste.invalid"}', true);
+do $$
+declare
+  os5 uuid := current_setting('teste.os5')::uuid;
+  os6 uuid := current_setting('teste.os6')::uuid;
+  os7 uuid := current_setting('teste.os7')::uuid;
+  os8 uuid := current_setting('teste.os8')::uuid;
+begin
+  assert (select motivo_cancelamento from public.vw_os where id = os5) = 'Cliente pagou R$ 500 do diagnostico',
+    'dono: motivo digitado da OS 5';
+  assert (select motivo_cancelamento from public.vw_os where id = os6) = 'Orçamento recusado: R$ 3.100 ficou caro',
+    'dono: motivo da recusa com cancelamento (OS 6)';
+  assert (select motivo_cancelamento from public.vw_os where id = os7) = 'Aberta por engano', 'dono: motivo fixo da OS 7';
+  assert (select motivo_cancelamento from public.vw_os where id = current_setting('teste.os3')::uuid) = 'Cliente desistiu',
+    'dono: motivo fixo da OS 3';
+  assert (select motivo_cancelamento_texto from public.os_comercial where os_id = os5) = 'Cliente pagou R$ 500 do diagnostico',
+    'dono: texto livre deveria estar em os_comercial';
+  assert (select motivo_cancelamento_texto from public.os_comercial where os_id = os7) is null,
+    'motivo fixo nao deveria ser copiado como texto livre';
+
+  assert (select observacao from public.vw_os_historico where os_id = os5 and evento = 'recusa')
+    = 'Cliente recusou por whatsapp: Achou caro, o outro cobrou R$ 2.800', 'dono: recusa da OS 5';
+  assert (select observacao from public.vw_os_historico where os_id = os5 and evento = 'cancelada')
+    = 'Cliente pagou R$ 500 do diagnostico', 'dono: cancelamento da OS 5';
+  assert (select observacao from public.vw_os_historico where os_id = os6 and evento = 'recusa')
+    = 'Cliente recusou por telefone: R$ 3.100 ficou caro', 'dono: recusa com cancelamento da OS 6';
+  assert (select observacao from public.vw_os_historico where os_id = current_setting('teste.os4')::uuid and evento = 'recusa')
+    = 'Cliente recusou por telefone: Achou caro', 'dono: recusa da OS 4';
+  assert (select observacao from public.vw_os_historico where os_id = os8 and evento = 'status' and para_status = 'pronta')
+    = 'R$ 50 de gorjeta', 'dono: texto livre mandado pelo mecanico';
+  assert (select observacao from public.vw_os_historico where os_id = os7 and evento = 'cancelada') = 'Aberta por engano',
+    'dono: cancelamento da OS 7';
+  -- a tabela crua so tem texto do sistema; o completo fica na tabela separada
+  assert not exists (select 1 from public.os_historico h where row_to_json(h)::text like '%R$%'),
+    'os_historico.observacao ainda guarda texto livre';
+  assert (select count(*) from public.os_historico_textos) = 5, 'dono deveria ler os 5 textos livres (OS 4, 5, 6, 8)';
+  -- ninguem grava direto
+  assert public.zz_estado(format($q$ insert into public.os_historico_textos (historico_id, oficina_id, observacao)
+      select id, oficina_id, 'x' from public.os_historico where os_id = %L limit 1 $q$, os7)) = '42501',
+    'dono gravou direto em os_historico_textos';
+  assert public.zz_estado(format($q$ update public.ordens_servico set motivo_cancelamento = 'R$ 1' where id = %L $q$, os7))
+    = '42501', 'dono mudou motivo_cancelamento direto';
+end $$;
+
+-- =============================================================================
 -- 8) DONO B: nao ve nem mexe em nada da A
 -- =============================================================================
 select set_config('request.jwt.claims',
@@ -536,6 +687,7 @@ begin
   assert (select count(*) from public.os_itens_custos) = 0, 'DONO B VE CUSTOS DA A';
   assert (select count(*) from public.os_comercial) = 1, 'DONO B VE COMERCIAL DA A';
   assert (select count(*) from public.os_historico) = 1, 'DONO B VE HISTORICO DA A';
+  assert (select count(*) from public.os_historico_textos) = 0, 'DONO B VE TEXTO LIVRE DO HISTORICO DA A';
   assert (select count(*) from public.vw_os_totais) = 1, 'DONO B VE TOTAIS DA A';
   assert (select count(*) from public.vw_catalogo_mais_usados) = 0, 'DONO B VE USO DO CATALOGO DA A';
   assert (select ultima_os_id from public.dados_da_placa('ABC1D23')) is null, 'dados_da_placa vazou OS da A';
