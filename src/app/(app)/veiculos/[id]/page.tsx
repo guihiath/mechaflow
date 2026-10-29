@@ -3,6 +3,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { Cabecalho } from "@/components/layout/cabecalho";
+import { UltimasOS } from "@/components/os/ultimas-os";
+import { BotaoLink } from "@/components/ui/botao";
 import { ConfirmarAcao } from "@/components/ui/confirmar-acao";
 import { CaixaErro, ChipPlaca, FormularioCarregando, Pagina } from "@/components/ui/estados";
 import { CaixaMensagem } from "@/components/ui/formulario";
@@ -41,7 +43,7 @@ async function Conteudo({
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
 
   const supabase = await createClient();
-  const [{ data: veiculo, error }, { data: clientes }] = await Promise.all([
+  const [{ data: veiculo, error }, { data: clientes }, { data: ordens }] = await Promise.all([
     supabase
       .from("veiculos")
       .select(
@@ -50,6 +52,12 @@ async function Conteudo({
       .eq("id", id)
       .maybeSingle(),
     supabase.from("clientes").select("id, nome").order("nome").limit(1000),
+    supabase
+      .from("vw_os")
+      .select("id, numero, status, criado_em, sintoma_relatado")
+      .eq("veiculo_id", id)
+      .order("criado_em", { ascending: false })
+      .limit(3),
   ]);
 
   if (error) return <CaixaErro tentarDeNovo={`/veiculos/${id}`} />;
@@ -73,6 +81,13 @@ async function Conteudo({
           </p>
         )}
       </div>
+
+      <section className="flex flex-col gap-3">
+        <UltimasOS os={ordens ?? []} verTodas={`/os?q=${veiculo.placa}`} />
+        <BotaoLink href={`/os/nova?placa=${veiculo.placa}`} variante="secundario">
+          Abrir OS para este veículo
+        </BotaoLink>
+      </section>
 
       <FormVeiculo veiculo={dados} clientes={clientes ?? []} />
 
