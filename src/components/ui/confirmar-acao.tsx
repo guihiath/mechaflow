@@ -5,6 +5,7 @@ import { Check, CircleAlert, CircleX } from "lucide-react";
 import { Botao, type VarianteBotao } from "@/components/ui/botao";
 import { BotaoEnviar, CaixaMensagem } from "@/components/ui/formulario";
 import type { EstadoAcao } from "@/lib/acao";
+import { MOTIVOS_CANCELAMENTO } from "@/lib/os";
 
 /**
  * Acao que pede confirmacao antes (excluir, desativar, tornar dono).
@@ -94,7 +95,7 @@ export function ConfirmarAcao({
   );
 }
 
-export const MOTIVOS_CANCELAMENTO = ["Cliente desistiu", "Orçamento recusado", "Aberta por engano", "Outro motivo"] as const;
+export { MOTIVOS_CANCELAMENTO };
 
 /**
  * Acao perigosa que exige um motivo (DESIGN §10.9: cancelar OS).

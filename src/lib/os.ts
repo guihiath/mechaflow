@@ -75,6 +75,12 @@ export function unidadeFracionada(u: string | null | undefined): boolean {
 
 // ---------------------------------------------------------------- historico
 
+/** Motivos fixos do cancelamento (o ultimo, "Outro motivo", abre texto livre). */
+export const MOTIVOS_CANCELAMENTO = ["Cliente desistiu", "Orçamento recusado", "Aberta por engano", "Outro motivo"] as const;
+
+/** Motivos que o mecanico pode ver: so os fixos (texto livre pode ter valor, I5). */
+const MOTIVOS_FIXOS: readonly string[] = MOTIVOS_CANCELAMENTO.slice(0, -1);
+
 type LinhaHistorico = {
   id: string | null;
   evento: string | null;
@@ -99,10 +105,12 @@ function semAcento(t: string) {
 /**
  * Converte o historico do banco em eventos da LinhaTempo (mais recente primeiro).
  * O texto e montado aqui: a observacao crua do banco nao vai para o navegador.
- * Mecanico: eventos de pagamento ficam de fora (DESIGN §10.0 regra 4).
+ * Mecanico: eventos de pagamento ficam de fora (DESIGN §10.0 regra 4) e o texto livre
+ * do balcao (motivo de recusa / cancelamento) vira texto fixo: pode conter valor (I5).
  */
 export function montarEventos(linhas: LinhaHistorico[], papel: Papel): EventoOS[] {
   const eventos: EventoOS[] = [];
+  const mecanico = papel === "mecanico";
   for (const h of linhas) {
     if (!h.id || !h.em || !h.evento) continue;
     const base = { id: h.id, em: h.em, por: h.por_nome };
@@ -127,7 +135,10 @@ export function montarEventos(linhas: LinhaHistorico[], papel: Papel): EventoOS[
           });
         break;
       case "cancelada":
-        eventos.push({ ...base, tipo: "status", status: "cancelada", observacao: obs ? `Motivo: ${obs}` : null });
+        if (mecanico) {
+          const fixo = MOTIVOS_FIXOS.includes(obs.trim()) ? obs.trim() : null;
+          eventos.push({ ...base, tipo: "status", status: "cancelada", observacao: fixo ? `Motivo: ${fixo}` : null });
+        } else eventos.push({ ...base, tipo: "status", status: "cancelada", observacao: obs ? `Motivo: ${obs}` : null });
         break;
       case "aprovacao": {
         const canal = CANAL_TEXTO[obs.replace(/^por /, "")] ?? "";
@@ -135,6 +146,11 @@ export function montarEventos(linhas: LinhaHistorico[], papel: Papel): EventoOS[
         break;
       }
       case "recusa": {
+        if (mecanico) {
+          if (para === "cancelada") eventos.push({ ...base, tipo: "status", status: "cancelada", observacao: "Orçamento recusado." });
+          else eventos.push({ ...base, tipo: "texto", texto: "Cliente recusou o orçamento." });
+          break;
+        }
         const m = /^Cliente recusou por (\w+)(?:: ([\s\S]*))?$/.exec(obs);
         const canal = m ? (CANAL_TEXTO[m[1]] ?? "") : "";
         const motivo = m?.[2] ? `: ${m[2]}` : "";

@@ -445,7 +445,19 @@ async function testesFase2({ donoA, mec, at, donoB, ofA, ofB, vei, serv, peca })
   const vR = (await donoA.sb.from("vw_os").select("status, motivo_cancelamento").eq("id", s2.data?.os_id).single()).data;
   checar("recusa com cancelamento: cancelada com o motivo da recusa", !recusa.error && vR?.status === "cancelada" && /recusado/i.test(vR?.motivo_cancelamento ?? ""), msg(recusa));
 
-  // ---------------------------------------------------------------- isolamento A x B
+  // texto livre com valor nao chega ao mecanico (I5 da REVISAO-FASE2)
+  const LIVRE_CANC = "Cliente pagou R$ 123,45 so do diagnostico";
+  const LIVRE_REC = "Achou caro: o outro cobrou R$ 2.800,00";
+  const [m1, m2] = await Promise.all([
+    donoA.sb.rpc("abrir_os", { ...base, p_chave_idempotencia: uuid(), p_mecanico_id: idMec }).single(),
+    donoA.sb.rpc("abrir_os", { ...base, p_chave_idempotencia: uuid(), p_mecanico_id: idMec }).single(),
+  ]);
+  const osMecCanc = m1.data?.os_id;
+  const osMecRec = m2.data?.os_id;
+  const cancLivre = await donoA.sb.rpc("mudar_status_os", { p_os_id: osMecCanc, p_de: "aguardando_orcamento", p_para: "cancelada", p_motivo: LIVRE_CANC });
+  const recLivre = await donoA.sb.rpc("registrar_resposta_orcamento", { p_os_id: osMecRec, p_de: "aguardando_orcamento", p_aprovou: false, p_canal: "telefone", p_motivo: LIVRE_REC, p_cancelar: true });
+  checar("OS do mecanico canceladas com motivo livre (Outro motivo e recusa)", !m1.error && !m2.error && !cancLivre.error && !recLivre.error, `${msg(m1)}/${msg(m2)}/${msg(cancLivre)}/${msg(recLivre)}`);
+
   console.log("\n== Fase 2: isolamento entre oficinas ==");
   for (const tab of ["ordens_servico", "os_comercial", "os_itens", "os_itens_precos", "os_itens_custos", "os_historico", "vw_os", "vw_os_itens", "vw_os_totais", "vw_os_historico", "vw_catalogo_mais_usados"]) {
     const r = await donoB.sb.from(tab).select("*");
@@ -475,6 +487,16 @@ async function testesFase2({ donoA, mec, at, donoB, ofA, ofB, vei, serv, peca })
     const [ckDono, ckMec, ckAt] = await Promise.all([cookiesDaSessao(donoA.session), cookiesDaSessao(mec.session), cookiesDaSessao(at.session)]);
     const detMec = await pagina(`/os/${osA}`, ckMec);
     checar("app mecanico: /os/[id] sem nenhum R$ nem 'centavos' no HTML/payload", detMec.status === 200 && detMec.html.includes("DEF2G34") && !detMec.html.includes("R$") && !/centavos/i.test(detMec.html), `status ${detMec.status}`);
+    for (const [rotulo, id, livre] of [["cancelamento", osMecCanc, "123,45"], ["recusa", osMecRec, "2.800"]]) {
+      const pg = await pagina(`/os/${id}`, ckMec);
+      checar(
+        `app mecanico: /os/[id] cancelada por ${rotulo} sem o texto livre do motivo (nem R$)`,
+        pg.status === 200 && pg.html.includes("Cancelada") && !pg.html.includes("R$") && !pg.html.includes(livre),
+        `status ${pg.status}`,
+      );
+    }
+    const pgDonoCanc = await pagina(`/os/${osMecCanc}`, ckDono);
+    checar("app dono: ve o motivo livre do cancelamento", pgDonoCanc.status === 200 && pgDonoCanc.html.includes("123,45"), `status ${pgDonoCanc.status}`);
     const minhas = await pagina("/minhas-os?entregues=1", ckMec);
     checar("app mecanico: /minhas-os mostra a OS e nenhum R$", minhas.status === 200 && minhas.html.includes("DEF2G34") && !minhas.html.includes("R$"), `status ${minhas.status}`);
     const listaMec = await pagina("/os", ckMec);
