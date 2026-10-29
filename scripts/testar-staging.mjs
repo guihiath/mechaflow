@@ -32,7 +32,12 @@ const CHAVE = env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 if (!URL_SB || !CHAVE) throw new Error("Falta NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY no .env.local");
 if (!URL_SB.includes("qjzhzyzmifashtvffxdx")) throw new Error("Este teste so roda no projeto STAGING.");
 
-const DOMINIO = process.env.TESTE_EMAIL_DOMINIO;
+// TESTE_EMAIL_BASE=fulano@gmail.com gera fulano+rotulo.rodada@gmail.com (com a confirmacao
+// desligada nenhum e-mail e enviado). Alternativa: TESTE_EMAIL_DOMINIO=dominio-com-mx.com
+const BASE = process.env.TESTE_EMAIL_BASE;
+const DOMINIO = BASE ? BASE.split("@")[1] : process.env.TESTE_EMAIL_DOMINIO;
+const emailTeste = (rotulo) =>
+  BASE ? BASE.replace("@", `+${rotulo}.${RODADA}@`) : `${rotulo}.${RODADA}@${DOMINIO}`;
 const APP_URL = process.env.APP_URL;
 const TERMOS = "2026-10-28";
 const RODADA = `${Date.now().toString(36)}${randomBytes(2).toString("hex")}`;
@@ -50,7 +55,7 @@ const senha = () => `Mf-${randomBytes(12).toString("base64url")}`;
 
 async function criarConta(rotulo) {
   const sb = novoCliente();
-  const email = `${rotulo}.${RODADA}@${DOMINIO}`;
+  const email = emailTeste(rotulo);
   const pw = senha();
   const { data, error } = await sb.auth.signUp({ email, password: pw });
   if (error) throw new Error(`signUp ${rotulo}: ${error.message}`);
