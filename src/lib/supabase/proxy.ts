@@ -7,7 +7,7 @@ import { getSupabaseEnv } from "./env";
  * Prefixos publicos (sem login). Todo o resto exige sessao.
  * "/" e exato; os demais valem para a rota e as filhas.
  */
-const ROTAS_PUBLICAS = ["/login", "/cadastro", "/convite", "/termos", "/auth"];
+const ROTAS_PUBLICAS = ["/login", "/cadastro", "/convite", "/termos", "/auth", "/esqueci-senha", "/redefinir-senha"];
 
 export function rotaPublica(pathname: string) {
   if (pathname === "/") return true;
