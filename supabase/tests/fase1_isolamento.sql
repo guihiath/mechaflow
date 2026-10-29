@@ -360,9 +360,11 @@ begin
   assert not exists (select 1 from public.vw_catalogo_servicos where preco_padrao_centavos is not null),
     'MECANICO VE VALOR PELA VIEW DE SERVICOS';
 
-  -- ve clientes e veiculos da propria oficina (historico por placa), nada da B
+  -- ve veiculos da propria oficina (historico por placa), nada da B.
+  -- Desde a Fase 2 NAO le a tabela clientes (telefone/documento); o nome do
+  -- cliente chega pelas views da OS e pela RPC dados_da_placa.
   assert (select count(*) from public.veiculos) = 2, 'mecanico deveria ver os 2 veiculos da A';
-  assert (select count(*) from public.clientes) = 1, 'mecanico deveria ver 1 cliente da A';
+  assert (select count(*) from public.clientes) = 0, 'mecanico nao deveria ler a tabela clientes (Fase 2)';
 
   -- nao ve colegas nem convites
   assert (select count(*) from public.perfis) = 1, 'mecanico ve dados de outros funcionarios';
