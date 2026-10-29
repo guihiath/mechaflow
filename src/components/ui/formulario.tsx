@@ -116,6 +116,7 @@ export function BotaoEnviar({
   type = "submit",
   onClick,
   disabled,
+  form,
 }: {
   enviando: boolean;
   rotulo: string;
@@ -124,10 +125,12 @@ export function BotaoEnviar({
   type?: "submit" | "button";
   onClick?: () => void;
   disabled?: boolean;
+  /** Liga o botao a um formulario fora dele (rodape da folha). */
+  form?: string;
 }) {
   return (
     <div className="flex flex-col gap-1">
-      <Botao type={type} variante={variante} disabled={enviando || disabled} aria-busy={enviando} onClick={onClick}>
+      <Botao type={type} form={form} variante={variante} disabled={enviando || disabled} aria-busy={enviando} onClick={onClick}>
         {enviando ? rotuloEnviando : rotulo}
       </Botao>
       {enviando && <AvisoLento key="lento" />}
@@ -135,7 +138,7 @@ export function BotaoEnviar({
   );
 }
 
-function AvisoLento() {
+export function AvisoLento() {
   const ref = useRef<HTMLParagraphElement>(null);
   useEffect(() => {
     const t = setTimeout(() => {

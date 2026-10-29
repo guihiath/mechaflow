@@ -1,7 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useId,
@@ -37,7 +39,7 @@ import { AreaTexto, Campo } from "@/components/ui/campo";
 import { ConfirmarAcao } from "@/components/ui/confirmar-acao";
 import { Escolha } from "@/components/ui/escolha";
 import { Folha } from "@/components/ui/folha";
-import { CaixaMensagem, focarPrimeiroErro } from "@/components/ui/formulario";
+import { AvisoLento, BotaoEnviar, CaixaMensagem, focarPrimeiroErro } from "@/components/ui/formulario";
 import { Quantidade } from "@/components/ui/quantidade";
 import { SUGESTOES_RECUSA, SugestoesTexto, acrescentarTexto } from "@/components/ui/sugestoes-texto";
 import type { EstadoAcao } from "@/lib/acao";
@@ -118,6 +120,10 @@ type Ctx = {
   passo: (de: StatusOS, para: StatusOS) => void;
   ocupado: boolean;
   erro: string | null;
+  /** Rascunho de cada folha (C1): sobrevive a fechar a folha e a recarregar a pagina. */
+  lerRascunho: (chave: string) => Record<string, string> | undefined;
+  guardarRascunho: (chave: string, campos: Record<string, string>) => void;
+  limparRascunho: (chave: string) => void;
 };
 
 const ContextoOS = createContext<Ctx | null>(null);
@@ -160,7 +166,42 @@ function useEnvio(
   return { estado, setEstado, enviando, enviar, campos: estado?.campos ?? {} };
 }
 
-/** Primario do rodape da folha ligado ao formulario pelo atributo `form`. */
+/**
+ * Campos de uma folha guardados no rascunho do PainelOS (C1 da REVISAO-FASE2).
+ * - `inicial`: valores de quando a folha abre sem rascunho; so o que difere e guardado.
+ * - `digitados`: campos que contam como "algo digitado" (fechar pede confirmacao).
+ * - `fixos`: valores que vencem o rascunho (ex.: descricao nova do item avulso).
+ */
+function useRascunho<T extends Record<string, string>>(
+  chave: string,
+  inicial: T,
+  { digitados, fixos }: { digitados?: (keyof T)[]; fixos?: Partial<T> } = {},
+) {
+  const { lerRascunho, guardarRascunho, limparRascunho } = useOS();
+  const [base] = useState(inicial);
+  const [salvo] = useState(() => lerRascunho(chave));
+  const [v, setV] = useState<T>(() => ({ ...base, ...(salvo ?? {}), ...(fixos ?? {}) }) as T);
+  const chaves = Object.keys(base) as (keyof T)[];
+  const alterado = chaves.some((k) => v[k] !== base[k]);
+  const sujo = (digitados ?? chaves).some((k) => v[k] !== base[k] && String(v[k] ?? "").trim() !== "");
+
+  useEffect(() => {
+    if (alterado) guardarRascunho(chave, v);
+    else limparRascunho(chave);
+  }, [alterado, chave, v, guardarRascunho, limparRascunho]);
+
+  return {
+    v,
+    mudar: <K extends keyof T>(k: K, valor: T[K]) => setV((a) => ({ ...a, [k]: valor })),
+    sujo,
+    recuperado: Boolean(salvo && Object.keys(salvo).length),
+    limpar: () => limparRascunho(chave),
+  };
+}
+
+const chaveSessaoFolhas = (osId: string) => `mf-folha-${osId}`;
+
+/** Primario do rodape da folha ligado ao formulario pelo atributo `form` (com aviso de internet lenta). */
 function BotaoForm({
   form,
   enviando,
@@ -177,9 +218,15 @@ function BotaoForm({
   disabled?: boolean;
 }) {
   return (
-    <Botao type="submit" form={form} variante={variante} disabled={enviando || disabled} aria-busy={enviando}>
-      {enviando ? rotuloEnviando : rotulo}
-    </Botao>
+    <BotaoEnviar
+      type="submit"
+      form={form}
+      enviando={enviando}
+      rotulo={rotulo}
+      rotuloEnviando={rotuloEnviando}
+      variante={variante}
+      disabled={disabled}
+    />
   );
 }
 
@@ -195,14 +242,55 @@ export function PainelOS({ os, children }: { os: DadosPainel; children: ReactNod
   const [erro, setErro] = useState<string | null>(null);
   const [ocupado, iniciar] = useTransition();
   const contador = useRef(0);
+  const rascunhos = useRef<Record<string, Record<string, string>>>({});
+  const chaveSessao = chaveSessaoFolhas(os.id);
+
+  // Rascunhos desta OS guardados na aba (voltam se o PWA recarregar no meio).
+  useEffect(() => {
+    try {
+      const salvo = JSON.parse(sessionStorage.getItem(chaveSessao) ?? "null") as Record<string, Record<string, string>> | null;
+      rascunhos.current = salvo && typeof salvo === "object" ? salvo : {};
+    } catch {
+      rascunhos.current = {};
+    }
+  }, [chaveSessao]);
+
+  const gravarSessao = useCallback(() => {
+    try {
+      if (Object.keys(rascunhos.current).length) sessionStorage.setItem(chaveSessao, JSON.stringify(rascunhos.current));
+      else sessionStorage.removeItem(chaveSessao);
+    } catch {
+      /* sessionStorage cheio ou bloqueado: fica so na memoria */
+    }
+  }, [chaveSessao]);
+  const lerRascunho = useCallback((chave: string) => rascunhos.current[chave], []);
+  const guardarRascunho = useCallback(
+    (chave: string, campos: Record<string, string>) => {
+      rascunhos.current = { ...rascunhos.current, [chave]: campos };
+      gravarSessao();
+    },
+    [gravarSessao],
+  );
+  const limparRascunho = useCallback(
+    (chave: string) => {
+      if (!(chave in rascunhos.current)) return;
+      const { [chave]: _fora, ...resto } = rascunhos.current;
+      void _fora;
+      rascunhos.current = resto;
+      gravarSessao();
+    },
+    [gravarSessao],
+  );
 
   function passo(de: StatusOS, para: StatusOS) {
     setErro(null);
     iniciar(async () => {
       try {
         const r = await mudarStatusOS(os.id, de, para);
-        if (r?.erro) setErro(r.erro);
-        else setDesfazer({ chave: ++contador.current, mensagem: `Status: ${rotuloStatus(para)}.`, de, para });
+        if (r?.erro) {
+          setErro(r.erro);
+          setDesfazer(null);
+        } else setDesfazer({ chave: ++contador.current, mensagem: `Status: ${rotuloStatus(para)}.`, de, para });
       } catch {
         setErro(`Não foi possível mudar o status. Confira a internet e tente de novo.`);
       }
@@ -219,7 +307,16 @@ export function PainelOS({ os, children }: { os: DadosPainel; children: ReactNod
     setDesfazer(null);
   }
 
-  const ctx: Ctx = { os, abrir: (f) => (setErro(null), setFolha(f)), passo, ocupado, erro };
+  const ctx: Ctx = {
+    os,
+    abrir: (f) => (setErro(null), setFolha(f)),
+    passo,
+    ocupado,
+    erro,
+    lerRascunho,
+    guardarRascunho,
+    limparRascunho,
+  };
   const fechar = () => setFolha(null);
   const aposStatus = (de: StatusOS, para: StatusOS) => {
     setFolha(null);
@@ -259,7 +356,7 @@ export function PainelOS({ os, children }: { os: DadosPainel; children: ReactNod
  */
 export function BarraOS({ proximoPasso }: { proximoPasso?: string }) {
   const { os, abrir, passo, ocupado, erro } = useOS();
-  const acima = erro ? <CaixaMensagem tipo="erro">{erro}</CaixaMensagem> : undefined;
+  const acima = ocupado ? <AvisoLento /> : erro ? <CaixaMensagem tipo="erro">{erro}</CaixaMensagem> : undefined;
   const add = (
     <Botao variante="secundario" onClick={() => abrir({ tipo: "item-novo" })}>
       Adicionar item
@@ -384,6 +481,21 @@ export function BotaoJaMandei() {
   );
 }
 
+/** "Voltar para em andamento" (OS pronta por engano, depois dos 6 s do Desfazer). */
+export function BotaoReabrir() {
+  const { passo, ocupado } = useOS();
+  return (
+    <button
+      type="button"
+      disabled={ocupado}
+      onClick={() => passo("pronta", "em_andamento")}
+      className="inline-flex min-h-toque items-center self-start text-base font-bold text-info-texto underline underline-offset-4 disabled:opacity-60"
+    >
+      Voltar para em andamento
+    </button>
+  );
+}
+
 /** Link "Trocar o modo" (antes de o servico comecar). */
 export function BotaoTrocarModo() {
   const { abrir, os } = useOS();
@@ -436,12 +548,15 @@ function FolhaItem({ aoFechar, item }: { aoFechar: () => void; item?: ItemOSClie
   const [mensagem, setMensagem] = useState<string | null>(null);
   const editando = Boolean(item);
   const passo2 = editando || escolhido;
+  const [rasc, setRasc] = useState({ sujo: false, recuperado: false });
+  const descartarRef = useRef<(() => void) | null>(null);
   const envio = useEnvio(
     editando ? salvarItemOS : adicionarItemOS,
     editando
       ? "Não foi possível salvar o item. Confira a internet e tente de novo."
       : "Não foi possível adicionar o item. Confira a internet e tente de novo.",
     (r) => {
+      descartarRef.current?.();
       if (editando) {
         aoFechar();
         return;
@@ -460,6 +575,9 @@ function FolhaItem({ aoFechar, item }: { aoFechar: () => void; item?: ItemOSClie
       aberta
       aoFechar={aoFechar}
       titulo={titulo}
+      sujo={rasc.sujo}
+      recuperado={rasc.recuperado}
+      aoDescartar={() => descartarRef.current?.()}
       topo={
         escolhido && !editando ? (
           <button
@@ -490,7 +608,17 @@ function FolhaItem({ aoFechar, item }: { aoFechar: () => void; item?: ItemOSClie
       }
     >
       {passo2 ? (
-        <FormItem item={item} escolhido={escolhido} envio={envio} aoRemover={aoFechar} />
+        <FormItem
+          item={item}
+          escolhido={escolhido}
+          envio={envio}
+          aoRemover={() => {
+            descartarRef.current?.();
+            aoFechar();
+          }}
+          aoRascunho={setRasc}
+          descartarRef={descartarRef}
+        />
       ) : (
         <SeletorItem
           mensagem={mensagem}
@@ -577,7 +705,7 @@ function SeletorItem({ mensagem, aoEscolher }: { mensagem: string | null; aoEsco
   return (
     <div className="flex flex-col gap-4">
       {mensagem && <CaixaMensagem tipo="sucesso">{mensagem}</CaixaMensagem>}
-      <div role="tablist" aria-label="Tipo de item" className="grid grid-cols-2 gap-2">
+      <div role="group" aria-label="Tipo de item" className="grid grid-cols-2 gap-2">
         {(
           [
             ["servico", "Serviços"],
@@ -587,8 +715,7 @@ function SeletorItem({ mensagem, aoEscolher }: { mensagem: string | null; aoEsco
           <button
             key={valor}
             type="button"
-            role="tab"
-            aria-selected={aba === valor}
+            aria-pressed={aba === valor}
             onClick={() => setAba(valor)}
             className={`flex min-h-toque items-center justify-center gap-1.5 rounded-md border-2 text-base font-bold ${
               aba === valor ? "border-grafite bg-primaria text-primaria-texto" : "border-borda bg-superficie"
@@ -642,9 +769,12 @@ function SeletorItem({ mensagem, aoEscolher }: { mensagem: string | null; aoEsco
           <p className="text-base text-texto-suave">Seu catálogo ainda está vazio.</p>
           {avulso}
           {os.ehDono && (
-            <a href="/catalogo" className="inline-flex min-h-toque items-center font-bold text-info-texto underline">
+            <Link
+              href={aba === "peca" ? "/catalogo/pecas/novo" : "/catalogo/servicos/novo"}
+              className="inline-flex min-h-toque items-center font-bold text-info-texto underline"
+            >
               Cadastrar no catálogo
-            </a>
+            </Link>
           )}
         </>
       ) : termo && !filtrados.length ? (
@@ -676,25 +806,64 @@ function FormItem({
   escolhido,
   envio,
   aoRemover,
+  aoRascunho,
+  descartarRef,
 }: {
   item?: ItemOSCliente;
   escolhido: Escolhido | null;
   envio: ReturnType<typeof useEnvio>;
   aoRemover: () => void;
+  /** Avisa a folha se ha algo digitado (fechar pede confirmacao). */
+  aoRascunho: (e: { sujo: boolean; recuperado: boolean }) => void;
+  descartarRef: { current: (() => void) | null };
 }) {
   const { os } = useOS();
   const editando = Boolean(item);
   const cat = escolhido?.catalogo ?? null;
-  const [chave] = useState(() => crypto.randomUUID());
-  const [tipo, setTipo] = useState<TipoItemOS>(item?.tipo ?? escolhido?.tipo ?? "servico");
-  const [descricao, setDescricao] = useState(item?.descricao ?? escolhido?.descricao ?? "");
+  const avulso = !item && !cat;
+  const descricaoNova = avulso ? (escolhido?.descricao ?? "").trim() : "";
+  // A chave de idempotencia vai no rascunho: reenviar o mesmo item depois de uma
+  // falha de rede nao duplica. Rascunho por item (editar) ou por item do catalogo.
+  const r = useRascunho(
+    `item-${item?.id ?? cat?.id ?? "avulso"}`,
+    {
+      chave: crypto.randomUUID(),
+      tipo: item?.tipo ?? escolhido?.tipo ?? "servico",
+      descricao: item?.descricao ?? escolhido?.descricao ?? "",
+      qtd: String(item?.quantidade ?? 1),
+      preco: centavosParaCampo(item ? item.precoUnitarioCentavos : cat?.precoCentavos),
+      custo: centavosParaCampo(item ? item.custoUnitarioCentavos : cat?.custoCentavos),
+    },
+    { digitados: ["descricao", "qtd", "preco", "custo"], fixos: descricaoNova ? { descricao: descricaoNova } : undefined },
+  );
+  const { chave, descricao, preco, custo } = r.v;
+  const tipo = r.v.tipo as TipoItemOS;
   const unidade = item?.unidade ?? cat?.unidade ?? "un";
   const fracionada = unidadeFracionada(unidade);
-  const [qtd, setQtd] = useState<number | null>(item?.quantidade ?? 1);
-  const [preco, setPreco] = useState(centavosParaCampo(item ? item.precoUnitarioCentavos : cat?.precoCentavos));
-  const [custo, setCusto] = useState(centavosParaCampo(item ? item.custoUnitarioCentavos : cat?.custoCentavos));
-  const avulso = !item && !cat;
+  const [qtdInicial] = useState(() => {
+    const n = Number(r.v.qtd);
+    return Number.isFinite(n) && n > 0 ? n : 1;
+  });
+  const [qtd, setQtd] = useState<number | null>(qtdInicial);
+  const setTipo = (t: TipoItemOS) => r.mudar("tipo", t);
+  const setDescricao = (t: string) => r.mudar("descricao", t);
+  const setPreco = (t: string) => r.mudar("preco", t);
+  const setCusto = (t: string) => r.mudar("custo", t);
+  const { sujo, recuperado, limpar } = r;
 
+  useEffect(() => {
+    aoRascunho({ sujo, recuperado });
+  }, [sujo, recuperado, aoRascunho]);
+  useEffect(() => {
+    descartarRef.current = limpar;
+  });
+  useEffect(
+    () => () => {
+      aoRascunho({ sujo: false, recuperado: false });
+      descartarRef.current = null;
+    },
+    [aoRascunho, descartarRef],
+  );
 
   const precoCent = reaisParaCentavos(preco);
   const subtotal = qtd !== null && typeof precoCent === "number" && !Number.isNaN(precoCent) ? Math.round(qtd * precoCent) : null;
@@ -736,11 +905,14 @@ function FormItem({
       )}
 
       <Quantidade
-        valorInicial={item?.quantidade ?? 1}
+        valorInicial={qtdInicial}
         minimo={fracionada ? 0.1 : 1}
         decimal={fracionada}
         unidade={textoUnidade(unidade)}
-        aoMudar={setQtd}
+        aoMudar={(n) => {
+          setQtd(n);
+          if (n !== null) r.mudar("qtd", String(n));
+        }}
         erro={envio.campos.quantidade}
       />
 
@@ -798,13 +970,22 @@ function FormItem({
 
 function FolhaResposta({ aoFechar, aoAprovar }: { aoFechar: () => void; aoAprovar: () => void }) {
   const { os } = useOS();
-  const [resposta, setResposta] = useState<"aprovou" | "recusou" | "">("");
-  const [canal, setCanal] = useState<string>("");
-  const [quem, setQuem] = useState(os.clienteNome);
-  const [motivo, setMotivo] = useState("");
-  const [depois, setDepois] = useState<"refazer" | "cancelar">("refazer");
-  const envio = useEnvio(registrarRespostaOS, "Não foi possível registrar a resposta. Confira a internet e tente de novo.", (r) => {
-    if (r?.mensagem === "aprovou") aoAprovar();
+  const r = useRascunho(
+    "resposta",
+    { resposta: "", canal: "", quem: os.clienteNome, motivo: "", depois: "refazer" },
+    { digitados: ["quem", "motivo"] },
+  );
+  const resposta = r.v.resposta as "aprovou" | "recusou" | "";
+  const depois = r.v.depois as "refazer" | "cancelar";
+  const { canal, quem, motivo } = r.v;
+  const setResposta = (v: "aprovou" | "recusou" | "") => r.mudar("resposta", v);
+  const setCanal = (v: string) => r.mudar("canal", v);
+  const setQuem = (v: string) => r.mudar("quem", v);
+  const setMotivo = (v: string | ((m: string) => string)) => r.mudar("motivo", typeof v === "function" ? v(motivo) : v);
+  const setDepois = (v: "refazer" | "cancelar") => r.mudar("depois", v);
+  const envio = useEnvio(registrarRespostaOS, "Não foi possível registrar a resposta. Confira a internet e tente de novo.", (res) => {
+    r.limpar();
+    if (res?.mensagem === "aprovou") aoAprovar();
     else aoFechar();
   });
   const semPreco = (os.itensSemPreco ?? 0) > 0;
@@ -820,7 +1001,12 @@ function FolhaResposta({ aoFechar, aoAprovar }: { aoFechar: () => void; aoAprova
       aberta
       aoFechar={aoFechar}
       titulo="Resposta do cliente"
+      sujo={r.sujo}
+      recuperado={r.recuperado}
+      aoDescartar={r.limpar}
       rodape={
+        <>
+        {!resposta && <p className="text-sm text-texto-suave">Escolha se o cliente aprovou ou recusou.</p>}
         <BotaoForm
           form="form-resposta"
           enviando={envio.enviando}
@@ -829,6 +1015,7 @@ function FolhaResposta({ aoFechar, aoAprovar }: { aoFechar: () => void; aoAprova
           variante={resposta === "recusou" && depois === "cancelar" ? "perigo" : "primario"}
           disabled={!resposta || (resposta === "aprovou" && semPreco)}
         />
+        </>
       }
     >
       <form id="form-resposta" onSubmit={envio.enviar} noValidate className="flex flex-col gap-5">
@@ -874,6 +1061,7 @@ function FolhaResposta({ aoFechar, aoAprovar }: { aoFechar: () => void; aoAprova
             valor={canal}
             aoMudar={setCanal}
             erro={envio.campos.canal}
+            colunas={1}
             opcoes={CANAIS_RESPOSTA}
           />
         )}
@@ -918,6 +1106,12 @@ function FolhaResposta({ aoFechar, aoAprovar }: { aoFechar: () => void; aoAprova
                 { valor: "cancelar", rotulo: "Cancelar a OS" },
               ]}
             />
+            {depois === "cancelar" && (
+              <p className="flex items-start gap-1.5 text-sm font-bold text-erro-texto">
+                <TriangleAlert size={18} strokeWidth={2.25} aria-hidden className="mt-0.5 shrink-0" />
+                A OS será cancelada e não pode ser reaberta.
+              </p>
+            )}
           </>
         )}
         {envio.estado?.erro && <CaixaMensagem tipo="erro">{envio.estado.erro}</CaixaMensagem>}
@@ -930,19 +1124,42 @@ function FolhaResposta({ aoFechar, aoAprovar }: { aoFechar: () => void; aoAprova
 
 function FolhaPronta({ aoFechar, aoConcluir }: { aoFechar: () => void; aoConcluir: () => void }) {
   const { os } = useOS();
-  const envio = useEnvio(marcarProntaOS, "Não foi possível marcar como pronta. Confira a internet e tente de novo.", aoConcluir);
+  const r = useRascunho("pronta", { causa: "", solucao: "" });
+  const envio = useEnvio(marcarProntaOS, "Não foi possível marcar como pronta. Confira a internet e tente de novo.", () => {
+    r.limpar();
+    aoConcluir();
+  });
   return (
     <Folha
       aberta
       aoFechar={aoFechar}
       titulo="Marcar como pronta"
+      sujo={r.sujo}
+      recuperado={r.recuperado}
+      aoDescartar={r.limpar}
       rodape={<BotaoForm form="form-pronta" enviando={envio.enviando} rotulo="Marcar como pronta" rotuloEnviando="Enviando…" />}
     >
       <form id="form-pronta" onSubmit={envio.enviar} noValidate className="flex flex-col gap-5">
         <input type="hidden" name="os_id" value={os.id} />
         <p className="text-base">Antes de marcar, anote o que você achou. É opcional, mas ajuda no fechamento.</p>
-        <AreaTexto rotulo="O que foi encontrado?" opcional name="causa" maxLength={4000} erro={envio.campos.causa} />
-        <AreaTexto rotulo="O que foi feito?" opcional name="solucao" maxLength={4000} erro={envio.campos.solucao} />
+        <AreaTexto
+          rotulo="O que foi encontrado?"
+          opcional
+          name="causa"
+          maxLength={4000}
+          value={r.v.causa}
+          onChange={(e) => r.mudar("causa", e.target.value)}
+          erro={envio.campos.causa}
+        />
+        <AreaTexto
+          rotulo="O que foi feito?"
+          opcional
+          name="solucao"
+          maxLength={4000}
+          value={r.v.solucao}
+          onChange={(e) => r.mudar("solucao", e.target.value)}
+          erro={envio.campos.solucao}
+        />
         {envio.estado?.erro && <CaixaMensagem tipo="erro">{envio.estado.erro}</CaixaMensagem>}
       </form>
     </Folha>
@@ -988,6 +1205,9 @@ function FolhaMecanico({ aoFechar, comecar, aoComecar }: { aoFechar: () => void;
       titulo="Quem vai fazer?"
       rodape={
         <>
+          {!comecar && pessoa && pessoa.id === os.mecanicoId && (
+            <p className="text-sm text-texto-suave">{os.mecanicoNome ?? pessoa.nome} já é o mecânico desta OS.</p>
+          )}
           {comecar && pessoa && (
             <button
               type="button"
@@ -1005,6 +1225,7 @@ function FolhaMecanico({ aoFechar, comecar, aoComecar }: { aoFechar: () => void;
           >
             {enviando ? "Enviando…" : rotulo}
           </Botao>
+          {enviando && <AvisoLento />}
         </>
       }
     >
@@ -1098,16 +1319,29 @@ function FolhaPagamento({ aoFechar }: { aoFechar: () => void }) {
 function FolhaModo({ aoFechar }: { aoFechar: () => void }) {
   const { os } = useOS();
   const paraDireto = os.modo === "com_orcamento";
-  const [quem, setQuem] = useState<"cliente" | "outra">(os.clienteNome ? "cliente" : "outra");
-  const [nome, setNome] = useState("");
-  const [tel, setTel] = useState("");
-  const envio = useEnvio(trocarModoOS, "Não foi possível trocar o modo. Confira a internet e tente de novo.", aoFechar);
+  const r = useRascunho(
+    "modo",
+    { quem: os.clienteNome ? "cliente" : "outra", nome: "", tel: "" },
+    { digitados: ["nome", "tel"] },
+  );
+  const quem = r.v.quem as "cliente" | "outra";
+  const { nome, tel } = r.v;
+  const setQuem = (v: "cliente" | "outra") => r.mudar("quem", v);
+  const setNome = (v: string) => r.mudar("nome", v);
+  const setTel = (v: string) => r.mudar("tel", v);
+  const envio = useEnvio(trocarModoOS, "Não foi possível trocar o modo. Confira a internet e tente de novo.", () => {
+    r.limpar();
+    aoFechar();
+  });
   const autorizado = quem === "cliente" ? os.clienteNome : nome.trim();
 
   return (
     <Folha
       aberta
       aoFechar={aoFechar}
+      sujo={r.sujo}
+      recuperado={r.recuperado}
+      aoDescartar={r.limpar}
       titulo={paraDireto ? "Trocar para serviço direto" : "Trocar para com orçamento"}
       rodape={
         <BotaoForm
