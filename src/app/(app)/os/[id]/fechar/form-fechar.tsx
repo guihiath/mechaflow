@@ -6,7 +6,7 @@ import { fecharOS } from "@/acoes/os";
 import { Botao } from "@/components/ui/botao";
 import { AreaTexto, Campo } from "@/components/ui/campo";
 import { Escolha } from "@/components/ui/escolha";
-import { CaixaMensagem, focarPrimeiroErro } from "@/components/ui/formulario";
+import { BotaoEnviar, CaixaMensagem, focarPrimeiroErro } from "@/components/ui/formulario";
 import type { EstadoAcao } from "@/lib/acao";
 import { FORMAS_PAGAMENTO, type FormaPagamento } from "@/lib/os";
 
@@ -150,18 +150,29 @@ export function FormFechar({
           <Botao variante="secundario" disabled={enviando} onClick={() => setConfirmando(false)}>
             Voltar sem entregar
           </Botao>
-          <Botao disabled={enviando} aria-busy={enviando} onClick={() => enviar("entregar")}>
-            {enviando && qual === "entregar" ? "Fechando…" : "Entregar e fechar"}
-          </Botao>
+          <BotaoEnviar
+            type="button"
+            enviando={enviando && qual === "entregar"}
+            disabled={enviando}
+            rotulo="Entregar e fechar"
+            rotuloEnviando="Fechando…"
+            onClick={() => enviar("entregar")}
+          />
         </div>
       ) : (
         <>
-          <div aria-hidden className="h-16 lg:hidden" />
+          <div aria-hidden className="h-28 lg:hidden" />
           <div className="fixed inset-x-0 bottom-0 z-50 flex flex-col gap-2 border-t-2 border-borda-sutil bg-superficie px-4 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] shadow-barra lg:static lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none">
             {bloqueado && <p className="text-sm text-texto-suave">Defina o preço dos itens antes de entregar.</p>}
-            <Botao variante="secundario" disabled={enviando} onClick={() => enviar("salvar")}>
-              {enviando && qual === "salvar" ? "Salvando…" : "Salvar sem entregar"}
-            </Botao>
+            <BotaoEnviar
+              type="button"
+              variante="secundario"
+              enviando={enviando && qual === "salvar"}
+              disabled={enviando}
+              rotulo="Salvar sem entregar"
+              rotuloEnviando="Salvando…"
+              onClick={() => enviar("salvar")}
+            />
             <Botao type="submit" disabled={bloqueado || enviando}>
               Entregar veículo
             </Botao>

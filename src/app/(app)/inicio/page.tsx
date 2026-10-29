@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
-import { BookOpen, CircleCheckBig, Clock, Contact, PackageSearch, Plus, Truck, Users, Wrench } from "lucide-react";
+import { BookOpen, CircleCheckBig, Clock, Contact, PackageSearch, Plus, Truck, Users, Wrench, ThumbsUp } from "lucide-react";
 import { Cabecalho } from "@/components/layout/cabecalho";
 import { BotaoLink } from "@/components/ui/botao";
 import { Cartao, ListaCarregando, Pagina } from "@/components/ui/estados";
@@ -35,12 +35,13 @@ async function Painel() {
       .eq("pendente_precificacao", true)
       .eq("ativo", true),
     supabase.from("perfis").select("id", { count: "exact", head: true }).eq("ativo", true),
-    supabase.from("ordens_servico").select("status").in("status", ["aguardando_orcamento", "orcamento_enviado", "em_andamento", "pronta"]).limit(5000),
+    supabase.from("ordens_servico").select("status").in("status", ["aguardando_orcamento", "orcamento_enviado", "aprovada", "em_andamento", "pronta"]).limit(5000),
   ]);
   const contar = (...st: string[]) => (abertas.data ?? []).filter((o) => st.includes(o.status)).length;
   const atalhosOS = [
     { href: "/os?status=prontas", titulo: "Prontas para entregar", valor: contar("pronta"), icone: CircleCheckBig },
     { href: "/os?status=orcamento", titulo: "Esperando o cliente", valor: contar("aguardando_orcamento", "orcamento_enviado"), icone: Clock },
+    { href: "/os?status=aprovadas", titulo: "Liberadas para começar", valor: contar("aprovada"), icone: ThumbsUp },
     { href: "/os?status=em_andamento", titulo: "Em andamento", valor: contar("em_andamento"), icone: Wrench },
   ];
 
@@ -66,7 +67,7 @@ async function Painel() {
         Abrir OS
       </BotaoLink>
 
-      <ul className="flex flex-col gap-3 lg:grid lg:grid-cols-3">
+      <ul className="flex flex-col gap-3 lg:grid lg:grid-cols-2">
         {atalhosOS.map(({ href, titulo, valor, icone: Icone }) => (
           <li key={href}>
             <Cartao href={href} className="h-full">

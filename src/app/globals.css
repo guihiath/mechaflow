@@ -139,6 +139,12 @@
     scroll-padding-top: calc(3.5rem + 0.25rem + env(safe-area-inset-top) + 0.5rem);
     scroll-padding-bottom: calc(4rem + env(safe-area-inset-bottom) + 1rem);
   }
+  /* Rodapes maiores que a barra inferior (DESIGN §10.3 item 7 e §10.11, I6):
+     "Abrir OS" fixo acima da barra em /os; rodape com 1-2 botoes em /os/nova, detalhe e fechar. */
+  @media (max-width: 1023.98px) {
+    html:has([data-rodape-extra]) { scroll-padding-bottom: calc(8rem + env(safe-area-inset-bottom) + 1rem); }
+    html:has([data-esconde-navegacao]) { scroll-padding-bottom: calc(9rem + env(safe-area-inset-bottom)); }
+  }
   @media (min-width: 1024px) {
     html { scroll-padding-bottom: 1rem; }
   }

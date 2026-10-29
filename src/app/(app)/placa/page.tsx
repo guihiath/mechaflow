@@ -93,7 +93,7 @@ async function Resultado({ searchParams }: { searchParams: Promise<Record<string
   if (!v) return (<>{busca}<NaoCadastrada placa={placa} podeEditar={podeEditar} /></>);
 
   // Ultimas OS da placa (o mecanico so recebe as que ve; nenhuma coluna de valor).
-  const { data: ultimas } = await supabase
+  const { data: ultimas, error: erroUltimas } = await supabase
     .from("vw_os")
     .select("id, numero, status, criado_em, sintoma_relatado")
     .eq("veiculo_id", v.veiculo_id)
@@ -147,7 +147,11 @@ async function Resultado({ searchParams }: { searchParams: Promise<Record<string
         )}
       </Cartao>
 
-      <UltimasOS os={ultimas ?? []} verTodas={podeEditar ? `/os?q=${v.placa}` : undefined} />
+      {erroUltimas ? (
+        <CaixaErro titulo="Não foi possível carregar as OS desta placa." tentarDeNovo={`/placa?placa=${placa}`} />
+      ) : (
+        <UltimasOS os={ultimas ?? []} verTodas={podeEditar ? `/os?q=${v.placa}` : undefined} />
+      )}
     </>
   );
 }

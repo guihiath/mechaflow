@@ -244,6 +244,7 @@ async function Lista({ searchParams }: { searchParams: Promise<Params> }) {
       )}
 
       {/* Celular: "Abrir OS" fixo acima da barra inferior; o espaco evita cobrir o ultimo card */}
+      <span hidden data-rodape-extra />
       <div aria-hidden className="h-20 lg:hidden" />
       <div className="fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-30 px-4 pb-2 lg:hidden">
         <BotaoLink href="/os/nova" className="shadow-barra">
