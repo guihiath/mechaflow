@@ -31,10 +31,16 @@ type TipoVeiculo = keyof typeof ROTULO_TIPO_VEICULO;
 const CHAVE_RASCUNHO = "mf-os-nova";
 const ERRO_GERAL = "Não foi possível abrir a OS. Nada foi perdido: confira a internet e toque de novo.";
 const MAX_CLIENTES = 8;
+/** Rascunho mais velho que isso e ignorado (I3). */
+const VALIDADE_RASCUNHO_MS = 12 * 60 * 60 * 1000;
+const ERRO_PLACA = "Placa inválida. Ex.: ABC1D23 ou ABC-1234";
 
 /** Tudo que o atendente digitou (volta se o PWA recarregar no meio, DESIGN §10.4). */
 type Rascunho = {
   chave: string;
+  /** Placa para a qual a chave foi usada: placa diferente => chave nova (I3). */
+  chavePlaca: string;
+  salvoEm: number;
   placa: string;
   modo: ModoOS;
   modoTocado: boolean;
@@ -59,6 +65,8 @@ type Rascunho = {
 function rascunhoVazio(placa: string): Rascunho {
   return {
     chave: "",
+    chavePlaca: "",
+    salvoEm: 0,
     placa,
     modo: "com_orcamento",
     modoTocado: false,
@@ -114,6 +122,8 @@ export function FormNovaOS({
   const [montado, setMontado] = useState(false);
   const [mesmoAssim, setMesmoAssim] = useState(false);
   const [estado, setEstado] = useState<EstadoAcao>(null);
+  const [recuperado, setRecuperado] = useState<string | null>(null);
+  const [erroPlaca, setErroPlaca] = useState<string>();
   const [enviando, iniciar] = useTransition();
   const campos = estado?.campos ?? {};
 
@@ -137,15 +147,21 @@ export function FormNovaOS({
   // Abre: recupera o rascunho desta aba (ou comeca outro) e gera a chave de idempotencia.
   useEffect(() => {
     let inicial = rascunhoVazio(placaInicial);
+    let rec: string | null = null;
     try {
       const salvo = JSON.parse(sessionStorage.getItem(CHAVE_RASCUNHO) ?? "null") as Rascunho | null;
-      if (salvo?.chave && (!placaInicial || salvo.placa === placaInicial)) inicial = { ...inicial, ...salvo };
+      const recente = typeof salvo?.salvoEm === "number" && Date.now() - salvo.salvoEm < VALIDADE_RASCUNHO_MS;
+      if (salvo?.chave && recente && (!placaInicial || salvo.placa === placaInicial)) {
+        inicial = { ...inicial, ...salvo };
+        if (salvo.placa || salvo.sintoma?.trim()) rec = salvo.placa ? formatarPlaca(salvo.placa) : "";
+      } else if (salvo) sessionStorage.removeItem(CHAVE_RASCUNHO);
     } catch {
       /* rascunho corrompido: comeca do zero */
     }
     if (!inicial.chave) inicial.chave = crypto.randomUUID();
     // eslint-disable-next-line react-hooks/set-state-in-effect -- sessionStorage so existe no navegador
     setR(inicial);
+    setRecuperado(rec);
     setPlacaTexto(formatarPlaca(inicial.placa));
     setMontado(true);
     if (placaValida(inicial.placa)) void buscar(normalizarPlaca(inicial.placa));
@@ -154,12 +170,13 @@ export function FormNovaOS({
   }, []);
 
   useEffect(() => {
-    if (montado) sessionStorage.setItem(CHAVE_RASCUNHO, JSON.stringify(r));
+    if (montado) sessionStorage.setItem(CHAVE_RASCUNHO, JSON.stringify({ ...r, salvoEm: Date.now() }));
   }, [r, montado]);
 
   function aoDigitarPlaca(valor: string) {
     const texto = formatarPlaca(valor);
     setPlacaTexto(texto);
+    setErroPlaca(undefined);
     const placa = normalizarPlaca(texto);
     mudar("placa", placa);
     if (placaValida(placa)) {
@@ -174,8 +191,35 @@ export function FormNovaOS({
     pedido.current++;
     setBusca({ fase: "vazio" });
     setPlacaTexto("");
-    mudar("placa", "");
+    setErroPlaca(undefined);
+    // Outra placa = outra OS: nunca reaproveitar a chave de idempotencia (I3).
+    setR((a) => ({ ...a, placa: "", chave: crypto.randomUUID(), chavePlaca: "" }));
     setMesmoAssim(false);
+    requestAnimationFrame(() => campoPlaca.current?.focus());
+  }
+
+  /** Placa digitada: busca, ou mostra o erro se estiver incompleta (I4). */
+  function buscarDigitada() {
+    if (placaValida(placaTexto)) {
+      setErroPlaca(undefined);
+      void buscar(normalizarPlaca(placaTexto));
+    } else {
+      setErroPlaca(ERRO_PLACA);
+      campoPlaca.current?.focus();
+    }
+  }
+
+  /** "Começar do zero": apaga o rascunho recuperado e gera chave nova (I3). */
+  function comecarDoZero() {
+    sessionStorage.removeItem(CHAVE_RASCUNHO);
+    pedido.current++;
+    setR({ ...rascunhoVazio(""), chave: crypto.randomUUID() });
+    setPlacaTexto("");
+    setBusca({ fase: "vazio" });
+    setMesmoAssim(false);
+    setEstado(null);
+    setErroPlaca(undefined);
+    setRecuperado(null);
     requestAnimationFrame(() => campoPlaca.current?.focus());
   }
 
@@ -201,6 +245,13 @@ export function FormNovaOS({
     if (enviando || travado.current || !resolvida || !r.chave) return;
     travado.current = true;
     const fd = new FormData(evento.currentTarget);
+    // A chave so vale para a placa da 1ª tentativa: reenvio da mesma placa e
+    // idempotente; placa diferente (rascunho antigo, troca de placa) ganha chave nova.
+    if (r.chavePlaca && r.chavePlaca !== r.placa) {
+      const nova = crypto.randomUUID();
+      fd.set("chave", nova);
+      setR((a) => ({ ...a, chave: nova, chavePlaca: a.placa }));
+    } else if (!r.chavePlaca) setR((a) => ({ ...a, chavePlaca: a.placa }));
     iniciar(async () => {
       try {
         const resposta = await abrirOS(null, fd);
@@ -228,6 +279,21 @@ export function FormNovaOS({
       <input type="hidden" name="placa" value={r.placa} />
       {dados && <input type="hidden" name="veiculo_id" value={dados.veiculoId} />}
 
+      {recuperado !== null && (
+        <div className="flex flex-col gap-2">
+          <CaixaMensagem tipo="info">
+            Recuperamos a OS que você começou a abrir{recuperado ? ` (${recuperado})` : ""}.
+          </CaixaMensagem>
+          <button
+            type="button"
+            onClick={comecarDoZero}
+            className="inline-flex min-h-toque items-center self-start text-base font-bold text-info-texto underline underline-offset-4"
+          >
+            Começar do zero
+          </button>
+        </div>
+      )}
+
       {/* ---------------------------------------------------- Bloco 1: placa */}
       {busca.fase !== "achou" ? (
         <div className="flex flex-col gap-1.5">
@@ -243,7 +309,7 @@ export function FormNovaOS({
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   e.preventDefault();
-                  if (placaValida(placaTexto)) void buscar(normalizarPlaca(placaTexto));
+                  buscarDigitada();
                 }
               }}
               enterKeyHint="search"
@@ -253,21 +319,29 @@ export function FormNovaOS({
               spellCheck={false}
               maxLength={8}
               placeholder="ABC1D23"
-              aria-describedby={`${idPlaca}-ajuda`}
-              className="h-[52px] min-w-0 flex-1 rounded-md border-2 border-borda bg-superficie px-3 font-mono text-2xl tracking-[0.08em] uppercase outline-none focus:border-foco focus:ring-[3px] focus:ring-foco/30"
+              aria-invalid={erroPlaca ? true : undefined}
+              aria-describedby={erroPlaca ? `${idPlaca}-erro` : `${idPlaca}-ajuda`}
+              className={`h-[52px] min-w-0 flex-1 rounded-md border-2 ${erroPlaca ? "border-erro" : "border-borda"} bg-superficie px-3 font-mono text-2xl tracking-[0.08em] uppercase outline-none focus:border-foco focus:ring-[3px] focus:ring-foco/30`}
             />
             <button
               type="button"
-              onClick={() => placaValida(placaTexto) && buscar(normalizarPlaca(placaTexto))}
+              onClick={buscarDigitada}
               className="flex h-[52px] shrink-0 items-center gap-2 rounded-md border-2 border-borda bg-superficie px-4 text-lg font-bold active:bg-superficie-2"
             >
               <Search size={22} strokeWidth={2.25} aria-hidden />
               Buscar
             </button>
           </div>
-          <p id={`${idPlaca}-ajuda`} className="text-sm text-texto-suave">
-            Antiga (ABC-1234) ou Mercosul (ABC1D23).
-          </p>
+          {erroPlaca ? (
+            <p id={`${idPlaca}-erro`} className="flex items-start gap-1.5 text-sm font-bold text-erro-texto">
+              <CircleAlert size={18} strokeWidth={2.25} aria-hidden className="mt-0.5 shrink-0" />
+              {erroPlaca}
+            </p>
+          ) : (
+            <p id={`${idPlaca}-ajuda`} className="text-sm text-texto-suave">
+              Antiga (ABC-1234) ou Mercosul (ABC1D23).
+            </p>
+          )}
         </div>
       ) : null}
 
@@ -589,7 +663,7 @@ export function FormNovaOS({
       )}
 
       {/* ---------------------------------------------------- rodape fixo */}
-      <div aria-hidden className="h-6 lg:hidden" />
+      <div aria-hidden className="h-16 lg:hidden" />
       <div className="fixed inset-x-0 bottom-0 z-50 flex flex-col gap-2 border-t-2 border-borda-sutil bg-superficie px-4 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] shadow-barra lg:static lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none">
         {estado?.erro && <CaixaMensagem tipo="erro">{estado.erro}</CaixaMensagem>}
         {!resolvida && busca.fase !== "buscando" && (
