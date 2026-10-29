@@ -578,20 +578,6 @@ function FolhaItem({ aoFechar, item }: { aoFechar: () => void; item?: ItemOSClie
       sujo={rasc.sujo}
       recuperado={rasc.recuperado}
       aoDescartar={() => descartarRef.current?.()}
-      topo={
-        escolhido && !editando ? (
-          <button
-            type="button"
-            onClick={() => {
-              setEscolhido(null);
-              envio.setEstado(null);
-            }}
-            className="inline-flex min-h-toque shrink-0 items-center rounded-md px-2 text-base font-bold text-info-texto"
-          >
-            ← Escolher outro
-          </button>
-        ) : undefined
-      }
       rodape={
         passo2 ? (
           <BotaoForm
@@ -607,6 +593,19 @@ function FolhaItem({ aoFechar, item }: { aoFechar: () => void; item?: ItemOSClie
         ) : undefined
       }
     >
+      {escolhido && !editando && (
+        // D17: fica na 1a linha do corpo (nao no topo) para o nome do item caber no titulo.
+        <button
+          type="button"
+          onClick={() => {
+            setEscolhido(null);
+            envio.setEstado(null);
+          }}
+          className="-mt-2 mb-2 inline-flex min-h-toque items-center text-base font-bold text-info-texto underline underline-offset-4"
+        >
+          ← Escolher outro
+        </button>
+      )}
       {passo2 ? (
         <FormItem
           item={item}

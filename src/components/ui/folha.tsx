@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Info, X } from "lucide-react";
 import { Botao } from "@/components/ui/botao";
 
@@ -9,7 +10,13 @@ const CHAVE_HISTORICO = "mfFolha";
 /**
  * Folha (bottom sheet) da Fase 2 (DESIGN §10.6), sobre `<dialog>` nativo com showModal():
  * prende o foco, Esc fecha, fundo inerte, sem biblioteca.
- * - Celular: presa embaixo, raio so em cima, ate 90dvh. Desktop: centralizada, 560px.
+ * - Posicao nao depende do estilo padrao do `<dialog>` no navegador (bug F2-G1 no Safari do
+ *   iPhone: a folha caia no fim da pagina, sem fundo escuro). O `<dialog>` vai para o `<body>`
+ *   (portal), cobre a area visivel inteira (fixo, com o escurecido pintado nele mesmo) e o
+ *   painel fica preso embaixo por flex. Topo e altura seguem o `visualViewport`: com o teclado
+ *   aberto (iOS nao encolhe o layout), a folha sobe e fica acima dele.
+ * - Se `showModal()` faltar ou falhar, abre sem modal e deixa o resto da pagina `inert`.
+ * - Celular: presa embaixo, raio so em cima, ate 90% da area visivel. Desktop: centralizada, 560px.
  * - Topo fixo com titulo + botao "Fechar" (sem puxador de arrastar).
  * - Meio rola; `rodape` fica fixo embaixo (primario por ultimo, perto do polegar).
  * - Voltar do Android fecha a folha (empurra um estado no historico ao abrir).
@@ -27,7 +34,6 @@ export function Folha({
   titulo,
   children,
   rodape,
-  topo,
   sujo = false,
   aoDescartar,
   recuperado = false,
@@ -38,8 +44,6 @@ export function Folha({
   children: ReactNode;
   /** Botoes do rodape fixo (secundario acima, primario embaixo). */
   rodape?: ReactNode;
-  /** Algo antes do titulo no topo (ex.: botao "← Escolher outro"). */
-  topo?: ReactNode;
   /** Ha algo digitado: fechar pede confirmacao. */
   sujo?: boolean;
   /** Apaga o rascunho guardado (antes de fechar). */
@@ -75,9 +79,48 @@ export function Folha({
 
     const origem = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     fechandoPorNos.current = false;
-    if (!dialogo.open) dialogo.showModal();
+
+    // Abre como modal; sem suporte (ou se falhar), abre normal e deixa o resto inerte.
+    const inertes: HTMLElement[] = [];
+    if (!dialogo.open) {
+      let modal = false;
+      try {
+        if (typeof dialogo.showModal === "function") {
+          dialogo.showModal();
+          modal = dialogo.open;
+        }
+      } catch {
+        modal = false;
+      }
+      if (!modal) {
+        dialogo.setAttribute("open", "");
+        for (const el of Array.from(document.body.children)) {
+          if (el !== dialogo && el instanceof HTMLElement && !el.inert) {
+            el.inert = true;
+            inertes.push(el);
+          }
+        }
+        dialogo.querySelector<HTMLElement>("button, [href], input, select, textarea")?.focus();
+      }
+    }
     const overflowAntes = document.documentElement.style.overflow;
     document.documentElement.style.overflow = "hidden";
+
+    // A camada acompanha a area visivel (teclado aberto, barra do Safari, zoom).
+    const vv = window.visualViewport;
+    const ajustar = () => {
+      if (!vv) return;
+      dialogo.style.top = `${vv.offsetTop}px`;
+      dialogo.style.height = `${vv.height}px`;
+    };
+    ajustar();
+    vv?.addEventListener("resize", ajustar);
+    vv?.addEventListener("scroll", ajustar);
+    // Arrastar no fundo escuro nao rola a pagina de tras (iOS ignora o overflow do <html>).
+    const travarFundo = (e: TouchEvent) => {
+      if (e.target === dialogo) e.preventDefault();
+    };
+    dialogo.addEventListener("touchmove", travarFundo, { passive: false });
 
     // Reabriu antes do "voltar" agendado (ex.: StrictMode em dev): reaproveita o estado.
     if (voltarPendente.current) {
@@ -102,8 +145,15 @@ export function Folha({
 
     return () => {
       window.removeEventListener("popstate", aoVoltar);
+      vv?.removeEventListener("resize", ajustar);
+      vv?.removeEventListener("scroll", ajustar);
+      dialogo.removeEventListener("touchmove", travarFundo);
       fechandoPorNos.current = true;
-      if (dialogo.open) dialogo.close();
+      if (dialogo.open) {
+        if (typeof dialogo.close === "function") dialogo.close();
+        else dialogo.removeAttribute("open");
+      }
+      for (const el of inertes) el.inert = false;
       document.documentElement.style.overflow = overflowAntes;
       if (origem?.isConnected) origem.focus({ preventScroll: true });
       else {
@@ -128,7 +178,10 @@ export function Folha({
     else aoFechar();
   }
 
-  return (
+  // So existe depois de um toque (nunca no HTML do servidor).
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
     <dialog
       ref={ref}
       aria-labelledby={idTitulo}
@@ -138,15 +191,17 @@ export function Folha({
       }}
       onClose={() => {
         // O navegador fechou sozinho (ex.: 2º Esc/voltar seguido): o rascunho ja esta guardado.
-        if (!fechandoPorNos.current) aoFechar();
+        // Se ja reabriu (StrictMode em dev fecha e reabre; o "close" chega atrasado), ignora.
+        if (!fechandoPorNos.current && !ref.current?.open) aoFechar();
       }}
-      className="m-0 mt-auto max-h-[90dvh] w-full max-w-none flex-col overflow-hidden rounded-t-xl bg-superficie p-0 text-texto shadow-folha backdrop:bg-[#14161A]/50 open:flex lg:m-auto lg:max-w-[560px] lg:rounded-xl"
+      // Camada da area visivel inteira: fixa e explicita (top/height o efeito ajusta pelo
+      // visualViewport). O escuro e pintado aqui; o ::backdrop fica transparente.
+      className="fixed inset-x-0 top-0 m-0 h-full max-h-none w-full max-w-none flex-col items-center justify-end overflow-hidden overscroll-contain border-0 bg-[#14161A]/50 p-0 text-texto backdrop:bg-transparent open:flex lg:justify-center lg:p-6"
     >
       {aberta && (
-        <>
+        <div className="flex max-h-[90%] min-h-0 w-full flex-col overflow-hidden rounded-t-xl bg-superficie text-texto shadow-folha lg:max-h-full lg:max-w-[560px] lg:rounded-xl">
           <div className="flex min-h-14 shrink-0 items-center gap-2 border-b-2 border-borda-sutil py-1 pr-2 pl-4">
-            {topo}
-            <h2 id={idTitulo} className="min-w-0 flex-1 truncate text-xl">
+            <h2 id={idTitulo} className="line-clamp-2 min-w-0 flex-1 text-xl leading-tight break-words">
               {titulo}
             </h2>
             <button
@@ -205,8 +260,9 @@ export function Folha({
               </div>
             )
           )}
-        </>
+        </div>
       )}
-    </dialog>
+    </dialog>,
+    document.body,
   );
 }
