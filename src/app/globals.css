@@ -156,6 +156,13 @@
   input, select, textarea { font-size: 1.125rem; }
 }
 
+/* Telas de OS com barra de acoes / rodape fixo (DESIGN §10.2): a barra de navegacao
+   do celular some. A pagina marca isso com um elemento [data-esconde-navegacao]. */
+@media (max-width: 1023.98px) {
+  body:has([data-esconde-navegacao]) .navegacao-inferior { display: none; }
+  body:has([data-esconde-navegacao]) .area-conteudo { padding-bottom: 1rem; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0ms !important;

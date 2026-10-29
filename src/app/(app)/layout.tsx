@@ -13,7 +13,7 @@ export default function AppLayout({ children }: LayoutProps<"/">) {
       <Suspense fallback={<NavegacaoEsqueleto />}>
         <NavegacaoDoUsuario />
       </Suspense>
-      <div className="flex flex-1 flex-col pb-[calc(4rem+env(safe-area-inset-bottom)+1rem)] lg:pb-0">{children}</div>
+      <div className="area-conteudo flex flex-1 flex-col pb-[calc(4rem+env(safe-area-inset-bottom)+1rem)] lg:pb-0">{children}</div>
     </div>
   );
 }

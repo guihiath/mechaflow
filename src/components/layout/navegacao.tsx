@@ -20,22 +20,30 @@ import { APP_NAME } from "@/lib/brand";
 
 type Item = { href: string; rotulo: string; icone: typeof House; ativoEm?: string[] };
 
-/** Barra inferior do celular (DESIGN 5.6 e 6.2). */
+const OS: Item = { href: "/os", rotulo: "OS", icone: ClipboardList, ativoEm: ["/os"] };
+const OS_LATERAL: Item = { ...OS, rotulo: "Ordens de serviço" };
+
+/** Barra inferior do celular (DESIGN 5.6, 6.2 e §10.2). */
 const BARRA: Record<Papel, Item[]> = {
   dono: [
     { href: "/inicio", rotulo: "Início", icone: House },
+    OS,
     { href: "/clientes", rotulo: "Clientes", icone: Contact },
-    { href: "/veiculos", rotulo: "Veículos", icone: Truck },
-    { href: "/mais", rotulo: "Mais", icone: Ellipsis, ativoEm: ["/mais", "/catalogo", "/equipe", "/conta", "/placa"] },
+    {
+      href: "/mais",
+      rotulo: "Mais",
+      icone: Ellipsis,
+      ativoEm: ["/mais", "/veiculos", "/catalogo", "/equipe", "/conta", "/placa"],
+    },
   ],
   atendente: [
+    OS,
     { href: "/clientes", rotulo: "Clientes", icone: Contact },
-    { href: "/veiculos", rotulo: "Veículos", icone: Truck },
     { href: "/catalogo", rotulo: "Catálogo", icone: BookOpen },
-    { href: "/conta", rotulo: "Conta", icone: User },
+    { href: "/mais", rotulo: "Mais", icone: Ellipsis, ativoEm: ["/mais", "/veiculos", "/placa", "/conta"] },
   ],
   mecanico: [
-    { href: "/minhas-os", rotulo: "Minhas OS", icone: ClipboardList, ativoEm: ["/minhas-os", "/catalogo"] },
+    { href: "/minhas-os", rotulo: "Minhas OS", icone: ClipboardList, ativoEm: ["/minhas-os", "/os", "/catalogo"] },
     { href: "/placa", rotulo: "Buscar placa", icone: Search },
     { href: "/conta", rotulo: "Conta", icone: User },
   ],
@@ -45,6 +53,7 @@ const BARRA: Record<Papel, Item[]> = {
 const LATERAL: Record<Papel, Item[]> = {
   dono: [
     { href: "/inicio", rotulo: "Início", icone: House },
+    OS_LATERAL,
     { href: "/clientes", rotulo: "Clientes", icone: Contact },
     { href: "/veiculos", rotulo: "Veículos", icone: Truck },
     { href: "/placa", rotulo: "Buscar placa", icone: Search },
@@ -53,6 +62,7 @@ const LATERAL: Record<Papel, Item[]> = {
     { href: "/conta", rotulo: "Conta", icone: User },
   ],
   atendente: [
+    OS_LATERAL,
     { href: "/clientes", rotulo: "Clientes", icone: Contact },
     { href: "/veiculos", rotulo: "Veículos", icone: Truck },
     { href: "/placa", rotulo: "Buscar placa", icone: Search },
@@ -60,7 +70,7 @@ const LATERAL: Record<Papel, Item[]> = {
     { href: "/conta", rotulo: "Conta", icone: User },
   ],
   mecanico: [
-    { href: "/minhas-os", rotulo: "Minhas OS", icone: ClipboardList },
+    { href: "/minhas-os", rotulo: "Minhas OS", icone: ClipboardList, ativoEm: ["/minhas-os", "/os"] },
     { href: "/placa", rotulo: "Buscar placa", icone: Search },
     { href: "/catalogo", rotulo: "Catálogo", icone: BookOpen },
     { href: "/conta", rotulo: "Conta", icone: User },
@@ -121,7 +131,7 @@ export function Navegacao({ papel, oficina }: { papel: Papel; oficina: string | 
       {/* Celular/tablet: barra inferior 64px + safe area */}
       <nav
         aria-label="Menu principal"
-        className="fixed inset-x-0 bottom-0 z-40 bg-grafite pb-[env(safe-area-inset-bottom)] shadow-barra lg:hidden"
+        className="navegacao-inferior fixed inset-x-0 bottom-0 z-40 bg-grafite pb-[env(safe-area-inset-bottom)] shadow-barra lg:hidden"
       >
         <ul className="mx-auto flex h-barra max-w-[720px]">
           {BARRA[papel].map((item) => {
@@ -154,7 +164,7 @@ export function NavegacaoEsqueleto() {
   return (
     <>
       <div aria-hidden className="fixed inset-y-0 left-0 z-40 hidden w-60 bg-grafite lg:block" />
-      <div aria-hidden className="fixed inset-x-0 bottom-0 z-40 bg-grafite pb-[env(safe-area-inset-bottom)] lg:hidden">
+      <div aria-hidden className="navegacao-inferior fixed inset-x-0 bottom-0 z-40 bg-grafite pb-[env(safe-area-inset-bottom)] lg:hidden">
         <div className="h-barra" />
       </div>
     </>

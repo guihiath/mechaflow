@@ -6,7 +6,7 @@ export type Papel = Database["public"]["Enums"]["papel_usuario"];
 /** Tela inicial de cada papel. */
 export const HOME_POR_PAPEL: Record<Papel, string> = {
   dono: "/inicio",
-  atendente: "/clientes",
+  atendente: "/os",
   mecanico: "/minhas-os",
 };
 
