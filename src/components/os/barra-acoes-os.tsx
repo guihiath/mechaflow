@@ -9,7 +9,7 @@ import type { ReactNode } from "react";
  *
  * Os botoes vem prontos do pai (`Botao`, `BotaoEnviar`, botao que abre `Folha`...).
  * No celular os botoes de 56px (`h-toque-principal`) descem para 48px dentro da barra.
- * Inclui um espaco no fim da pagina para o ultimo conteudo nao ficar atras da barra.
+ * O espaco no fim da pagina vem do layout do app (mesma altura da barra de navegacao).
  */
 export function BarraAcoesOS({
   primario,
@@ -27,7 +27,6 @@ export function BarraAcoesOS({
   if (!primario && !secundario) return null;
   return (
     <>
-      <div aria-hidden className="h-[calc(4rem+env(safe-area-inset-bottom))] lg:hidden" />
       <section
         aria-label="Ações da OS"
         className="fixed inset-x-0 bottom-0 z-50 flex flex-col gap-2 border-t-2 border-borda-sutil bg-superficie px-4 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] shadow-barra lg:static lg:z-auto lg:rounded-lg lg:border lg:p-4 lg:shadow-none"

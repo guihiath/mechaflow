@@ -87,13 +87,14 @@ export type DadosPainel = {
   clienteNome: string;
   mecanicoId: string | null;
   mecanicoNome: string | null;
-  totalCentavos: number | null;
-  itensSemPreco: number;
+  /** Ausentes na versao do mecanico. */
+  totalCentavos?: number | null;
+  itensSemPreco?: number;
   qtdItens: number;
   temServico: boolean;
   semItensComTroca: boolean;
-  formaPagamento: FormaPagamento | null;
-  pago: boolean;
+  formaPagamento?: FormaPagamento | null;
+  pago?: boolean;
   equipe: PessoaOS[];
   itens: ItemOSCliente[];
 };
@@ -806,7 +807,7 @@ function FolhaResposta({ aoFechar, aoAprovar }: { aoFechar: () => void; aoAprova
     if (r?.mensagem === "aprovou") aoAprovar();
     else aoFechar();
   });
-  const semPreco = os.itensSemPreco > 0;
+  const semPreco = (os.itensSemPreco ?? 0) > 0;
   const rotulo =
     resposta === "recusou"
       ? depois === "cancelar"

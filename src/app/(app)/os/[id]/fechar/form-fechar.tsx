@@ -156,7 +156,7 @@ export function FormFechar({
         </div>
       ) : (
         <>
-          <div aria-hidden className="h-[calc(8.5rem+env(safe-area-inset-bottom))] lg:hidden" />
+          <div aria-hidden className="h-16 lg:hidden" />
           <div className="fixed inset-x-0 bottom-0 z-50 flex flex-col gap-2 border-t-2 border-borda-sutil bg-superficie px-4 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] shadow-barra lg:static lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none">
             {bloqueado && <p className="text-sm text-texto-suave">Defina o preço dos itens antes de entregar.</p>}
             <Botao variante="secundario" disabled={enviando} onClick={() => enviar("salvar")}>

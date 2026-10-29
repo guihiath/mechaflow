@@ -589,7 +589,7 @@ export function FormNovaOS({
       )}
 
       {/* ---------------------------------------------------- rodape fixo */}
-      <div aria-hidden className="h-[calc(5.5rem+env(safe-area-inset-bottom))] lg:hidden" />
+      <div aria-hidden className="h-6 lg:hidden" />
       <div className="fixed inset-x-0 bottom-0 z-50 flex flex-col gap-2 border-t-2 border-borda-sutil bg-superficie px-4 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] shadow-barra lg:static lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none">
         {estado?.erro && <CaixaMensagem tipo="erro">{estado.erro}</CaixaMensagem>}
         {!resolvida && busca.fase !== "buscando" && (
@@ -638,7 +638,7 @@ function EscolherClienteOS({
       <legend className="mb-1.5 text-sm font-bold">De quem é o veículo?</legend>
       <div className="relative">
         <label htmlFor={id} className="sr-only">
-          Nome do cliente
+          Buscar cliente
         </label>
         <Search size={22} aria-hidden className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-texto-suave" />
         <input

@@ -419,13 +419,9 @@ async function DetalheMecanico({ ctx, id }: { ctx: ContextoAtivo; id: string }) 
     clienteNome: "",
     mecanicoId: os.mecanico_id,
     mecanicoNome: os.mecanico_nome,
-    totalCentavos: null,
-    itensSemPreco: 0,
     qtdItens: itens.length,
     temServico: false,
     semItensComTroca: false,
-    formaPagamento: null,
-    pago: false,
     equipe: [],
     itens: [],
   };
