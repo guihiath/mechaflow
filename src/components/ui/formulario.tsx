@@ -13,6 +13,9 @@ import type { EstadoAcao } from "@/lib/acao";
  */
 type Acao = (anterior: EstadoAcao, dados: FormData) => Promise<EstadoAcao>;
 
+/** Evento que o Formulario dispara nos campos com validacao local antes de enviar. */
+export const EVENTO_VALIDAR = "mf-validar";
+
 const ErrosContexto = createContext<Record<string, string | undefined>>({});
 
 export function useErroCampo(nome?: string) {
@@ -57,6 +60,13 @@ export function Formulario({
   function aoEnviar(evento: FormEvent<HTMLFormElement>) {
     evento.preventDefault();
     if (enviando || travado.current) return;
+    // Validacao no proprio celular (ex.: placa) antes de gastar internet.
+    const invalidos = evento.currentTarget.querySelectorAll<HTMLElement>('[data-validacao-local="erro"]');
+    if (invalidos.length) {
+      invalidos.forEach((el) => el.dispatchEvent(new Event(EVENTO_VALIDAR)));
+      invalidos[0].focus();
+      return;
+    }
     travado.current = true;
     const dados = new FormData(evento.currentTarget);
     startTransition(() => enviar(dados));

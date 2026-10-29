@@ -114,6 +114,16 @@ export function linkWhatsApp(telefone: string | null | undefined, texto?: string
   return `https://wa.me/${numero}${texto ? `?text=${encodeURIComponent(texto)}` : ""}`;
 }
 
+/** Escapa % e _ para usar texto do usuario em ilike ("%texto%"). */
+export function padraoIlike(textoBusca: string) {
+  return `%${textoBusca.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+}
+
+/** Le um searchParam como string unica. */
+export function param(valor: string | string[] | undefined): string {
+  return (Array.isArray(valor) ? valor[0] : valor ?? "").trim();
+}
+
 // ---------------------------------------------------------------- rotulos
 
 export const ROTULO_PAPEL = { dono: "Dono", atendente: "Atendente", mecanico: "Mecânico" } as const;

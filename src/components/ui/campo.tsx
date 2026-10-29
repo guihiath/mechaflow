@@ -1,9 +1,9 @@
 "use client";
 
-import { useId, useState, type ComponentProps, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { ChevronDown, CircleAlert } from "lucide-react";
-import { useErroCampo } from "@/components/ui/formulario";
-import { formatarDocumento, formatarPlaca, formatarTelefone, normalizarPlaca } from "@/lib/formato";
+import { EVENTO_VALIDAR, useErroCampo } from "@/components/ui/formulario";
+import { formatarDocumento, formatarPlaca, formatarTelefone, normalizarPlaca, placaValida } from "@/lib/formato";
 
 /**
  * Campos base (DESIGN.md 5.2 e 5.3): rotulo acima, 52px, borda 2px,
@@ -199,14 +199,30 @@ type Mascarado = Omit<Base, "rotulo"> & { rotulo?: string } & Omit<ComponentProp
 
 /** Placa: IBM Plex Mono 24px, maiusculas, aceita com/sem traco. Envia normalizada. */
 export function CampoPlaca({ rotulo = "Placa", ajuda, erro: erroProp, valorInicial, name = "placa", ...props }: Mascarado) {
-  const { id, erro, aria, borda } = useCampo(name, erroProp);
   const [valor, setValor] = useState(formatarPlaca(valorInicial));
+  const [tocado, setTocado] = useState(false);
+  const ref = useRef<HTMLInputElement>(null);
+  const invalida = !placaValida(valor);
+  const erroLocal = tocado && invalida ? (valor ? "Placa inválida. Ex.: ABC1D23 ou ABC-1234" : "Informe a placa.") : undefined;
+  const { id, erro, aria, borda } = useCampo(name, erroProp ?? erroLocal);
+
+  // O Formulario avisa antes de enviar: mostra o erro sem esperar o campo perder o foco.
+  useEffect(() => {
+    const el = ref.current;
+    const mostrar = () => setTocado(true);
+    el?.addEventListener(EVENTO_VALIDAR, mostrar);
+    return () => el?.removeEventListener(EVENTO_VALIDAR, mostrar);
+  }, []);
+
   return (
     <Moldura id={id} rotulo={rotulo} ajuda={ajuda ?? "Antiga (ABC-1234) ou Mercosul (ABC1D23)."} erro={erro}>
       <input
         id={id}
+        ref={ref}
         {...aria}
+        data-validacao-local={invalida ? "erro" : undefined}
         value={valor}
+        onBlur={() => setTocado(true)}
         onChange={(e) => setValor(formatarPlaca(e.target.value))}
         autoCapitalize="characters"
         autoComplete="off"
