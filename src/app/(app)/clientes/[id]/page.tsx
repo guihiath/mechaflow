@@ -7,6 +7,7 @@ import { BotaoLink, classesBotao } from "@/components/ui/botao";
 import { ConfirmarAcao } from "@/components/ui/confirmar-acao";
 import { CaixaErro, Cartao, ChipPlaca, FormularioCarregando, Pagina } from "@/components/ui/estados";
 import { CaixaMensagem } from "@/components/ui/formulario";
+import { LimparUrl } from "@/components/ui/limpar-url";
 import { excluirCliente } from "@/acoes/clientes";
 import { exigirContexto } from "@/lib/dal";
 import { formatarPlaca, linkWhatsApp, param, ROTULO_TIPO_VEICULO } from "@/lib/formato";
@@ -58,6 +59,7 @@ async function Conteudo({
   return (
     <>
       {salvo && <CaixaMensagem tipo="sucesso">Cliente cadastrado.</CaixaMensagem>}
+      {salvo && <LimparUrl />}
       <h2 className="text-3xl">{cliente.nome}</h2>
       {whats && (
         <a href={whats} target="_blank" rel="noopener noreferrer" className={classesBotao("secundario")}>

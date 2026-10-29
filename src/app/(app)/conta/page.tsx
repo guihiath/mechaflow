@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { Suspense } from "react";
+import { EscolherTema } from "./escolher-tema";
 import { LogOut } from "lucide-react";
 import { Cabecalho } from "@/components/layout/cabecalho";
 import { classesBotao } from "@/components/ui/botao";
@@ -35,9 +37,19 @@ async function Dados() {
           <Linha rotulo="Oficina" valor={ctx.oficina_nome} />
         </dl>
       </Cartao>
-      <p className="text-base text-texto-suave">
-        Esqueceu a senha ou precisa trocar o e-mail? Fale com o dono da oficina.
-      </p>
+      {ctx.papel === "dono" ? (
+        <div className="text-base">
+          <p className="text-texto-suave">Quer trocar a senha?</p>
+          <Link href="/esqueci-senha" className="inline-flex min-h-toque items-center font-bold text-info-texto underline">
+            Receber link para criar senha nova
+          </Link>
+        </div>
+      ) : (
+        <p className="text-base text-texto-suave">
+          Esqueceu a senha ou precisa trocar o e-mail? Fale com o dono da oficina.
+        </p>
+      )}
+      <EscolherTema />
       <form action={sair}>
         <button type="submit" className={classesBotao("secundario")}>
           <LogOut size={24} strokeWidth={2.25} aria-hidden />

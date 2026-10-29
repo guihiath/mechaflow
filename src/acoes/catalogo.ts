@@ -3,7 +3,7 @@
 import { refresh } from "next/cache";
 import { redirect } from "next/navigation";
 import { contextoParaAcao } from "@/lib/dal";
-import { temErros, texto, textoOuNull, type EstadoAcao } from "@/lib/acao";
+import { erroCampos, temErros, texto, textoOuNull, type EstadoAcao } from "@/lib/acao";
 import { traduzirErro } from "@/lib/erros";
 import { reaisParaCentavos, UNIDADES_PECA, type UnidadePeca } from "@/lib/formato";
 import { createClient } from "@/lib/supabase/server";
@@ -36,7 +36,7 @@ export async function salvarServico(_anterior: EstadoAcao, dados: FormData): Pro
     descricao: descricao && descricao.length > 1000 ? "Máximo de 1000 caracteres." : undefined,
     preco: Number.isNaN(preco) ? ERRO_VALOR : undefined,
   };
-  if (temErros(campos)) return { campos, erro: "Confira os campos marcados." };
+  if (temErros(campos)) return erroCampos(campos);
 
   const supabase = await createClient();
   let servicoId = id;
@@ -83,7 +83,7 @@ export async function salvarPeca(_anterior: EstadoAcao, dados: FormData): Promis
     preco: Number.isNaN(preco) ? ERRO_VALOR : undefined,
     custo: Number.isNaN(custo) ? ERRO_VALOR : undefined,
   };
-  if (temErros(campos)) return { campos, erro: "Confira os campos marcados." };
+  if (temErros(campos)) return erroCampos(campos);
 
   const supabase = await createClient();
   let pecaId = id;

@@ -11,10 +11,11 @@ type Cliente = Pick<
   "id" | "nome" | "telefone" | "documento" | "email" | "modo_padrao" | "observacoes"
 >;
 
-export function FormCliente({ cliente }: { cliente?: Cliente }) {
+export function FormCliente({ cliente, voltar }: { cliente?: Cliente; voltar?: string | null }) {
   return (
     <Formulario acao={salvarCliente} rotulo={cliente ? "Salvar cliente" : "Cadastrar cliente"}>
       {cliente && <input type="hidden" name="id" value={cliente.id} />}
+      {voltar && <input type="hidden" name="voltar" value={voltar} />}
       <Campo rotulo="Nome ou razão social" name="nome" autoComplete="off" defaultValue={cliente?.nome} />
       <CampoTelefone rotulo="Telefone (WhatsApp)" opcional valorInicial={cliente?.telefone} />
       <OpcoesBotoes

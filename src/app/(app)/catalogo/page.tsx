@@ -77,11 +77,11 @@ async function Conteudo({ searchParams }: { searchParams: Promise<Params> }) {
           </BotaoLink>
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-base">
             {aba === "pecas" && (
-              <Link href={url({ pendentes: pendentes ? undefined : "1" })} className="min-h-toque content-center font-bold text-info-texto underline">
+              <Link href={url({ pendentes: pendentes ? undefined : "1" })} className="inline-flex min-h-toque items-center font-bold text-info-texto underline">
                 {pendentes ? "Ver todas as peças" : "Ver só peças sem preço"}
               </Link>
             )}
-            <Link href={url({ inativos: inativos ? undefined : "1" })} className="min-h-toque content-center font-bold text-info-texto underline">
+            <Link href={url({ inativos: inativos ? undefined : "1" })} className="inline-flex min-h-toque items-center font-bold text-info-texto underline">
               {inativos ? "Esconder desativados" : "Mostrar desativados"}
             </Link>
           </div>

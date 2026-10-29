@@ -3,7 +3,7 @@
 import { useCallback, useState } from "react";
 import { Check, Copy, MessageCircle, UserPlus } from "lucide-react";
 import { Botao, classesBotao } from "@/components/ui/botao";
-import { Campo, OpcoesBotoes, Selecao } from "@/components/ui/campo";
+import { Campo, OpcoesBotoes } from "@/components/ui/campo";
 import { CaixaMensagem, Formulario } from "@/components/ui/formulario";
 import { criarConvite } from "@/acoes/equipe";
 import type { EstadoAcao } from "@/lib/acao";
@@ -49,8 +49,8 @@ export function Convidar({ oficina }: { oficina: string }) {
       <section className="flex flex-col gap-3 rounded-lg border-2 border-grafite bg-superficie p-4">
         <h2 className="text-2xl">Convite pronto</h2>
         <p className="text-base">
-          {gerado.nome ? `${gerado.nome}, ` : ""}
-          {gerado.papel}. Vale até {gerado.expira}. Funciona uma vez só.
+          Convite de {gerado.papel}
+          {gerado.nome ? ` para ${gerado.nome}` : ""}. Vale até {gerado.expira}. Funciona uma vez só.
         </p>
         <p className="break-all rounded-md bg-superficie-2 p-3 font-mono text-sm">{gerado.link}</p>
         <Botao variante="secundario" onClick={copiar}>
@@ -116,10 +116,10 @@ export function Convidar({ oficina }: { oficina: string }) {
           ajuda="Mecânico não vê preços nem custos. Atendente vê preço, não vê custo."
         />
         <Campo rotulo="Nome da pessoa" name="nome_sugerido" opcional maxLength={80} autoComplete="off" />
-        <Selecao
+        <OpcoesBotoes
           rotulo="Validade do link"
           name="validade"
-          defaultValue="72"
+          valorInicial="72"
           opcoes={[
             { valor: "24", rotulo: "24 horas" },
             { valor: "72", rotulo: "3 dias" },

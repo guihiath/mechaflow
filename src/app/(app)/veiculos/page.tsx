@@ -6,7 +6,7 @@ import { BotaoLink } from "@/components/ui/botao";
 import { Busca } from "@/components/ui/busca";
 import { CaixaErro, Cartao, ChipPlaca, EstadoVazio, ListaCarregando, Pagina } from "@/components/ui/estados";
 import { exigirContexto } from "@/lib/dal";
-import { formatarPlaca, normalizarPlaca, param, ROTULO_TIPO_VEICULO } from "@/lib/formato";
+import { formatarPlaca, normalizarPlaca, param, placaValida, ROTULO_TIPO_VEICULO } from "@/lib/formato";
 import { createClient } from "@/lib/supabase/server";
 
 export const metadata: Metadata = { title: "Veículos" };
@@ -41,7 +41,7 @@ async function Lista({ searchParams }: { searchParams: Promise<Record<string, st
   return (
     <>
       <div className="flex flex-col gap-3">
-        <Busca acao="/veiculos" nome="placa" rotulo="Buscar pela placa" valor={q ? formatarPlaca(q) : ""} placa />
+        <Busca acao="/veiculos" nome="placa" rotulo="Ex.: ABC1D23" rotuloVisivel="Buscar pela placa" valor={q ? formatarPlaca(q) : ""} placa />
         <BotaoLink href="/veiculos/novo">
           <Plus size={24} strokeWidth={2.25} aria-hidden />
           Novo veículo
@@ -54,9 +54,13 @@ async function Lista({ searchParams }: { searchParams: Promise<Record<string, st
         q ? (
           <EstadoVazio
             icone={Truck}
-            titulo="Nenhum veículo com essa placa."
+            titulo={placaValida(q) ? `${formatarPlaca(q)} não está cadastrada.` : "Nenhum veículo com essa placa."}
             texto="Confira a placa ou cadastre o veículo."
-            acao={{ href: "/veiculos/novo", rotulo: "Cadastrar veículo" }}
+            acao={
+              placaValida(q)
+                ? { href: `/veiculos/novo?placa=${q}`, rotulo: `Cadastrar ${formatarPlaca(q)}` }
+                : { href: "/veiculos/novo", rotulo: "Cadastrar veículo" }
+            }
           />
         ) : (
           <EstadoVazio

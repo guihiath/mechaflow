@@ -15,16 +15,20 @@ export function FormVeiculo({
   veiculo,
   clientes,
   clienteInicial,
+  placaInicial,
+  hrefNovoCliente = "/clientes/novo",
 }: {
   veiculo?: Veiculo;
   clientes: { id: string; nome: string }[];
   clienteInicial?: string | null;
+  placaInicial?: string | null;
+  hrefNovoCliente?: string;
 }) {
   return (
     <Formulario acao={salvarVeiculo} rotulo={veiculo ? "Salvar veículo" : "Cadastrar veículo"}>
       {veiculo && <input type="hidden" name="id" value={veiculo.id} />}
-      <CampoPlaca valorInicial={veiculo?.placa} />
-      <EscolherCliente clientes={clientes} inicial={veiculo?.cliente_id ?? clienteInicial} />
+      <CampoPlaca valorInicial={veiculo?.placa ?? placaInicial} />
+      <EscolherCliente clientes={clientes} inicial={veiculo?.cliente_id ?? clienteInicial} hrefNovoCliente={hrefNovoCliente} />
       <Selecao
         rotulo="Tipo"
         name="tipo"
@@ -35,11 +39,11 @@ export function FormVeiculo({
         <Campo rotulo="Marca" name="marca" opcional defaultValue={veiculo?.marca ?? ""} placeholder="Ex.: Volvo" maxLength={60} />
         <Campo rotulo="Modelo" name="modelo" opcional defaultValue={veiculo?.modelo ?? ""} placeholder="Ex.: FH 540" maxLength={80} />
       </div>
-      <div className="grid grid-cols-2 gap-3">
-        <Campo rotulo="Ano fabricação" name="ano_fabricacao" inputMode="numeric" maxLength={4} opcional defaultValue={n(veiculo?.ano_fabricacao)} />
-        <Campo rotulo="Ano modelo" name="ano_modelo" inputMode="numeric" maxLength={4} opcional defaultValue={n(veiculo?.ano_modelo)} />
+      <div className="grid gap-5 min-[400px]:grid-cols-2 min-[400px]:gap-3">
+        <Campo rotulo="Ano de fabricação" name="ano_fabricacao" inputMode="numeric" maxLength={4} opcional defaultValue={n(veiculo?.ano_fabricacao)} />
+        <Campo rotulo="Ano do modelo" name="ano_modelo" inputMode="numeric" maxLength={4} opcional defaultValue={n(veiculo?.ano_modelo)} />
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid gap-5 min-[400px]:grid-cols-2 min-[400px]:gap-3">
         <Campo rotulo="KM atual" name="km_atual" inputMode="numeric" opcional defaultValue={n(veiculo?.km_atual)} className="font-mono" />
         <Campo rotulo="Horímetro" name="horimetro_atual" inputMode="numeric" opcional defaultValue={n(veiculo?.horimetro_atual)} className="font-mono" />
       </div>

@@ -2,7 +2,7 @@
 
 import { refresh } from "next/cache";
 import { contextoParaAcao } from "@/lib/dal";
-import { texto, type EstadoAcao } from "@/lib/acao";
+import { erroCampos, temErros, texto, type EstadoAcao } from "@/lib/acao";
 import { traduzirErro } from "@/lib/erros";
 import { createClient } from "@/lib/supabase/server";
 import type { Database } from "@/lib/supabase/database.types";
@@ -24,7 +24,7 @@ export async function criarConvite(_anterior: EstadoAcao, dados: FormData): Prom
     nome_sugerido: nome.length > 80 ? "Máximo de 80 caracteres." : undefined,
     validade: [24, 72, 168].includes(horas) ? undefined : "Escolha a validade.",
   };
-  if (Object.values(campos).some(Boolean)) return { campos, erro: "Confira os campos marcados." };
+  if (temErros(campos)) return erroCampos(campos);
 
   const supabase = await createClient();
   const { data, error } = await supabase

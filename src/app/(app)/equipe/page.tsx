@@ -16,7 +16,7 @@ export const metadata: Metadata = { title: "Equipe" };
 export default function EquipePage() {
   return (
     <>
-      <Cabecalho titulo="Equipe" voltar="/mais" />
+      <Cabecalho titulo="Equipe" voltar="/mais" voltarSoCelular />
       <Pagina>
         <Suspense fallback={<ListaCarregando />}>
           <Conteudo />

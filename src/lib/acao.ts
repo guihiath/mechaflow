@@ -23,3 +23,13 @@ export function textoOuNull(dados: FormData, nome: string): string | null {
 export function temErros(campos: Record<string, string | undefined>) {
   return Object.values(campos).some(Boolean);
 }
+
+/** "Confira 2 campos marcados em vermelho." */
+export function mensagemCampos(campos: Record<string, string | undefined>) {
+  const n = Object.values(campos).filter(Boolean).length;
+  return n === 1 ? "Confira o campo marcado em vermelho." : `Confira ${n} campos marcados em vermelho.`;
+}
+
+export function erroCampos(campos: Record<string, string | undefined>): EstadoAcao {
+  return { campos, erro: mensagemCampos(campos) };
+}

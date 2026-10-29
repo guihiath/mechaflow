@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type ComponentProps, type ReactNode } from "react";
-import { ChevronDown, CircleAlert } from "lucide-react";
+import { Check, ChevronDown, CircleAlert } from "lucide-react";
 import { EVENTO_VALIDAR, useErroCampo } from "@/components/ui/formulario";
 import { formatarDocumento, formatarPlaca, formatarTelefone, normalizarPlaca, placaValida } from "@/lib/formato";
 
@@ -50,7 +50,7 @@ function Moldura({
   );
 }
 
-function useCampo(nome: string | undefined, erroProp?: string) {
+function useCampo(nome: string | undefined, erroProp?: string, ajuda?: ReactNode) {
   const id = useId();
   const erroForm = useErroCampo(nome);
   const erro = erroProp ?? erroForm;
@@ -59,7 +59,7 @@ function useCampo(nome: string | undefined, erroProp?: string) {
     erro,
     aria: {
       "aria-invalid": erro ? true : undefined,
-      "aria-describedby": erro ? `${id}-erro` : `${id}-ajuda`,
+      "aria-describedby": erro ? `${id}-erro` : ajuda ? `${id}-ajuda` : undefined,
     } as const,
     borda: erro ? "border-erro" : "border-borda",
   };
@@ -68,7 +68,7 @@ function useCampo(nome: string | undefined, erroProp?: string) {
 type CampoProps = Base & Omit<ComponentProps<"input">, "id">;
 
 export function Campo({ rotulo, ajuda, erro: erroProp, opcional, className, ...props }: CampoProps) {
-  const { id, erro, aria, borda } = useCampo(props.name, erroProp);
+  const { id, erro, aria, borda } = useCampo(props.name, erroProp, ajuda);
   return (
     <Moldura id={id} rotulo={rotulo} ajuda={ajuda} erro={erro} opcional={opcional}>
       <input id={id} {...aria} className={`${classeEntrada} ${borda} ${className ?? ""}`} {...props} />
@@ -79,7 +79,7 @@ export function Campo({ rotulo, ajuda, erro: erroProp, opcional, className, ...p
 type AreaProps = Base & Omit<ComponentProps<"textarea">, "id">;
 
 export function AreaTexto({ rotulo, ajuda, erro: erroProp, opcional, ...props }: AreaProps) {
-  const { id, erro, aria, borda } = useCampo(props.name, erroProp);
+  const { id, erro, aria, borda } = useCampo(props.name, erroProp, ajuda);
   return (
     <Moldura id={id} rotulo={rotulo} ajuda={ajuda} erro={erro} opcional={opcional}>
       <textarea
@@ -97,7 +97,7 @@ type SelecaoProps = Base & Omit<ComponentProps<"select">, "id"> & { opcoes: { va
 
 /** Select nativo (6 a 15 opcoes). */
 export function Selecao({ rotulo, ajuda, erro: erroProp, opcional, opcoes, ...props }: SelecaoProps) {
-  const { id, erro, aria, borda } = useCampo(props.name, erroProp);
+  const { id, erro, aria, borda } = useCampo(props.name, erroProp, ajuda);
   return (
     <Moldura id={id} rotulo={rotulo} ajuda={ajuda} erro={erro} opcional={opcional}>
       <div className="relative">
@@ -127,20 +127,25 @@ type OpcoesBotoesProps = Base & {
 
 /** Ate 5 opcoes: botoes segmentados (cada um >= 48px). */
 export function OpcoesBotoes({ rotulo, ajuda, erro: erroProp, name, opcoes, valorInicial }: OpcoesBotoesProps) {
+  const id = useId();
   const erroForm = useErroCampo(name);
   const erro = erroProp ?? erroForm;
   const [valor, setValor] = useState(valorInicial ?? opcoes[0]?.valor);
+  const colunas = opcoes.length === 3 ? "grid-cols-3" : "grid-cols-2";
   return (
-    <fieldset className="flex flex-col gap-1.5">
+    <fieldset
+      className="flex flex-col gap-1.5"
+      aria-describedby={erro ? `${id}-erro` : ajuda ? `${id}-ajuda` : undefined}
+    >
       <legend className="mb-1.5 text-sm font-bold text-texto">{rotulo}</legend>
-      <div className="grid grid-cols-2 gap-2">
+      <div className={`grid ${colunas} gap-2`}>
         {opcoes.map((o) => {
           const ativo = o.valor === valor;
           return (
             <label
               key={o.valor}
-              className={`flex min-h-toque cursor-pointer items-center justify-center rounded-md border-2 px-3 text-center text-base font-bold transition-colors has-[:focus-visible]:outline has-[:focus-visible]:outline-[3px] has-[:focus-visible]:outline-foco ${
-                ativo ? "border-grafite bg-primaria text-primaria-texto" : "border-borda bg-superficie text-texto"
+              className={`flex min-h-toque cursor-pointer items-center justify-center gap-1.5 rounded-md border-2 px-2 text-center text-base font-bold transition-colors has-[:focus-visible]:outline has-[:focus-visible]:outline-[3px] has-[:focus-visible]:outline-foco ${
+                ativo ? "border-grafite bg-primaria text-primaria-texto" : erro ? "border-erro bg-superficie text-texto" : "border-borda bg-superficie text-texto"
               }`}
             >
               <input
@@ -149,16 +154,60 @@ export function OpcoesBotoes({ rotulo, ajuda, erro: erroProp, name, opcoes, valo
                 value={o.valor}
                 checked={ativo}
                 onChange={() => setValor(o.valor)}
+                data-invalido={erro ? "true" : undefined}
                 className="sr-only"
               />
+              {ativo && <Check size={20} strokeWidth={2.5} aria-hidden className="shrink-0" />}
               {o.rotulo}
             </label>
           );
         })}
       </div>
-      {ajuda && !erro && <p className="text-sm text-texto-suave">{ajuda}</p>}
-      {erro && <p className="text-sm font-bold text-erro-texto">{erro}</p>}
+      {ajuda && !erro && (
+        <p id={`${id}-ajuda`} className="text-sm text-texto-suave">
+          {ajuda}
+        </p>
+      )}
+      {erro && (
+        <p id={`${id}-erro`} className="flex items-start gap-1.5 text-sm font-bold text-erro-texto">
+          <CircleAlert size={18} strokeWidth={2.25} aria-hidden className="mt-0.5 shrink-0" />
+          {erro}
+        </p>
+      )}
     </fieldset>
+  );
+}
+
+type SenhaProps = Omit<Base, "rotulo"> & { rotulo?: string } & Omit<ComponentProps<"input">, "id" | "type">;
+
+/** Senha com botao "Mostrar"/"Esconder" (mao suja/luva erra e precisa ver o que digitou). */
+export function CampoSenha({ rotulo = "Senha", ajuda, erro: erroProp, opcional, className, ...props }: SenhaProps) {
+  const { id, erro, aria, borda } = useCampo(props.name, erroProp, ajuda);
+  const [visivel, setVisivel] = useState(false);
+  return (
+    <Moldura id={id} rotulo={rotulo} ajuda={ajuda} erro={erro} opcional={opcional}>
+      <div className="relative">
+        <input
+          id={id}
+          type={visivel ? "text" : "password"}
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          {...aria}
+          className={`${classeEntrada} ${borda} pr-28 ${className ?? ""}`}
+          {...props}
+        />
+        <button
+          type="button"
+          onClick={() => setVisivel((v) => !v)}
+          aria-pressed={visivel}
+          aria-controls={id}
+          className="absolute inset-y-0.5 right-0.5 min-h-toque rounded-md px-3 text-base font-bold text-info-texto"
+        >
+          {visivel ? "Esconder" : "Mostrar"}
+        </button>
+      </div>
+    </Moldura>
   );
 }
 
@@ -176,7 +225,8 @@ export function CaixaMarcar({ children, erro: erroProp, ...props }: CaixaMarcarP
           id={id}
           type="checkbox"
           aria-invalid={erro ? true : undefined}
-          className="mt-0.5 size-7 shrink-0 cursor-pointer accent-[#14161A]"
+          aria-describedby={erro ? `${id}-erro` : undefined}
+          className="mt-0.5 size-7 shrink-0 cursor-pointer accent-primaria"
           {...props}
         />
         <label htmlFor={id} className="cursor-pointer pt-0.5 text-base">
@@ -184,7 +234,7 @@ export function CaixaMarcar({ children, erro: erroProp, ...props }: CaixaMarcarP
         </label>
       </div>
       {erro && (
-        <p className="flex items-start gap-1.5 text-sm font-bold text-erro-texto">
+        <p id={`${id}-erro`} className="flex items-start gap-1.5 text-sm font-bold text-erro-texto">
           <CircleAlert size={18} strokeWidth={2.25} aria-hidden className="mt-0.5 shrink-0" />
           {erro}
         </p>
@@ -204,7 +254,8 @@ export function CampoPlaca({ rotulo = "Placa", ajuda, erro: erroProp, valorInici
   const ref = useRef<HTMLInputElement>(null);
   const invalida = !placaValida(valor);
   const erroLocal = tocado && invalida ? (valor ? "Placa inválida. Ex.: ABC1D23 ou ABC-1234" : "Informe a placa.") : undefined;
-  const { id, erro, aria, borda } = useCampo(name, erroProp ?? erroLocal);
+  const textoAjuda = ajuda ?? "Antiga (ABC-1234) ou Mercosul (ABC1D23).";
+  const { id, erro, aria, borda } = useCampo(name, erroProp ?? erroLocal, textoAjuda);
 
   // O Formulario avisa antes de enviar: mostra o erro sem esperar o campo perder o foco.
   useEffect(() => {
@@ -215,7 +266,7 @@ export function CampoPlaca({ rotulo = "Placa", ajuda, erro: erroProp, valorInici
   }, []);
 
   return (
-    <Moldura id={id} rotulo={rotulo} ajuda={ajuda ?? "Antiga (ABC-1234) ou Mercosul (ABC1D23)."} erro={erro}>
+    <Moldura id={id} rotulo={rotulo} ajuda={textoAjuda} erro={erro}>
       <input
         id={id}
         ref={ref}

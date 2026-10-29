@@ -5,6 +5,7 @@ import { Cabecalho } from "@/components/layout/cabecalho";
 import { ConfirmarAcao } from "@/components/ui/confirmar-acao";
 import { CaixaErro, FormularioCarregando, Pagina } from "@/components/ui/estados";
 import { CaixaMensagem } from "@/components/ui/formulario";
+import { LimparUrl } from "@/components/ui/limpar-url";
 import { alterarAtivoCatalogo } from "@/acoes/catalogo";
 import { exigirContexto } from "@/lib/dal";
 import { formatarCentavos, param } from "@/lib/formato";
@@ -52,6 +53,7 @@ async function Conteudo({
 
   return (
     <>
+      {(param(sp.salvo) || param(sp.aviso)) && <LimparUrl />}
       {param(sp.salvo) === "1" && <CaixaMensagem tipo="sucesso">Peça cadastrada.</CaixaMensagem>}
       {param(sp.aviso) === "preco" && (
         <CaixaMensagem tipo="alerta">A peça foi criada, mas preço/custo não foram salvos. Confira e salve de novo.</CaixaMensagem>

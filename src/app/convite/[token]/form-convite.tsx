@@ -2,10 +2,11 @@
 
 import { useRef, useState, type FormEvent } from "react";
 import { MailCheck } from "lucide-react";
+import { BotaoLink } from "@/components/ui/botao";
 import { AceiteTermos, ERRO_TERMOS } from "@/components/auth/aceite-termos";
 import { irParaDestino, validarEmail, validarSenha } from "@/components/auth/navegar";
-import { Campo } from "@/components/ui/campo";
-import { BotaoEnviar, CaixaMensagem } from "@/components/ui/formulario";
+import { Campo, CampoSenha } from "@/components/ui/campo";
+import { BotaoEnviar, CaixaMensagem, focarPrimeiroErro } from "@/components/ui/formulario";
 import { traduzirErro } from "@/lib/erros";
 import { TERMOS_VERSAO } from "@/lib/termos";
 import { createClient } from "@/lib/supabase/client";
@@ -29,7 +30,8 @@ export function FormConvite({ token, logadoComo }: { token: string; logadoComo: 
   async function aoEnviar(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (travado.current) return;
-    const d = new FormData(e.currentTarget);
+    const form = e.currentTarget;
+    const d = new FormData(form);
     const nome = String(d.get("nome") ?? "").trim();
     const email = String(d.get("email") ?? "").trim().toLowerCase();
     const senha = String(d.get("senha") ?? "");
@@ -43,7 +45,10 @@ export function FormConvite({ token, logadoComo }: { token: string; logadoComo: 
     };
     setErros(novos);
     setErro(undefined);
-    if (Object.values(novos).some(Boolean)) return;
+    if (Object.values(novos).some(Boolean)) {
+      focarPrimeiroErro(form);
+      return;
+    }
 
     travado.current = true;
     setEnviando(true);
@@ -103,6 +108,9 @@ export function FormConvite({ token, logadoComo }: { token: string; logadoComo: 
           Mandamos um link para <strong className="break-all">{confirmarEmail}</strong>. Abra o e-mail, toque no link e
           você volta para este convite para terminar.
         </p>
+        <BotaoLink href={`/login?voltar=/convite/${token}`} variante="secundario">
+          Já confirmei, entrar
+        </BotaoLink>
       </div>
     );
   }
@@ -149,10 +157,8 @@ export function FormConvite({ token, logadoComo }: { token: string; logadoComo: 
             ajuda={modo === "criar" ? "Use um e-mail seu de verdade (ex.: Gmail). Ele vai ser o seu usuário." : undefined}
             erro={erros.email}
           />
-          <Campo
-            rotulo="Senha"
+          <CampoSenha
             name="senha"
-            type="password"
             autoComplete={modo === "criar" ? "new-password" : "current-password"}
             ajuda={modo === "criar" ? "Mínimo de 8 caracteres." : undefined}
             erro={erros.senha}

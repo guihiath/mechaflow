@@ -131,7 +131,17 @@
 }
 
 @layer base {
-  html { background: var(--mf-fundo); color: var(--mf-texto); }
+  html {
+    background: var(--mf-fundo);
+    color: var(--mf-texto);
+    /* WCAG 2.4.11: campo focado nao fica atras do cabecalho fixo (56px + faixa TESTE 4px)
+       nem da barra inferior (64px + safe area). */
+    scroll-padding-top: calc(3.5rem + 0.25rem + env(safe-area-inset-top) + 0.5rem);
+    scroll-padding-bottom: calc(4rem + env(safe-area-inset-bottom) + 1rem);
+  }
+  @media (min-width: 1024px) {
+    html { scroll-padding-bottom: 1rem; }
+  }
   body {
     font-family: var(--font-sans);
     font-weight: 500;
@@ -141,6 +151,8 @@
   }
   h1, h2, h3 { font-family: var(--font-display); font-weight: 700; }
   :focus-visible { outline: 3px solid var(--mf-foco); outline-offset: 2px; }
+  /* Sobre grafite o azul fica abaixo de 3:1; amarelo da 10:1. */
+  .bg-grafite :focus-visible { outline-color: var(--color-primaria); }
   input, select, textarea { font-size: 1.125rem; }
 }
 

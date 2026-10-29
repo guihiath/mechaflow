@@ -39,20 +39,20 @@ export function FormPeca({ peca }: { peca?: Peca }) {
     <Formulario acao={salvarPeca} rotulo={peca ? "Salvar peça" : "Cadastrar peça"}>
       {peca && <input type="hidden" name="id" value={peca.id} />}
       <Campo rotulo="Nome da peça" name="nome" defaultValue={peca?.nome} maxLength={120} placeholder="Ex.: Filtro de óleo" />
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid gap-5 min-[400px]:grid-cols-2 min-[400px]:gap-3">
         <CampoDinheiro
-          rotulo="Custo (R$)"
+          rotulo="Custo"
           name="custo"
           opcional
           valorInicial={centavosParaCampo(peca?.custo_centavos)}
-          ajuda="Só o dono vê."
+          ajuda="Em R$. Só o dono vê."
         />
         <CampoDinheiro
-          rotulo="Preço de venda (R$)"
+          rotulo="Preço de venda"
           name="preco"
           opcional
           valorInicial={centavosParaCampo(peca?.preco_venda_centavos)}
-          ajuda="Sem preço = pendente."
+          ajuda="Em R$. Sem preço = pendente."
         />
       </div>
       <Campo rotulo="Código" name="codigo" opcional defaultValue={peca?.codigo ?? ""} maxLength={60} className="font-mono" />

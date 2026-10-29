@@ -48,6 +48,7 @@ export function Formulario({
 }: Props) {
   const [estado, enviar, enviando] = useActionState(acao, null);
   const travado = useRef(false);
+  const form = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
     if (!enviando) travado.current = false;
@@ -57,6 +58,11 @@ export function Formulario({
     if (estado?.ok && aoConcluir) aoConcluir(estado);
   }, [estado, aoConcluir]);
 
+  // Voltou com erro de campo: leva o usuario ate o primeiro campo marcado.
+  useEffect(() => {
+    if (estado?.campos) focarPrimeiroErro(form.current);
+  }, [estado]);
+
   function aoEnviar(evento: FormEvent<HTMLFormElement>) {
     evento.preventDefault();
     if (enviando || travado.current) return;
@@ -64,7 +70,8 @@ export function Formulario({
     const invalidos = evento.currentTarget.querySelectorAll<HTMLElement>('[data-validacao-local="erro"]');
     if (invalidos.length) {
       invalidos.forEach((el) => el.dispatchEvent(new Event(EVENTO_VALIDAR)));
-      invalidos[0].focus();
+      invalidos[0].scrollIntoView({ block: "center" });
+      invalidos[0].focus({ preventScroll: true });
       return;
     }
     travado.current = true;
@@ -74,7 +81,7 @@ export function Formulario({
 
   return (
     <ErrosContexto value={estado?.campos ?? {}}>
-      <form onSubmit={aoEnviar} noValidate className={className ?? "flex flex-col gap-5"}>
+      <form ref={form} onSubmit={aoEnviar} noValidate className={className ?? "flex flex-col gap-5"}>
         {children}
         {estado?.erro && <CaixaMensagem tipo="erro">{estado.erro}</CaixaMensagem>}
         {estado?.ok && estado.mensagem && <CaixaMensagem tipo="sucesso">{estado.mensagem}</CaixaMensagem>}
@@ -85,6 +92,19 @@ export function Formulario({
       </form>
     </ErrosContexto>
   );
+}
+
+/**
+ * Foca e rola ate o primeiro campo com aria-invalid (espera o React pintar o erro).
+ * Usado pelo Formulario e pelos formularios do navegador (login, cadastro, convite).
+ */
+export function focarPrimeiroErro(form: HTMLFormElement | null) {
+  requestAnimationFrame(() => {
+    const el = form?.querySelector<HTMLElement>('[aria-invalid="true"], [data-invalido="true"]');
+    if (!el) return;
+    el.scrollIntoView({ block: "center" });
+    el.focus({ preventScroll: true });
+  });
 }
 
 /** Botao de envio: mantem o tamanho, troca o texto e avisa se a internet estiver lenta. */

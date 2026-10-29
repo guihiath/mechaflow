@@ -12,7 +12,10 @@ export async function irParaDestino(supabase: SupabaseClient<Database>, voltar?:
   const { data } = await supabase.rpc("meu_contexto").maybeSingle();
   const destino = destinoPorContexto(data ?? null);
   const pronto = Object.values(HOME_POR_PAPEL).includes(destino);
-  window.location.replace((pronto && caminhoSeguro(voltar)) || destino);
+  const seguro = caminhoSeguro(voltar);
+  // Sem oficina e voltando de um convite: volta ao convite para aceitar.
+  const convite = destino === "/bem-vindo" && seguro?.startsWith("/convite/");
+  window.location.replace(((pronto || convite) && seguro) || destino);
 }
 
 /** Le ?voltar= da URL atual (sem useSearchParams, para nao precisar de Suspense). */

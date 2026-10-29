@@ -46,7 +46,7 @@ async function Lista({ searchParams }: { searchParams: Promise<Record<string, st
   return (
     <>
       <div className="flex flex-col gap-3">
-        <Busca acao="/clientes" rotulo="Buscar por nome, telefone ou CPF/CNPJ" valor={q} />
+        <Busca acao="/clientes" rotulo="Nome, telefone ou CPF" valor={q} />
         <BotaoLink href="/clientes/novo">
           <Plus size={24} strokeWidth={2.25} aria-hidden />
           Novo cliente

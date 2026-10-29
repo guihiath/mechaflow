@@ -11,12 +11,12 @@ import { destinoPorContexto } from "@/lib/contexto";
 import { lerContexto } from "@/lib/dal";
 import { ColarConvite } from "./colar-convite";
 
-export const metadata: Metadata = { title: "Bem-vindo" };
+export const metadata: Metadata = { title: "Boas-vindas" };
 
 /** Conta criada, mas sem oficina: criar oficina (dono) ou usar link de convite (funcionario). */
 export default function BemVindoPage() {
   return (
-    <TelaSimples titulo="Bem-vindo" subtitulo="Sua conta ainda não está ligada a nenhuma oficina.">
+    <TelaSimples titulo="Boas-vindas" subtitulo="Sua conta ainda não está ligada a nenhuma oficina.">
       <Suspense fallback={<FormularioCarregando />}>
         <Conteudo />
       </Suspense>

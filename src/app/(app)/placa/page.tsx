@@ -1,13 +1,22 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
-import { Search, Truck } from "lucide-react";
+import { Phone, Search, Truck } from "lucide-react";
 import { Cabecalho } from "@/components/layout/cabecalho";
 import { classesBotao } from "@/components/ui/botao";
 import { Busca } from "@/components/ui/busca";
 import { CaixaErro, Cartao, ChipPlaca, EstadoVazio, ListaCarregando, Pagina } from "@/components/ui/estados";
 import { exigirContexto } from "@/lib/dal";
-import { formatarPlaca, formatarTelefone, normalizarPlaca, param, ROTULO_MODO, ROTULO_TIPO_VEICULO } from "@/lib/formato";
+import {
+  formatarPlaca,
+  formatarTelefone,
+  normalizarPlaca,
+  param,
+  placaValida,
+  ROTULO_MODO,
+  ROTULO_TIPO_VEICULO,
+  soDigitos,
+} from "@/lib/formato";
 import { createClient } from "@/lib/supabase/server";
 
 export const metadata: Metadata = { title: "Buscar placa" };
@@ -31,7 +40,7 @@ async function Resultado({ searchParams }: { searchParams: Promise<Record<string
   const placa = normalizarPlaca(param((await searchParams).placa));
   const podeEditar = ctx.papel !== "mecanico";
 
-  const busca = <Busca acao="/placa" nome="placa" rotulo="Digite a placa" valor={placa ? formatarPlaca(placa) : ""} placa />;
+  const busca = <Busca acao="/placa" nome="placa" rotulo="Ex.: ABC1D23" rotuloVisivel="Placa" valor={placa ? formatarPlaca(placa) : ""} placa />;
 
   if (!placa) {
     return (
@@ -61,9 +70,15 @@ async function Resultado({ searchParams }: { searchParams: Promise<Record<string
       {!veiculos.length ? (
         <EstadoVazio
           icone={Truck}
-          titulo="Placa não encontrada na oficina."
+          titulo={`${formatarPlaca(placa)} não está cadastrada na oficina.`}
           texto={podeEditar ? "Confira a placa ou cadastre o veículo." : "Confira a placa. Se o veículo é novo, avise o dono ou o atendente."}
-          acao={podeEditar ? { href: "/veiculos/novo", rotulo: "Cadastrar veículo" } : undefined}
+          acao={
+            podeEditar
+              ? placaValida(placa)
+                ? { href: `/veiculos/novo?placa=${placa}`, rotulo: `Cadastrar ${formatarPlaca(placa)}` }
+                : { href: "/veiculos/novo", rotulo: "Cadastrar veículo" }
+              : undefined
+          }
         />
       ) : (
         <ul className="flex flex-col gap-3">
@@ -88,11 +103,20 @@ async function Resultado({ searchParams }: { searchParams: Promise<Record<string
                       <dt className="text-sm font-bold text-texto-suave">Cliente</dt>
                       <dd className="text-lg">
                         {v.cliente.nome}
-                        {v.cliente.telefone && (
-                          <span className="font-mono text-base text-texto-suave"> · {formatarTelefone(v.cliente.telefone)}</span>
-                        )}
+
                       </dd>
                       <dd className="text-base text-texto-suave">{ROTULO_MODO[v.cliente.modo_padrao]}</dd>
+                      {v.cliente.telefone && (
+                        <dd>
+                          <a
+                            href={`tel:${soDigitos(v.cliente.telefone)}`}
+                            className="inline-flex min-h-toque items-center gap-2 font-mono text-lg font-bold text-info-texto underline"
+                          >
+                            <Phone size={20} strokeWidth={2.25} aria-hidden />
+                            {formatarTelefone(v.cliente.telefone)}
+                          </a>
+                        </dd>
+                      )}
                     </div>
                   )}
                 </dl>

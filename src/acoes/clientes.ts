@@ -2,8 +2,9 @@
 
 import { refresh } from "next/cache";
 import { redirect } from "next/navigation";
+import { voltarDoCliente } from "@/lib/contexto";
 import { contextoParaAcao } from "@/lib/dal";
-import { temErros, texto, textoOuNull, type EstadoAcao } from "@/lib/acao";
+import { erroCampos, temErros, texto, textoOuNull, type EstadoAcao } from "@/lib/acao";
 import { traduzirErro } from "@/lib/erros";
 import { soDigitos } from "@/lib/formato";
 import { createClient } from "@/lib/supabase/server";
@@ -38,7 +39,7 @@ export async function salvarCliente(_anterior: EstadoAcao, dados: FormData): Pro
     modo_padrao: MODOS.includes(modo) ? undefined : "Escolha o padrão do cliente.",
     observacoes: observacoes && observacoes.length > 2000 ? "Máximo de 2000 caracteres." : undefined,
   };
-  if (temErros(campos)) return { campos, erro: "Confira os campos marcados." };
+  if (temErros(campos)) return erroCampos(campos);
 
   const registro = {
     nome,
@@ -54,6 +55,8 @@ export async function salvarCliente(_anterior: EstadoAcao, dados: FormData): Pro
   if (!id) {
     const { data, error } = await supabase.from("clientes").insert(registro).select("id").single();
     if (error) return { erro: traduzirErro(error, "cliente") };
+    const voltar = voltarDoCliente(texto(dados, "voltar"));
+    if (voltar) redirect(`${voltar}${voltar.includes("?") ? "&" : "?"}cliente=${data.id}`);
     redirect(`/clientes/${data.id}?salvo=1`);
   }
 

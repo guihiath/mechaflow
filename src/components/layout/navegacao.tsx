@@ -154,7 +154,9 @@ export function NavegacaoEsqueleto() {
   return (
     <>
       <div aria-hidden className="fixed inset-y-0 left-0 z-40 hidden w-60 bg-grafite lg:block" />
-      <div aria-hidden className="fixed inset-x-0 bottom-0 z-40 h-barra bg-grafite lg:hidden" />
+      <div aria-hidden className="fixed inset-x-0 bottom-0 z-40 bg-grafite pb-[env(safe-area-inset-bottom)] lg:hidden">
+        <div className="h-barra" />
+      </div>
     </>
   );
 }

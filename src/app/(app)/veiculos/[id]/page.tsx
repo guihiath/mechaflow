@@ -6,6 +6,7 @@ import { Cabecalho } from "@/components/layout/cabecalho";
 import { ConfirmarAcao } from "@/components/ui/confirmar-acao";
 import { CaixaErro, ChipPlaca, FormularioCarregando, Pagina } from "@/components/ui/estados";
 import { CaixaMensagem } from "@/components/ui/formulario";
+import { LimparUrl } from "@/components/ui/limpar-url";
 import { excluirVeiculo } from "@/acoes/veiculos";
 import { exigirContexto } from "@/lib/dal";
 import { formatarPlaca, param } from "@/lib/formato";
@@ -60,6 +61,7 @@ async function Conteudo({
   return (
     <>
       {salvo && <CaixaMensagem tipo="sucesso">Veículo cadastrado.</CaixaMensagem>}
+      {salvo && <LimparUrl />}
       <div className="flex flex-col gap-2">
         <ChipPlaca placa={placa} grande />
         {cliente && (

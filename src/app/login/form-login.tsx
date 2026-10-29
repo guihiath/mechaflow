@@ -1,8 +1,8 @@
 "use client";
 
 import { useRef, useState, type FormEvent } from "react";
-import { Campo } from "@/components/ui/campo";
-import { BotaoEnviar, CaixaMensagem } from "@/components/ui/formulario";
+import { Campo, CampoSenha } from "@/components/ui/campo";
+import { BotaoEnviar, CaixaMensagem, focarPrimeiroErro } from "@/components/ui/formulario";
 import { irParaDestino, lerVoltar, validarEmail } from "@/components/auth/navegar";
 import { traduzirErro } from "@/lib/erros";
 import { createClient } from "@/lib/supabase/client";
@@ -16,14 +16,18 @@ export function FormLogin() {
   async function aoEnviar(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (travado.current) return;
-    const dados = new FormData(e.currentTarget);
+    const form = e.currentTarget;
+    const dados = new FormData(form);
     const email = String(dados.get("email") ?? "").trim().toLowerCase();
     const senha = String(dados.get("senha") ?? "");
 
     const novos = { email: validarEmail(email), senha: senha ? undefined : "Informe a senha." };
     setErros(novos);
     setErro(undefined);
-    if (novos.email || novos.senha) return;
+    if (novos.email || novos.senha) {
+      focarPrimeiroErro(form);
+      return;
+    }
 
     travado.current = true;
     setEnviando(true);
@@ -51,7 +55,7 @@ export function FormLogin() {
         erro={erros.email}
         required
       />
-      <Campo rotulo="Senha" name="senha" type="password" autoComplete="current-password" erro={erros.senha} required />
+      <CampoSenha name="senha" autoComplete="current-password" erro={erros.senha} required />
       {erro && <CaixaMensagem tipo="erro">{erro}</CaixaMensagem>}
       <BotaoEnviar enviando={enviando} rotulo="Entrar" rotuloEnviando="Entrando…" />
     </form>

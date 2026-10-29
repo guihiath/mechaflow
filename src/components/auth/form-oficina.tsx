@@ -2,8 +2,9 @@
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { MailCheck } from "lucide-react";
-import { Campo, CampoTelefone } from "@/components/ui/campo";
-import { BotaoEnviar, CaixaMensagem } from "@/components/ui/formulario";
+import { BotaoLink } from "@/components/ui/botao";
+import { Campo, CampoSenha, CampoTelefone } from "@/components/ui/campo";
+import { BotaoEnviar, CaixaMensagem, focarPrimeiroErro } from "@/components/ui/formulario";
 import { AceiteTermos, ERRO_TERMOS } from "@/components/auth/aceite-termos";
 import { irParaDestino, validarEmail, validarSenha } from "@/components/auth/navegar";
 import { traduzirErro } from "@/lib/erros";
@@ -44,7 +45,8 @@ export function FormOficina({ logado = false }: { logado?: boolean }) {
   async function aoEnviar(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (travado.current) return;
-    const d = new FormData(e.currentTarget);
+    const form = e.currentTarget;
+    const d = new FormData(form);
     const nome = String(d.get("nome") ?? "").trim();
     const nomeOficina = String(d.get("nomeOficina") ?? "").trim();
     const telefone = soDigitos(String(d.get("telefone") ?? ""));
@@ -62,7 +64,10 @@ export function FormOficina({ logado = false }: { logado?: boolean }) {
     };
     setErros(novos);
     setErro(undefined);
-    if (Object.values(novos).some(Boolean)) return;
+    if (Object.values(novos).some(Boolean)) {
+      focarPrimeiroErro(form);
+      return;
+    }
 
     travado.current = true;
     setEnviando(true);
@@ -128,6 +133,9 @@ export function FormOficina({ logado = false }: { logado?: boolean }) {
           depois entre com sua senha para terminar o cadastro da oficina.
         </p>
         <p className="text-base text-texto-suave">Não chegou? Veja a caixa de spam ou espere alguns minutos.</p>
+        <BotaoLink href="/login" variante="secundario">
+          Já confirmei, entrar
+        </BotaoLink>
       </div>
     );
   }
@@ -162,10 +170,8 @@ export function FormOficina({ logado = false }: { logado?: boolean }) {
             ajuda="Vai ser o seu usuário para entrar."
             erro={erros.email}
           />
-          <Campo
-            rotulo="Senha"
+          <CampoSenha
             name="senha"
-            type="password"
             autoComplete="new-password"
             ajuda="Mínimo de 8 caracteres."
             erro={erros.senha}

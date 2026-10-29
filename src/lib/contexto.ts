@@ -22,6 +22,12 @@ export function destinoPorContexto(ctx: MeuContexto | null): string {
   return ctx.papel ? HOME_POR_PAPEL[ctx.papel] : "/bem-vindo";
 }
 
+/** Depois de criar um cliente, so pode voltar para o cadastro de veiculo. */
+export function voltarDoCliente(voltar: string | null | undefined): string | null {
+  const seguro = caminhoSeguro(voltar);
+  return seguro && /^\/veiculos\/novo(\?placa=[A-Z0-9]{0,7})?$/.test(seguro) ? seguro : null;
+}
+
 /** Aceita so caminhos internos (evita redirecionar para outro site). */
 export function caminhoSeguro(voltar: string | null | undefined): string | null {
   if (!voltar || !voltar.startsWith("/") || voltar.startsWith("//") || voltar.includes("\\")) return null;
