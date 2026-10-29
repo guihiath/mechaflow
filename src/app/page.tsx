@@ -18,7 +18,10 @@ export default function Home() {
         <p className="text-lg text-texto-suave">{APP_TAGLINE}</p>
       </div>
 
-      <div className="w-full max-w-[560px]">
+      <div className="flex w-full max-w-[560px] flex-col gap-3">
+        <BotaoLink href="/cadastro" variante="secundario">
+          Criar conta da oficina
+        </BotaoLink>
         <BotaoLink href="/login" variante="primario">
           Entrar
         </BotaoLink>

@@ -1,6 +1,7 @@
 import "server-only";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import type { Database } from "./database.types";
 import { getSupabaseEnv } from "./env";
 
 /**
@@ -11,7 +12,7 @@ export async function createClient() {
   const { url, publishableKey } = getSupabaseEnv();
   const cookieStore = await cookies();
 
-  return createServerClient(url, publishableKey, {
+  return createServerClient<Database>(url, publishableKey, {
     cookies: {
       getAll() {
         return cookieStore.getAll();
@@ -23,7 +24,7 @@ export async function createClient() {
           );
         } catch {
           // Chamado de um Server Component: cookies sao somente leitura aqui.
-          // Pode ignorar se o proxy (proxy.ts) estiver renovando a sessao.
+          // O proxy (src/proxy.ts) renova a sessao antes de cada pagina.
         }
       },
     },

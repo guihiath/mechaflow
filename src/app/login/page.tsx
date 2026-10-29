@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
-import { BotaoLink } from "@/components/ui/botao";
+import Link from "next/link";
+import { TelaSimples } from "@/components/layout/tela-simples";
+import { FormLogin } from "./form-login";
 
 export const metadata: Metadata = {
   title: "Entrar",
@@ -7,19 +9,19 @@ export const metadata: Metadata = {
 
 export default function LoginPage() {
   return (
-    <main className="flex flex-1 flex-col px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-[max(2rem,env(safe-area-inset-top))]">
-      <div className="flex w-full max-w-[560px] flex-1 flex-col justify-center gap-3">
-        <h1 className="text-3xl">Entrar</h1>
-        <p className="text-lg text-texto-suave">
-          Em breve. O acesso da oficina ainda está sendo preparado.
+    <TelaSimples titulo="Entrar" subtitulo="Use o e-mail e a senha da sua conta.">
+      <FormLogin />
+      <div className="flex flex-col gap-2 text-base">
+        <p>
+          É dono de oficina e ainda não tem conta?{" "}
+          <Link href="/cadastro" className="font-bold text-info-texto underline">
+            Criar conta da oficina
+          </Link>
+        </p>
+        <p className="text-texto-suave">
+          Funcionário: peça ao dono o link de convite. Esqueceu a senha? Fale com o dono da oficina.
         </p>
       </div>
-
-      <div className="w-full max-w-[560px]">
-        <BotaoLink href="/" variante="secundario">
-          Voltar ao início
-        </BotaoLink>
-      </div>
-    </main>
+    </TelaSimples>
   );
 }
