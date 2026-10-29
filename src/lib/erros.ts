@@ -71,7 +71,7 @@ const MENSAGENS_AUTH: [RegExp, string][] = [
 
 export type ErroSupabase = { message?: string; code?: string } | null | undefined;
 
-export type ContextoErro = "cliente" | "veiculo" | "catalogo" | "geral";
+export type ContextoErro = "cliente" | "veiculo" | "catalogo" | "os" | "geral";
 
 export function traduzirErro(erro: ErroSupabase, contexto: ContextoErro = "geral"): string {
   if (!erro) return "Algo deu errado. Tente de novo.";
@@ -88,9 +88,11 @@ export function traduzirErro(erro: ErroSupabase, contexto: ContextoErro = "geral
     case "23514":
       return "Algum campo está em formato inválido (ex.: placa).";
     case "23503":
-      return contexto === "cliente"
-        ? "Este cliente tem veículos cadastrados. Remova os veículos antes."
-        : "Registro ligado a outro que não existe ou está em uso.";
+      // Fase 2: OS segura cliente, veiculo e item do catalogo (on delete restrict, ARQUITETURA F2.8/F14).
+      if (contexto === "cliente") return "Este cliente tem veículos ou OS registrados. Ele não pode ser excluído.";
+      if (contexto === "veiculo") return "Este veículo já tem OS registradas. Ele não pode ser excluído.";
+      if (contexto === "catalogo") return "Este item já foi usado em OS. Desative em vez de apagar.";
+      return "Registro ligado a outro que não existe ou está em uso.";
     case "42501":
       return "Você não tem permissão para isso.";
     case "28000":

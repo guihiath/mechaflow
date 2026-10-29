@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, startTransition, useActionState, useContext, useEffect, useRef, type FormEvent, type ReactNode } from "react";
-import { CircleAlert, CircleCheck } from "lucide-react";
+import { CircleAlert, CircleCheck, Info } from "lucide-react";
 import { Botao, type VarianteBotao } from "@/components/ui/botao";
 import type { EstadoAcao } from "@/lib/acao";
 
@@ -150,17 +150,30 @@ function AvisoLento() {
   );
 }
 
-export function CaixaMensagem({ tipo, children }: { tipo: "erro" | "sucesso" | "alerta"; children: ReactNode }) {
-  const cor =
-    tipo === "erro" ? "border-erro text-erro-texto" : tipo === "sucesso" ? "border-sucesso text-sucesso-texto" : "border-alerta text-alerta-texto";
-  const Icone = tipo === "sucesso" ? CircleCheck : CircleAlert;
+export function CaixaMensagem({
+  tipo,
+  children,
+  grande,
+}: {
+  tipo: "erro" | "sucesso" | "alerta" | "info";
+  children: ReactNode;
+  /** Texto de 18px (recado do status para o mecanico, DESIGN §10.10). */
+  grande?: boolean;
+}) {
+  const cor = {
+    erro: "border-erro text-erro-texto",
+    sucesso: "border-sucesso text-sucesso-texto",
+    alerta: "border-alerta text-alerta-texto",
+    info: "border-info text-info-texto",
+  }[tipo];
+  const Icone = tipo === "sucesso" ? CircleCheck : tipo === "info" ? Info : CircleAlert;
   return (
     <div
       role={tipo === "erro" ? "alert" : "status"}
       className={`flex items-start gap-3 rounded-md border-l-4 bg-superficie p-3 ${cor}`}
     >
       <Icone size={22} strokeWidth={2.25} aria-hidden className="mt-0.5 shrink-0" />
-      <p className="text-base font-bold text-texto">{children}</p>
+      <p className={`${grande ? "text-lg" : "text-base"} font-bold text-texto`}>{children}</p>
     </div>
   );
 }
