@@ -153,3 +153,80 @@ export const ROTULO_UNIDADE: Record<UnidadePeca, string> = {
   kg: "Quilo",
   m: "Metro",
 };
+
+// ---------------------------------------------------------------- Fase 2 (OS)
+
+const reaisInteiros = new Intl.NumberFormat("pt-BR", {
+  style: "currency",
+  currency: "BRL",
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 0,
+});
+
+/** Total no card da lista, sem centavos: 345000 -> "R$ 3.450". null -> "". */
+export function formatarReaisInteiros(centavos: number | null | undefined): string {
+  if (centavos === null || centavos === undefined) return "";
+  return reaisInteiros.format(centavos / 100);
+}
+
+const numero = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 });
+
+/** KM / horimetro: 412300 -> "412.300". null -> "". */
+export function formatarNumero(n: number | null | undefined): string {
+  if (n === null || n === undefined || !Number.isFinite(n)) return "";
+  return numero.format(n);
+}
+
+const quantidade = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 3, useGrouping: false });
+
+/** Quantidade de item: 2 -> "2"; 2.5 -> "2,5". */
+export function formatarQuantidade(n: number | null | undefined): string {
+  if (n === null || n === undefined || !Number.isFinite(n)) return "";
+  return quantidade.format(n);
+}
+
+/** Texto digitado ("2,5", "2.5", "3") -> numero. Vazio -> null. Invalido -> NaN. */
+export function textoParaQuantidade(texto: string | null | undefined): number | null {
+  const limpo = (texto ?? "").trim().replace(",", ".");
+  if (!limpo) return null;
+  if (!/^\d+(\.\d{1,3})?$/.test(limpo)) return Number.NaN;
+  return Number(limpo);
+}
+
+const diaMes = new Intl.DateTimeFormat("pt-BR", { timeZone: FUSO, day: "2-digit", month: "2-digit" });
+const hora = new Intl.DateTimeFormat("pt-BR", { timeZone: FUSO, hour: "2-digit", minute: "2-digit" });
+
+/** ISO (UTC) -> "12/09". */
+export function formatarDiaMes(iso: string | null | undefined): string {
+  if (!iso) return "";
+  return diaMes.format(new Date(iso));
+}
+
+/** ISO (UTC) -> "29/10 às 08:14" (America/Sao_Paulo). */
+export function formatarDiaHora(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return `${diaMes.format(d)} às ${hora.format(d)}`;
+}
+
+/**
+ * Tempo desde um momento: "agora", "há 5 min", "há 3 h", "há 2 dias"; mais de 30 dias -> data.
+ * `agora` pode vir do servidor para a lista inteira usar o mesmo relogio.
+ */
+export function formatarTempoDesde(iso: string | null | undefined, agora: Date = new Date()): string {
+  if (!iso) return "";
+  const ms = agora.getTime() - new Date(iso).getTime();
+  const min = Math.floor(ms / 60_000);
+  if (min < 1) return "agora";
+  if (min < 60) return `há ${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `há ${h} h`;
+  const dias = Math.floor(h / 24);
+  if (dias <= 30) return dias === 1 ? "há 1 dia" : `há ${dias} dias`;
+  return formatarData(iso);
+}
+
+/** "OS #1042". */
+export function formatarNumeroOS(numeroOS: number | string): string {
+  return `OS #${numeroOS}`;
+}

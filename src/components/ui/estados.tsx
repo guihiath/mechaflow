@@ -3,7 +3,10 @@ import type { ComponentType, ReactNode } from "react";
 import { CircleAlert, Inbox } from "lucide-react";
 import { classesBotao } from "@/components/ui/botao";
 
-/** Estado vazio (DESIGN 5.8): icone, titulo, uma frase e o botao que resolve. */
+/**
+ * Estado vazio (DESIGN 5.8): icone, titulo, uma frase e o botao que resolve.
+ * `acao.variante`: "primario" (padrao) ou "secundario" (ex.: "Atualizar" do mecanico, DESIGN §10.10).
+ */
 export function EstadoVazio({
   titulo,
   texto,
@@ -13,7 +16,7 @@ export function EstadoVazio({
   titulo: string;
   texto?: string;
   icone?: ComponentType<{ size?: number; strokeWidth?: number; "aria-hidden"?: boolean; className?: string }>;
-  acao?: { href: string; rotulo: string };
+  acao?: { href: string; rotulo: string; variante?: "primario" | "secundario" };
 }) {
   return (
     <div className="flex flex-col items-start gap-3 rounded-lg border border-borda-sutil bg-superficie p-6">
@@ -21,7 +24,7 @@ export function EstadoVazio({
       <h2 className="text-xl">{titulo}</h2>
       {texto && <p className="text-base text-texto-suave">{texto}</p>}
       {acao && (
-        <Link href={acao.href} className={classesBotao("primario", "mt-2 sm:w-auto")}>
+        <Link href={acao.href} className={classesBotao(acao.variante ?? "primario", "mt-2 sm:w-auto")}>
           {acao.rotulo}
         </Link>
       )}
@@ -99,9 +102,12 @@ export function Cartao({
   href,
   faixa,
   className,
+  rotulo,
 }: {
   children: ReactNode;
   href?: string;
+  /** aria-label do link (ex.: "OS 1042, placa ABC1D23, Transportes Silva, Em andamento"). */
+  rotulo?: string;
   /** classe de cor da faixa esquerda, ex.: "bg-alerta" */
   faixa?: string;
   className?: string;
@@ -116,7 +122,7 @@ export function Cartao({
     </>
   );
   return href ? (
-    <Link href={href} className={classe}>
+    <Link href={href} className={classe} aria-label={rotulo}>
       {corpo}
     </Link>
   ) : (
