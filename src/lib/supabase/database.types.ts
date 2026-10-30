@@ -380,7 +380,6 @@ export type Database = {
           modo: Database["public"]["Enums"]["modo_os"]
           motivo_cancelamento: string | null
           numero: number
-          observacoes: string | null
           oficina_id: string
           orcamento_aprovado_em: string | null
           orcamento_enviado_em: string | null
@@ -411,7 +410,6 @@ export type Database = {
           modo: Database["public"]["Enums"]["modo_os"]
           motivo_cancelamento?: string | null
           numero: number
-          observacoes?: string | null
           oficina_id?: string
           orcamento_aprovado_em?: string | null
           orcamento_enviado_em?: string | null
@@ -421,8 +419,9 @@ export type Database = {
           status: Database["public"]["Enums"]["status_os"]
           veiculo_id: string
         }
-        // UPDATE direto: so km, horimetro, sintoma_relatado, observacoes,
-        // codigo_falha, causa_encontrada, solucao_aplicada (dono/atendente).
+        // UPDATE direto: so km, horimetro, sintoma_relatado, codigo_falha,
+        // causa_encontrada, solucao_aplicada (dono/atendente). A observacao do
+        // balcao saiu daqui (Fase 3, F3-A3): fica em os_comercial.observacoes.
         Update: {
           atualizado_em?: string
           autorizado_em?: string | null
@@ -443,7 +442,6 @@ export type Database = {
           modo?: Database["public"]["Enums"]["modo_os"]
           motivo_cancelamento?: string | null
           numero?: number
-          observacoes?: string | null
           oficina_id?: string
           orcamento_aprovado_em?: string | null
           orcamento_enviado_em?: string | null
@@ -491,6 +489,7 @@ export type Database = {
           autorizado_por_nome: string | null
           autorizado_por_telefone: string | null
           motivo_cancelamento_texto: string | null
+          observacoes: string | null
           forma_pagamento: Database["public"]["Enums"]["forma_pagamento"] | null
           oficina_id: string
           orcamento_aprovacao_canal: Database["public"]["Enums"]["canal_resposta"] | null
@@ -501,13 +500,14 @@ export type Database = {
           pago_em: string | null
           valor_aprovado_centavos: number | null
         }
-        // Escrita so pelas RPCs.
+        // Escrita so pelas RPCs; UPDATE direto so de observacoes (dono/atendente).
         Insert: {
           atualizado_em?: string
           autorizacao_registrada_por?: string | null
           autorizado_por_nome?: string | null
           autorizado_por_telefone?: string | null
           motivo_cancelamento_texto?: string | null
+          observacoes?: string | null
           forma_pagamento?: Database["public"]["Enums"]["forma_pagamento"] | null
           oficina_id?: string
           orcamento_aprovacao_canal?: Database["public"]["Enums"]["canal_resposta"] | null
@@ -524,6 +524,7 @@ export type Database = {
           autorizado_por_nome?: string | null
           autorizado_por_telefone?: string | null
           motivo_cancelamento_texto?: string | null
+          observacoes?: string | null
           forma_pagamento?: Database["public"]["Enums"]["forma_pagamento"] | null
           oficina_id?: string
           orcamento_aprovacao_canal?: Database["public"]["Enums"]["canal_resposta"] | null
@@ -539,6 +540,62 @@ export type Database = {
             foreignKeyName: "os_comercial_os_fk"
             columns: ["os_id", "oficina_id"]
             isOneToOne: true
+            referencedRelation: "ordens_servico"
+            referencedColumns: ["id", "oficina_id"]
+          },
+        ]
+      }
+      os_fotos: {
+        Row: {
+          altura: number
+          caminho: string
+          caminho_miniatura: string
+          categoria: Database["public"]["Enums"]["categoria_foto"]
+          criado_em: string
+          criado_por: string | null
+          enviada_em: string | null
+          id: string
+          largura: number
+          legenda: string | null
+          oficina_id: string
+          os_id: string
+          tamanho_bytes: number
+          tamanho_miniatura_bytes: number
+        }
+        // Escrita so pelas RPCs registrar_foto / confirmar_foto / apagar_foto.
+        Insert: {
+          altura: number
+          categoria?: Database["public"]["Enums"]["categoria_foto"]
+          criado_em?: string
+          criado_por?: string | null
+          enviada_em?: string | null
+          id: string
+          largura: number
+          legenda?: string | null
+          oficina_id: string
+          os_id: string
+          tamanho_bytes: number
+          tamanho_miniatura_bytes: number
+        }
+        Update: {
+          altura?: number
+          categoria?: Database["public"]["Enums"]["categoria_foto"]
+          criado_em?: string
+          criado_por?: string | null
+          enviada_em?: string | null
+          id?: string
+          largura?: number
+          legenda?: string | null
+          oficina_id?: string
+          os_id?: string
+          tamanho_bytes?: number
+          tamanho_miniatura_bytes?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "os_fotos_os_fk"
+            columns: ["os_id", "oficina_id"]
+            isOneToOne: false
             referencedRelation: "ordens_servico"
             referencedColumns: ["id", "oficina_id"]
           },
@@ -622,11 +679,14 @@ export type Database = {
           chave_idempotencia: string | null
           criado_em: string
           descricao: string
+          apos_aprovacao: boolean
           id: string
+          lancado_pelo_mecanico: boolean
           lancado_por: string | null
           oficina_id: string
           os_id: string
           peca_id: string | null
+          precificado_pelo_balcao_em: string | null
           quantidade: number
           servico_id: string | null
           tipo: Database["public"]["Enums"]["tipo_item_os"]
@@ -637,7 +697,9 @@ export type Database = {
           chave_idempotencia?: string | null
           criado_em?: string
           descricao: string
+          apos_aprovacao?: boolean
           id?: string
+          lancado_pelo_mecanico?: boolean
           lancado_por?: string | null
           oficina_id?: string
           os_id: string
@@ -647,13 +709,17 @@ export type Database = {
           tipo: Database["public"]["Enums"]["tipo_item_os"]
           unidade?: string
         }
-        // UPDATE direto: so descricao, quantidade e unidade.
+        // UPDATE direto: so descricao, quantidade e unidade (dono/atendente).
+        // O mecanico usa as RPCs adicionar_item_os / alterar_item_mecanico / remover_item_mecanico.
+        // lancado_pelo_mecanico, apos_aprovacao, precificado_pelo_balcao_em: gravados por trigger.
         Update: {
+          apos_aprovacao?: boolean
           atualizado_em?: string
           chave_idempotencia?: string | null
           criado_em?: string
           descricao?: string
           id?: string
+          lancado_pelo_mecanico?: boolean
           lancado_por?: string | null
           oficina_id?: string
           os_id?: string
@@ -920,7 +986,8 @@ export type Database = {
       vw_os: {
         // Mecanico: cliente_telefone, autorizado_por_*, orcamento_aprovado_por_nome,
         // orcamento_aprovacao_canal, *_registrada_por_nome, valor_aprovado_centavos,
-        // forma_pagamento, pago_em, totais e qtd/itens_sem_preco vem NULL.
+        // forma_pagamento, pago_em, totais, qtd/itens_sem_preco, itens_mecanico,
+        // itens_apos_aprovacao e observacoes (Fase 3) vem NULL. qtd_fotos: todos.
         // Atendente: custo_total_centavos NULL.
         Row: {
           atualizado_em: string | null
@@ -944,6 +1011,8 @@ export type Database = {
           horimetro: number | null
           id: string | null
           iniciado_em: string | null
+          itens_apos_aprovacao: number | null
+          itens_mecanico: number | null
           itens_sem_preco: number | null
           km: number | null
           mecanico_id: string | null
@@ -962,6 +1031,7 @@ export type Database = {
           pago_em: string | null
           placa: string | null
           pronta_em: string | null
+          qtd_fotos: number | null
           qtd_itens: number | null
           sintoma_relatado: string | null
           solucao_aplicada: string | null
@@ -975,6 +1045,27 @@ export type Database = {
           veiculo_marca: string | null
           veiculo_modelo: string | null
           veiculo_tipo: Database["public"]["Enums"]["tipo_veiculo"] | null
+        }
+        Relationships: []
+      }
+      vw_os_fotos: {
+        // So fotos enviadas (enviada_em preenchido). pode_apagar: regra de quem consulta.
+        Row: {
+          altura: number | null
+          caminho: string | null
+          caminho_miniatura: string | null
+          categoria: Database["public"]["Enums"]["categoria_foto"] | null
+          criado_em: string | null
+          criado_por: string | null
+          criado_por_nome: string | null
+          enviada_em: string | null
+          id: string | null
+          largura: number | null
+          legenda: string | null
+          oficina_id: string | null
+          os_id: string | null
+          pode_apagar: boolean | null
+          tamanho_bytes: number | null
         }
         Relationships: []
       }
@@ -996,18 +1087,23 @@ export type Database = {
       vw_os_itens: {
         // Mecanico: preco_unitario_centavos, subtotal_centavos e custo_unitario_centavos NULL.
         // Atendente: custo_unitario_centavos NULL.
+        // mecanico_pode_alterar: true so para o mecanico, nos itens que ele pode alterar/remover agora.
         Row: {
+          apos_aprovacao: boolean | null
           atualizado_em: string | null
           criado_em: string | null
           custo_unitario_centavos: number | null
           descricao: string | null
           id: string | null
+          lancado_pelo_mecanico: boolean | null
           lancado_por: string | null
           lancado_por_nome: string | null
+          mecanico_pode_alterar: boolean | null
           oficina_id: string | null
           os_id: string | null
           peca_id: string | null
           peca_pendente_precificacao: boolean | null
+          precificado_pelo_balcao_em: string | null
           preco_unitario_centavos: number | null
           quantidade: number | null
           servico_id: string | null
@@ -1021,6 +1117,8 @@ export type Database = {
         // Mecanico: 0 linhas. custo_total_centavos/pecas_sem_custo: so dono.
         Row: {
           custo_total_centavos: number | null
+          itens_apos_aprovacao: number | null
+          itens_mecanico: number | null
           itens_sem_preco: number | null
           oficina_id: string | null
           os_id: string | null
@@ -1124,8 +1222,22 @@ export type Database = {
         }
         Returns: string
       }
+      alterar_item_mecanico: {
+        // So mecanico, item dele, OS dele em aguardando_orcamento/aprovada/em_andamento, antes do balcao precificar.
+        Args: { p_descricao?: string; p_item_id: string; p_quantidade?: number; p_unidade?: string }
+        Returns: undefined
+      }
+      apagar_foto: {
+        // Apagar os arquivos no Storage ANTES. false = ja nao existia.
+        Args: { p_id: string }
+        Returns: boolean
+      }
       atribuir_mecanico: {
         Args: { p_mecanico_id: string | null; p_os_id: string }
+        Returns: undefined
+      }
+      confirmar_foto: {
+        Args: { p_id: string }
         Returns: undefined
       }
       dados_da_placa: {
@@ -1176,6 +1288,25 @@ export type Database = {
         }
         Returns: undefined
       }
+      registrar_foto: {
+        Args: {
+          p_altura: number
+          p_categoria?: Database["public"]["Enums"]["categoria_foto"]
+          p_id: string
+          p_largura: number
+          p_legenda?: string
+          p_os_id: string
+          p_tamanho_bytes: number
+          p_tamanho_miniatura_bytes: number
+        }
+        Returns: {
+          caminho: string
+          caminho_miniatura: string
+          enviada: boolean
+          id: string
+          ja_existia: boolean
+        }[]
+      }
       registrar_pagamento: {
         Args: {
           p_forma_pagamento: Database["public"]["Enums"]["forma_pagamento"]
@@ -1195,6 +1326,11 @@ export type Database = {
           p_quem_respondeu?: string
         }
         Returns: undefined
+      }
+      remover_item_mecanico: {
+        // false = o item ja nao existia (reenvio).
+        Args: { p_item_id: string }
+        Returns: boolean
       }
       trocar_modo_os: {
         Args: {
@@ -1278,6 +1414,7 @@ export type Database = {
     }
     Enums: {
       canal_resposta: "telefone" | "whatsapp" | "presencial" | "link"
+      categoria_foto: "diagnostico" | "peca_defeituosa" | "peca_trocada" | "antes" | "depois" | "entrega" | "outro"
       forma_pagamento: "pix" | "dinheiro" | "cartao_debito" | "cartao_credito" | "boleto" | "faturado"
       modo_atendimento_cliente: "exige_orcamento" | "servico_direto"
       modo_os: "com_orcamento" | "direto"
@@ -1403,6 +1540,7 @@ export const Constants = {
   public: {
     Enums: {
       canal_resposta: ["telefone", "whatsapp", "presencial", "link"],
+      categoria_foto: ["diagnostico", "peca_defeituosa", "peca_trocada", "antes", "depois", "entrega", "outro"],
       forma_pagamento: ["pix", "dinheiro", "cartao_debito", "cartao_credito", "boleto", "faturado"],
       modo_atendimento_cliente: ["exige_orcamento", "servico_direto"],
       modo_os: ["com_orcamento", "direto"],

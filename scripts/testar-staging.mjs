@@ -472,7 +472,7 @@ async function testesFase2({ donoA, mec, at, donoB, ofA, ofB, vei, serv, peca })
   checar("dono B: nao cria item em OS da A (RPC)", msg(bItem) === "os_nao_encontrada", msg(bItem));
   const bItemDireto = await donoB.sb.from("os_itens").insert({ os_id: c1.data?.os_id, tipo: "servico", descricao: "invasao" });
   checar("dono B: nao cria item em OS da A (insert direto)", Boolean(bItemDireto.error), bItemDireto.error?.code);
-  const bUpd = await donoB.sb.from("ordens_servico").update({ observacoes: "invasao" }).eq("id", c1.data?.os_id).select("id");
+  const bUpd = await donoB.sb.from("ordens_servico").update({ sintoma_relatado: "invasao" }).eq("id", c1.data?.os_id).select("id");
   checar("dono B: update em OS da A afeta 0 linhas", !bUpd.error && bUpd.data?.length === 0, bUpd.error?.code);
   const bVei = await donoB.sb.rpc("abrir_os", { p_chave_idempotencia: uuid(), p_veiculo_id: vei?.id, p_km: 1, p_sintoma_relatado: "x", p_modo: "com_orcamento" });
   checar("dono B: nao abre OS com veiculo da A", msg(bVei) === "veiculo_nao_encontrado", msg(bVei));

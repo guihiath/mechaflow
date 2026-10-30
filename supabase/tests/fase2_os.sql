@@ -325,8 +325,10 @@ begin
   assert public.zz_estado($q$ select public.adicionar_item_os(gen_random_uuid(), current_setting('teste.os1')::uuid,
       'servico', p_descricao => 'X', p_preco_unitario_centavos => 1) $q$) in ('42501', 'P0001'),
     'mecanico gravou preco';
-  assert public.zz_erro(format($q$ select public.adicionar_item_os(gen_random_uuid(), %L, 'servico', p_descricao => 'X') $q$, os1))
-    = 'os_nao_esta_em_andamento', 'mecanico lancou item fora de em_andamento';
+  -- (Fase 3, migracao 05: o mecanico passou a lancar tambem em aprovada; os
+  --  status proibidos sao testados em fase3_mecanico_fotos.sql)
+  assert public.zz_erro(format($q$ select public.adicionar_item_os(gen_random_uuid(), %L, 'servico', p_descricao => 'X') $q$, os2))
+    = 'os_nao_encontrada', 'mecanico lancou item em OS que nao e dele';
 
   -- proibido para o mecanico
   assert public.zz_estado(format($q$ select public.mudar_status_os(%L, 'aprovada', 'cancelada', 'teste') $q$, os1))
@@ -352,16 +354,15 @@ begin
   perform public.mudar_status_os(os1, 'aprovada', 'em_andamento');
   assert exists (select 1 from public.os_historico where os_id = os1 and evento = 'desfazer'), 'desfazer nao registrado';
 
-  -- Fase 3: lanca servico do catalogo (preco vem sozinho, ele nao ve) e servico avulso direto
+  -- Fase 3: lanca servico do catalogo (preco vem sozinho, ele nao ve) e servico avulso.
+  -- (migracao 05: o mecanico so escreve em os_itens pela RPC; peca avulsa
+  --  passou a ser permitida - decisao 2 do CEO -, testada no fase3)
   perform set_config('teste.item_mec', public.adicionar_item_os('bbbbbbbb-0000-4000-8000-000000000001', os1, 'servico',
                      p_servico_id => current_setting('teste.servico')::uuid)::text, true);
-  insert into public.os_itens (os_id, tipo, descricao, lancado_por)
-  values (os1, 'servico', 'Limpeza de bico', '00000000-0000-4000-8000-0000000002a2');
+  perform public.adicionar_item_os('bbbbbbbb-0000-4000-8000-000000000002', os1, 'servico', p_descricao => 'Limpeza de bico');
   assert public.zz_estado(format($q$ insert into public.os_itens (os_id, tipo, descricao, lancado_por)
-      values (%L, 'peca', 'Peca avulsa', '00000000-0000-4000-8000-0000000002a2') $q$, os1)) = '42501',
-    'mecanico lancou peca avulsa (deveria ser do catalogo, pendente)';
-  assert public.zz_estado(format($q$ select public.adicionar_item_os(gen_random_uuid(), %L, 'peca', p_descricao => 'Avulsa') $q$, os1))
-    = 'P0001', 'mecanico lancou peca avulsa pela RPC';
+      values (%L, 'servico', 'Insert direto', '00000000-0000-4000-8000-0000000002a2') $q$, os1)) = '42501',
+    'mecanico inseriu item direto na tabela (deveria ser so pela RPC)';
 
   -- Pronta com causa e solucao (so isso)
   perform public.marcar_pronta(os1, 'Sensor de pressao com defeito', 'Troca do sensor');

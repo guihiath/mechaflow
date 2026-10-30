@@ -55,6 +55,17 @@ const MENSAGENS: Record<string, string> = {
   unidade_invalida: "Unidade inválida.",
   catalogo_item_nao_encontrado: "Item do catálogo não encontrado.",
   peca_do_catalogo_obrigatoria: "Escolha a peça no catálogo (ou cadastre uma nova).",
+  // Fase 3 — itens do mecânico e fotos (docs/ARQUITETURA.md, Fase 3, §F3.9)
+  status_nao_permite_itens: "Nesta etapa da OS não dá para lançar ou mudar itens. Fale com o balcão.",
+  item_nao_encontrado: "Item não encontrado. Ele pode ter sido removido.",
+  item_de_outra_pessoa: "Você só pode mudar os itens que você lançou.",
+  item_ja_precificado: "O balcão já deu preço a este item. Para mudar, fale com o balcão.",
+  foto_invalida: "Não deu para registrar esta foto. Tire de novo.",
+  foto_grande_demais: "A foto ficou grande demais (máximo 5 MB). Tire de novo.",
+  limite_fotos: "Esta OS já tem 40 fotos. Apague alguma para enviar outra.",
+  foto_nao_enviada: "A foto ainda não chegou. Toque em “Tentar de novo”.",
+  foto_nao_encontrada: "Foto não encontrada. Ela pode ter sido apagada.",
+  foto_nao_pode_apagar: "Você não pode apagar esta foto.",
 };
 
 /** Mensagens do Supabase Auth (signUp / signIn), que vêm em inglês. */
