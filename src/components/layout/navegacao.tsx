@@ -15,7 +15,7 @@ import {
   LogOut,
 } from "lucide-react";
 import type { Papel } from "@/lib/contexto";
-import { sair } from "@/acoes/sessao";
+import { FormSair } from "@/components/fotos/form-sair";
 import { APP_NAME } from "@/lib/brand";
 
 type Item = { href: string; rotulo: string; icone: typeof House; ativoEm?: string[] };
@@ -117,15 +117,10 @@ export function Navegacao({ papel, oficina }: { papel: Papel; oficina: string | 
             );
           })}
         </ul>
-        <form action={sair} className="p-3">
-          <button
-            type="submit"
-            className="flex h-12 w-full items-center gap-3 rounded-md px-2 text-lg font-bold text-[#B4B0A8] hover:bg-white/5"
-          >
+        <FormSair className="p-3" botaoClassName="flex h-12 w-full items-center gap-3 rounded-md px-2 text-lg font-bold text-[#B4B0A8] hover:bg-white/5">
             <LogOut size={24} strokeWidth={2.25} aria-hidden />
             Sair
-          </button>
-        </form>
+          </FormSair>
       </nav>
 
       {/* Celular/tablet: barra inferior 64px + safe area */}

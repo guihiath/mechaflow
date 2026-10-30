@@ -1,158 +1,363 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useEffect, useId, useRef, useState, type ChangeEvent } from "react";
-import { Camera, ImageOff, Images, RotateCcw } from "lucide-react";
-import { Botao, classesBotao } from "@/components/ui/botao";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { Camera, Images } from "lucide-react";
+import { classesBotao } from "@/components/ui/botao";
 import { CaixaMensagem } from "@/components/ui/formulario";
+import { FaixaEnvioFotos } from "@/components/os/faixa-envio-fotos";
+import { FolhaEditarFoto } from "@/components/os/escolha-categoria-foto";
+import { FotoTelaCheia, type FotoTelaCheiaDados } from "@/components/os/foto-tela-cheia";
+import { fotos as nFotos } from "@/components/os/categorias-foto";
+import { GradeFotos, type DadosMiniaturaFoto } from "@/components/os/grade-fotos";
 import { EH_PRODUCAO } from "@/lib/brand";
-import { formatarDiaHora, ROTULO_CATEGORIA_FOTO, type CategoriaFoto } from "@/lib/formato";
-import { enviarFoto, ErroEnvio, guardarDiagnostico, novoIdFoto, type EtapaEnvio } from "@/lib/fotos/enviar";
-import { ErroFoto, prepararFoto, type FotoPreparada } from "@/lib/fotos/preparar";
-import { LIMITE_FOTOS_OS } from "@/lib/fotos/regras";
+import type { Papel } from "@/lib/contexto";
+import { traduzirErro } from "@/lib/erros";
+import { CATEGORIAS_FOTO, type CategoriaFoto } from "@/lib/formato";
+import { aquecerConexao } from "@/lib/fotos/enviar";
+import { adicionarArquivos, aoConfirmarFoto, definirTipo, descartar, iniciarFila, tentarDeNovo, type ItemFila } from "@/lib/fotos/fila";
+import { BUCKET_FOTOS, LIMITE_FOTOS_OS, VALIDADE_URL_FOTO_S } from "@/lib/fotos/regras";
+import { createClient } from "@/lib/supabase/client";
+import { AjudaCamera } from "./ajuda-camera";
+import { FolhaTipoFoto } from "./folha-tipo-foto";
+import { useFila, useSituacaoEnvio } from "./usar-fila";
 
+/** Foto enviada (de `vw_os_fotos`), já com a URL assinada da miniatura. */
 export type FotoDaGrade = {
   id: string;
   categoria: CategoriaFoto;
   legenda: string | null;
+  caminho: string;
+  caminhoMiniatura: string;
   /** URL assinada da miniatura (15 min); null = não deu para assinar. */
   url: string | null;
   criadoPorNome: string | null;
   enviadaEm: string | null;
+  /** Regra do banco para quem consulta (apagar e editar tipo/legenda usam a mesma). */
+  podeApagar: boolean;
 };
 
-type Fase = "preparando" | EtapaEnvio | "erro";
+/** Renova as URLs assinadas 2 min antes de vencer (valem 15 min). */
+const RENOVAR_MS = (VALIDADE_URL_FOTO_S - 120) * 1000;
 
-type Envio = {
-  id: string;
-  fase: Fase;
-  mensagem?: string;
-  preparada?: FotoPreparada;
-  previa?: string;
-};
+const ehCategoria = (c: string | null | undefined): c is CategoriaFoto => (CATEGORIAS_FOTO as readonly string[]).includes(c ?? "");
 
-type Recente = { id: string; previa: string };
+function semChave<T>(obj: Record<string, T>, chave: string): Record<string, T> {
+  const copia = { ...obj };
+  delete copia[chave];
+  return copia;
+}
 
-const PROGRESSO: Record<Exclude<Fase, "erro">, number> = {
-  preparando: 10,
-  registrando: 25,
-  enviando_miniatura: 40,
-  enviando_foto: 60,
-  confirmando: 90,
-};
-
-const TEXTO_FASE: Record<Exclude<Fase, "erro">, string> = {
-  preparando: "Preparando a foto…",
-  registrando: "Registrando…",
-  enviando_miniatura: "Enviando…",
-  enviando_foto: "Enviando…",
-  confirmando: "Conferindo…",
-};
+/** Lê a lista e assina as miniaturas direto do navegador (Supabase em São Paulo, sem passar pela Vercel). */
+async function lerLista(osId: string): Promise<FotoDaGrade[] | null> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("vw_os_fotos")
+    .select("id, categoria, legenda, caminho, caminho_miniatura, criado_por_nome, enviada_em, pode_apagar")
+    .eq("os_id", osId)
+    .order("enviada_em", { ascending: false });
+  if (error) return null;
+  const linhas = (data ?? []).filter((f) => f.id && f.caminho && f.caminho_miniatura);
+  const urls = new Map<string, string>();
+  if (linhas.length) {
+    const { data: assinadas } = await supabase.storage.from(BUCKET_FOTOS).createSignedUrls(
+      linhas.map((f) => f.caminho_miniatura!),
+      VALIDADE_URL_FOTO_S,
+    );
+    for (const s of assinadas ?? []) if (s.path && s.signedUrl && !s.error) urls.set(s.path, s.signedUrl);
+  }
+  return linhas.map((f) => ({
+    id: f.id!,
+    categoria: ehCategoria(f.categoria) ? f.categoria : "outro",
+    legenda: f.legenda,
+    caminho: f.caminho!,
+    caminhoMiniatura: f.caminho_miniatura!,
+    url: urls.get(f.caminho_miniatura!) ?? null,
+    criadoPorNome: f.criado_por_nome,
+    enviadaEm: f.enviada_em,
+    podeApagar: Boolean(f.pode_apagar),
+  }));
+}
 
 /**
- * Seção "Fotos" do detalhe da OS — versão mínima da Fase 3 (F3-B2):
- * 1 foto por vez, tipo "Outro", sem fila guardada no aparelho e sem apagar.
- * Fluxo: prepara no celular → registrar_foto → sobe miniatura e foto → confirmar_foto.
+ * Seção "Fotos" do detalhe da OS (DESIGN §11.5 a §11.8, F3-B5), para todos os papéis:
+ * várias fotos de uma vez, tipo (tocar já envia) e legenda, fila guardada no aparelho com
+ * progresso / falhou / "Tentar de novo", grade de miniaturas, tela cheia com editar e apagar.
+ * O que cada um pode fazer vem do banco (`pode_apagar`, F3.4); a tela só mostra o permitido.
  */
 export function FotosOS({
   osId,
+  numeroOS,
+  usuarioId,
+  papel,
   podeEnviar,
   fotos,
+  assinadasEm,
   erroLista,
-  ehMecanico,
 }: {
   osId: string;
+  numeroOS: number | null;
+  usuarioId: string;
+  papel: Papel;
   podeEnviar: boolean;
   fotos: FotoDaGrade[];
+  /** Quando o servidor assinou as miniaturas (ms). */
+  assinadasEm: number;
   erroLista?: boolean;
-  ehMecanico?: boolean;
 }) {
-  const router = useRouter();
+  const ehMecanico = papel === "mecanico";
   const idCamera = useId();
   const idGaleria = useId();
-  const [envio, setEnvio] = useState<Envio | null>(null);
-  const [recentes, setRecentes] = useState<Recente[]>([]);
-  const [aviso, setAviso] = useState<string | null>(null);
-  const urls = useRef<string[]>([]);
+  const secao = useRef<HTMLElement>(null);
 
-  const ocupado = Boolean(envio && envio.fase !== "erro");
-  const idsServidor = new Set(fotos.map((f) => f.id));
-  const pendentesNaTela = recentes.filter((r) => !idsServidor.has(r.id));
-  const total = fotos.length + pendentesNaTela.length;
-  const cheio = total >= LIMITE_FOTOS_OS;
-
-  // Libera as prévias locais ao sair da tela.
-  useEffect(() => {
-    const lista = urls.current;
-    return () => lista.forEach((u) => URL.revokeObjectURL(u));
-  }, []);
-
-  // Aviso ao sair com envio em andamento (não há envio em segundo plano nesta fase).
-  useEffect(() => {
-    if (!ocupado) return;
-    const aoSair = (e: BeforeUnloadEvent) => e.preventDefault();
-    window.addEventListener("beforeunload", aoSair);
-    return () => window.removeEventListener("beforeunload", aoSair);
-  }, [ocupado]);
-
-  async function mandar(atual: Envio & { preparada: FotoPreparada }) {
-    try {
-      const r = await enviarFoto({
-        id: atual.id,
-        osId,
-        preparada: atual.preparada,
-        aoMudarEtapa: (fase) => setEnvio((e) => (e && e.id === atual.id ? { ...e, fase } : e)),
-      });
-      guardarDiagnostico({ osId, fotoId: atual.id, resultado: "enviada", preparo: atual.preparada.diag, envio: r });
-      if (atual.previa) setRecentes((l) => [{ id: atual.id, previa: atual.previa! }, ...l]);
-      setEnvio(null);
-      setAviso("Foto enviada.");
-      router.refresh();
-    } catch (e) {
-      const mensagem = e instanceof Error && e.message ? e.message : "Não deu para enviar a foto. Toque em “Tentar de novo”.";
-      guardarDiagnostico({
-        osId,
-        fotoId: atual.id,
-        resultado: "erro",
-        erro: e instanceof ErroEnvio ? `${e.message} (${e.detalhe})` : String(e),
-        etapaErro: e instanceof ErroEnvio ? e.etapa : undefined,
-        preparo: atual.preparada.diag,
-      });
-      setEnvio({ ...atual, fase: "erro", mensagem });
-    }
+  // Lista do servidor; depois de cada envio/apagar/renovar, relida pelo navegador.
+  const [origem, setOrigem] = useState(fotos);
+  const [lista, setLista] = useState(fotos);
+  const [assinadas, setAssinadas] = useState(assinadasEm);
+  const [erro, setErro] = useState(Boolean(erroLista));
+  if (origem !== fotos) {
+    setOrigem(fotos);
+    setLista(fotos);
+    setAssinadas(assinadasEm);
+    setErro(Boolean(erroLista));
   }
 
-  async function aoEscolher(ev: ChangeEvent<HTMLInputElement>) {
-    const arquivo = ev.target.files?.[0];
-    ev.target.value = ""; // deixa escolher o mesmo arquivo de novo
-    if (!arquivo || ocupado) return;
-    setAviso(null);
-    const id = novoIdFoto();
-    setEnvio({ id, fase: "preparando" });
-    let preparada: FotoPreparada;
-    try {
-      preparada = await prepararFoto(arquivo);
-    } catch (e) {
-      const mensagem = e instanceof ErroFoto ? e.message : "Não deu para preparar a foto. Tente de novo.";
-      guardarDiagnostico({ osId, fotoId: null, resultado: "erro", etapaErro: "preparo", erro: `${mensagem} (${String((e as Error)?.cause ?? e)})` });
-      setEnvio({ id, fase: "erro", mensagem });
+  const fila = useFila();
+  const daOS = useMemo(() => fila.itens.filter((i) => i.osId === osId && i.usuarioId === usuarioId), [fila.itens, osId, usuarioId]);
+  const naGrade = daOS.filter((i) => i.categoria !== null);
+  const { situacao, zerar } = useSituacaoEnvio(fila.itens, (i) => i.osId === osId);
+
+  const [lote, setLote] = useState<{ ids: string[]; cortadas: number; chave: number } | null>(null);
+  const loteItens = lote ? daOS.filter((i) => lote.ids.includes(i.id)) : [];
+  const [tela, setTela] = useState<{ aberta: boolean; indice: number }>({ aberta: false, indice: 0 });
+  const [grandes, setGrandes] = useState<Record<string, { url: string; vence: number }>>({});
+  const [editando, setEditando] = useState<string | null>(null);
+
+  // ------------------------------------------------ fila do aparelho e conexão
+  useEffect(() => {
+    void iniciarFila(usuarioId);
+  }, [usuarioId]);
+
+  // Aquece a sessão e a conexão com o Supabase logo ao abrir a OS (1º envio sem esperar token + TLS).
+  useEffect(() => {
+    if (!podeEnviar) return;
+    const t = setTimeout(() => void aquecerConexao(), 800);
+    return () => clearTimeout(t);
+  }, [podeEnviar]);
+
+  const recarregar = useCallback(async () => {
+    const nova = await lerLista(osId);
+    if (nova === null) {
+      setErro(true);
       return;
     }
-    const previa = URL.createObjectURL(preparada.mini);
-    urls.current.push(previa);
-    const atual = { id, fase: "registrando" as const, preparada, previa };
-    setEnvio(atual);
-    await mandar(atual);
+    setErro(false);
+    setLista(nova);
+    setAssinadas(Date.now());
+  }, [osId]);
+
+  useEffect(() => aoConfirmarFoto((o) => o === osId && void recarregar()), [osId, recarregar]);
+
+  // URL assinada vencendo com a tela aberta: renova sozinha (e ao voltar para a aba).
+  useEffect(() => {
+    const falta = Math.max(5_000, assinadas + RENOVAR_MS - Date.now());
+    const t = setTimeout(() => void recarregar(), falta);
+    const aoVoltar = () => {
+      if (document.visibilityState === "visible" && Date.now() - assinadas > RENOVAR_MS) void recarregar();
+    };
+    document.addEventListener("visibilitychange", aoVoltar);
+    return () => {
+      clearTimeout(t);
+      document.removeEventListener("visibilitychange", aoVoltar);
+    };
+  }, [assinadas, recarregar]);
+
+  // ------------------------------------------------ contagem e limite de 40
+  const idsServidor = new Set(lista.map((f) => f.id));
+  const naFilaPendentes = daOS.filter((i) => !idsServidor.has(i.id) && i.estado !== "nao_enviavel");
+  const total = lista.length + naFilaPendentes.filter((i) => i.categoria !== null).length;
+  const ocupadas = lista.length + naFilaPendentes.length;
+  const cabem = Math.max(0, LIMITE_FOTOS_OS - ocupadas);
+  const cheio = cabem === 0;
+  const retomadas = daOS.filter((i) => i.retomada && i.estado !== "confirmada" && i.estado !== "nao_enviavel");
+
+  // ------------------------------------------------ escolher fotos
+  function aoEscolher(ev: ChangeEvent<HTMLInputElement>) {
+    const arquivos = Array.from(ev.target.files ?? []);
+    ev.target.value = ""; // deixa escolher o mesmo arquivo de novo
+    if (!arquivos.length || cheio) return;
+    void aquecerConexao();
+    const entram = arquivos.slice(0, cabem);
+    const ids = adicionarArquivos(entram, { osId, numeroOS });
+    if (ids.length) setLote({ ids, cortadas: arquivos.length - entram.length, chave: Date.now() });
   }
 
-  const desabilitado = ocupado || cheio;
+  function escolherTipo(categoria: CategoriaFoto, legenda: string) {
+    if (!lote) return;
+    void definirTipo(lote.ids, categoria, legenda);
+    setLote(null);
+  }
+
+  function descartarLote() {
+    if (!lote) return;
+    descartar(lote.ids);
+    setLote(null);
+  }
+
+  // ------------------------------------------------ grade + tela cheia (mesma ordem)
+  const itensGrade: (DadosMiniaturaFoto & { fila?: ItemFila; servidor?: FotoDaGrade })[] = [
+    ...[...naGrade]
+      .sort((a, b) => b.criadoEm - a.criadoEm)
+      .map((i) => ({
+        id: i.id,
+        src: i.previa ?? null,
+        categoria: i.categoria!,
+        legenda: i.legenda,
+        estado: i.estado,
+        progresso: i.progresso,
+        fila: i,
+      })),
+    ...lista
+      .filter((f) => !naGrade.some((i) => i.id === f.id))
+      .map((f) => ({
+        id: f.id,
+        src: f.url,
+        categoria: f.categoria,
+        legenda: f.legenda,
+        enviadoPor: f.criadoPorNome,
+        enviadoEm: f.enviadaEm,
+        estado: (f.url ? "enviada" : "sem_imagem") as DadosMiniaturaFoto["estado"],
+        servidor: f,
+      })),
+  ];
+
+  const dadosTela: FotoTelaCheiaDados[] = itensGrade.map((g) => {
+    if (g.fila) {
+      const confirmada = g.fila.estado === "confirmada";
+      return {
+        ...g,
+        estado: confirmada ? "confirmada" : g.estado,
+        srcGrande: g.fila.previaGrande ?? null,
+        podeApagar: !confirmada,
+        motivo: g.fila.motivo,
+      };
+    }
+    const s = g.servidor!;
+    const grande = grandes[s.id];
+    return { ...g, srcGrande: grande?.url ?? null, podeApagar: s.podeApagar, podeEditar: s.podeApagar };
+  });
+
+  // A foto grande só é assinada (e baixada) ao abrir na tela cheia.
+  const atual = tela.aberta ? itensGrade[Math.min(tela.indice, itensGrade.length - 1)] : undefined;
+  const caminhoAtual = atual?.servidor?.caminho;
+  const idAtual = atual?.servidor?.id;
+  const urlGrandeAtual = idAtual ? grandes[idAtual]?.url : undefined;
+  const grandesRef = useRef(grandes);
+  useEffect(() => {
+    grandesRef.current = grandes;
+  }, [grandes]);
+  useEffect(() => {
+    if (!idAtual || !caminhoAtual) return;
+    let vivo = true;
+    let renovar: ReturnType<typeof setTimeout> | undefined;
+    const agendar = (vence: number) => {
+      // Tela aberta na mesma foto até a URL vencer: assina de novo 1 min antes.
+      renovar = setTimeout(() => {
+        if (vivo) setGrandes((g) => semChave(g, idAtual));
+      }, Math.max(1_000, vence - Date.now()));
+    };
+    const ja = grandesRef.current[idAtual];
+    if (ja && ja.vence > Date.now() + 5_000) {
+      agendar(ja.vence);
+    } else {
+      void createClient()
+        .storage.from(BUCKET_FOTOS)
+        .createSignedUrl(caminhoAtual, VALIDADE_URL_FOTO_S)
+        .then(({ data }) => {
+          if (!vivo || !data?.signedUrl) return;
+          const vence = Date.now() + (VALIDADE_URL_FOTO_S - 60) * 1000;
+          setGrandes((g) => ({ ...g, [idAtual]: { url: data.signedUrl, vence } }));
+        });
+    }
+    return () => {
+      vivo = false;
+      if (renovar) clearTimeout(renovar);
+    };
+  }, [idAtual, caminhoAtual, urlGrandeAtual]);
+
+  function abrir(id: string) {
+    const indice = itensGrade.findIndex((g) => g.id === id);
+    if (indice >= 0) setTela({ aberta: true, indice });
+  }
+
+  async function apagar(f: FotoTelaCheiaDados) {
+    const s = lista.find((x) => x.id === f.id);
+    if (!s) return;
+    const supabase = createClient();
+    // Arquivo primeiro, depois o registro (ARQUITETURA F3.1-P6); os dois passos aceitam repetir.
+    const rem = await supabase.storage.from(BUCKET_FOTOS).remove([s.caminho, s.caminhoMiniatura]);
+    if (rem.error) {
+      return {
+        erro: /row-level|403|not allowed|unauthorized/i.test(rem.error.message)
+          ? "Você não pode apagar esta foto."
+          : "Não foi possível apagar a foto. Confira a internet e tente de novo.",
+      };
+    }
+    const r = await supabase.rpc("apagar_foto", { p_id: s.id });
+    if (r.error) {
+      return {
+        erro: /failed to fetch|load failed|network/i.test(r.error.message)
+          ? "Não foi possível apagar a foto. Confira a internet e tente de novo."
+          : traduzirErro(r.error, "os"),
+      };
+    }
+    setLista((l) => l.filter((x) => x.id !== s.id));
+  }
+
+  const fotoEditando = editando ? lista.find((f) => f.id === editando) : undefined;
+
+  async function salvarEdicao(id: string, dados: { categoria: CategoriaFoto; legenda: string }) {
+    const r = await createClient().rpc("editar_foto", { p_id: id, p_categoria: dados.categoria, p_legenda: dados.legenda });
+    if (r.error) {
+      return {
+        erro: /failed to fetch|load failed|network/i.test(r.error.message)
+          ? "Não foi possível salvar. Confira a internet e tente de novo."
+          : traduzirErro(r.error, "os"),
+      };
+    }
+    setLista((l) => l.map((f) => (f.id === id ? { ...f, categoria: dados.categoria, legenda: dados.legenda || null } : f)));
+  }
+
+  const desabilitado = cheio;
+  const ajudaLegenda = ehMecanico ? undefined : "O mecânico também vê esta legenda.";
+  const titulo = total >= 30 ? `Fotos (${total} de ${LIMITE_FOTOS_OS})` : `Fotos (${total})`;
 
   return (
-    <section aria-labelledby="titulo-fotos" className="flex flex-col gap-3">
+    <section ref={secao} aria-labelledby="titulo-fotos" className="flex scroll-mt-4 flex-col gap-3" data-teste="secao-fotos">
       <h2 id="titulo-fotos" className="text-2xl">
-        {total >= 30 ? `Fotos (${total} de ${LIMITE_FOTOS_OS})` : `Fotos (${total})`}
+        {titulo}
       </h2>
+
+      {retomadas.length > 0 && (
+        <CaixaMensagem tipo="info">
+          {nFotos(retomadas.length)} desta OS {retomadas.length === 1 ? "ficou guardada" : "ficaram guardadas"} no celular. Enviando
+          agora.
+        </CaixaMensagem>
+      )}
+      {fila.aviso === "sem_indexeddb" && podeEnviar && (
+        <CaixaMensagem tipo="alerta">Este celular não está guardando as fotos. Se fechar o app antes de enviar, elas se perdem.</CaixaMensagem>
+      )}
+      {fila.aviso === "sem_espaco" && (
+        <CaixaMensagem tipo="alerta">O celular está sem espaço para guardar a foto. Libere espaço ou espere as outras enviarem.</CaixaMensagem>
+      )}
+      {daOS.some((i) => i.precisaEntrar) && (
+        <CaixaMensagem tipo="alerta">
+          Entre de novo para enviar as fotos guardadas.{" "}
+          <Link href={`/login?voltar=/os/${osId}`} className="font-bold underline underline-offset-4">
+            Entrar
+          </Link>
+        </CaixaMensagem>
+      )}
 
       {podeEnviar && (
         <div className="flex flex-col gap-2">
@@ -188,11 +393,12 @@ export function FotosOS({
             >
               <Images size={24} strokeWidth={2.25} aria-hidden />
               <span className="pointer-fine:hidden">Da galeria</span>
-              <span className="hidden pointer-fine:inline">Escolher foto</span>
+              <span className="hidden pointer-fine:inline">Escolher fotos</span>
               <input
                 id={idGaleria}
                 type="file"
                 accept="image/*"
+                multiple
                 className="sr-only"
                 disabled={desabilitado}
                 onChange={aoEscolher}
@@ -201,91 +407,30 @@ export function FotosOS({
             </label>
           </div>
           {cheio && (
-            <p className="text-base text-texto-suave">
+            <p className="text-base text-texto-suave" data-teste="aviso-limite">
               Esta OS chegou ao limite de {LIMITE_FOTOS_OS} fotos. Apague alguma para enviar outra.
             </p>
           )}
-          {!cheio && total >= 30 && (
-            <p className="text-base text-texto-suave">Cabem mais {LIMITE_FOTOS_OS - total} fotos nesta OS.</p>
+          {!cheio && ocupadas >= 30 && (
+            <p className="text-base text-texto-suave">
+              {cabem === 1 ? "Cabe mais 1 foto nesta OS." : `Cabem mais ${cabem} fotos nesta OS.`}
+            </p>
           )}
+          <AjudaCamera idCamera={idCamera} />
         </div>
       )}
 
-      {envio && envio.fase !== "erro" && (
-        <div className="flex flex-col gap-2 rounded-md bg-superficie p-3" role="status" aria-live="polite">
-          <div className="flex items-center gap-3">
-            {envio.previa && (
-              // eslint-disable-next-line @next/next/no-img-element -- prévia local (blob:)
-              <img src={envio.previa} alt="" className="size-12 shrink-0 rounded-sm object-cover" />
-            )}
-            <p className="text-base font-bold">{TEXTO_FASE[envio.fase]}</p>
-          </div>
-          <div
-            role="progressbar"
-            aria-label="Envio da foto"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={PROGRESSO[envio.fase]}
-            className="h-2 overflow-hidden rounded-full bg-superficie-2"
-          >
-            <div className="h-full bg-primaria transition-[width] motion-reduce:transition-none" style={{ width: `${PROGRESSO[envio.fase]}%` }} />
-          </div>
-        </div>
-      )}
-
-      {envio?.fase === "erro" && (
-        <div className="flex flex-col gap-2">
-          <CaixaMensagem tipo="erro">{envio.mensagem}</CaixaMensagem>
-          {envio.preparada && (
-            <div className="flex gap-2">
-              <Botao variante="secundario" className="flex-1" onClick={() => mandar({ ...envio, preparada: envio.preparada!, fase: "registrando" })}>
-                <RotateCcw size={22} strokeWidth={2.25} aria-hidden />
-                Tentar de novo
-              </Botao>
-              <Botao variante="secundario" className="flex-1" onClick={() => setEnvio(null)}>
-                Descartar
-              </Botao>
-            </div>
-          )}
-        </div>
-      )}
-
-      {aviso && !envio && <CaixaMensagem tipo="sucesso">{aviso}</CaixaMensagem>}
-
-      {erroLista && (
-        <div className="flex flex-col gap-2">
-          <CaixaMensagem tipo="erro">Não foi possível carregar as fotos.</CaixaMensagem>
-          <Botao variante="secundario" onClick={() => router.refresh()}>
-            Tentar de novo
-          </Botao>
-        </div>
-      )}
-
-      {total > 0 ? (
-        <ul className="grid grid-cols-3 gap-2 lg:grid-cols-[repeat(auto-fill,minmax(140px,1fr))]" aria-label="Fotos da OS">
-          {pendentesNaTela.map((r) => (
-            <li key={r.id} className="relative aspect-square overflow-hidden rounded-md bg-superficie-2">
-              {/* eslint-disable-next-line @next/next/no-img-element -- prévia local (blob:) */}
-              <img src={r.previa} alt="Outro, sem legenda, acabou de ser enviada" className="size-full object-cover" />
-              <FaixaTipo texto="Enviada" />
-            </li>
-          ))}
-          {fotos.map((f) => (
-            <MiniaturaFoto key={`${f.id}-${f.url ?? ""}`} foto={f} aoRecarregar={() => router.refresh()} />
-          ))}
-        </ul>
-      ) : (
-        !erroLista && (
-          <div className="flex flex-col items-start gap-1">
-            <Camera size={32} strokeWidth={2} aria-hidden className="text-texto-suave" />
-            <p className="text-lg font-bold">{ehMecanico ? "Nenhuma foto ainda." : "Nenhuma foto nesta OS."}</p>
-            {ehMecanico && podeEnviar && (
-              <p className="text-base text-texto-suave">
-                Tire foto da peça com defeito e da peça trocada. Ajuda a explicar o serviço ao cliente.
-              </p>
-            )}
-          </div>
-        )
+      <GradeFotos
+        fotos={itensGrade}
+        erro={erro && lista.length === 0 && itensGrade.length === 0}
+        aoTentarCarregar={() => void recarregar()}
+        vazio={ehMecanico ? "mecanico" : "balcao"}
+        aoAbrir={abrir}
+        aoTentarDeNovo={(id) => tentarDeNovo([id])}
+        aoRecarregar={() => void recarregar()}
+      />
+      {erro && itensGrade.length > 0 && (
+        <CaixaMensagem tipo="erro">Não foi possível atualizar as fotos. Confira a internet.</CaixaMensagem>
       )}
 
       {!EH_PRODUCAO && (
@@ -296,41 +441,55 @@ export function FotosOS({
           Diagnóstico das fotos (só no ambiente de teste)
         </Link>
       )}
-    </section>
-  );
-}
 
-function FaixaTipo({ texto }: { texto: string }) {
-  return (
-    <span className="absolute inset-x-0 bottom-0 flex h-7 items-center truncate bg-[#14161A]/80 px-2 text-sm font-bold text-white">
-      {texto}
-    </span>
-  );
-}
-
-function MiniaturaFoto({ foto, aoRecarregar }: { foto: FotoDaGrade; aoRecarregar: () => void }) {
-  const [falhou, setFalhou] = useState(false);
-  const tipo = ROTULO_CATEGORIA_FOTO[foto.categoria] ?? "Outro";
-  const alt = `${tipo}, ${foto.legenda || "sem legenda"}${foto.criadoPorNome ? `, enviada por ${foto.criadoPorNome}` : ""}${
-    foto.enviadaEm ? ` em ${formatarDiaHora(foto.enviadaEm)}` : ""
-  }`;
-  return (
-    <li className="relative aspect-square overflow-hidden rounded-md bg-superficie-2">
-      {foto.url && !falhou ? (
-        // eslint-disable-next-line @next/next/no-img-element -- URL assinada do Storage (expira em 15 min)
-        <img src={foto.url} alt={alt} className="size-full object-cover" loading="lazy" onError={() => setFalhou(true)} />
-      ) : (
-        <button
-          type="button"
-          onClick={aoRecarregar}
-          className="flex size-full flex-col items-center justify-center gap-1 p-1 text-center text-sm font-bold text-texto-suave"
-          aria-label={`${alt}. Não carregou; toque para carregar`}
-        >
-          <ImageOff size={24} strokeWidth={2} aria-hidden />
-          Toque para carregar
-        </button>
+      {situacao && (
+        <FaixaEnvioFotos
+          situacao={situacao}
+          aoTentarDeNovo={() => tentarDeNovo(daOS.map((i) => i.id))}
+          aoTocar={() => secao.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+          aoSumir={zerar}
+        />
       )}
-      <FaixaTipo texto={tipo} />
-    </li>
+
+      {lote && (
+        <FolhaTipoFoto
+          key={lote.chave}
+          aberta
+          itens={loteItens}
+          cortadas={lote.cortadas}
+          ajudaLegenda={ajudaLegenda}
+          aoEscolher={escolherTipo}
+          aoDescartar={descartarLote}
+        />
+      )}
+
+      <FotoTelaCheia
+        aberta={tela.aberta && dadosTela.length > 0}
+        aoFechar={() => setTela((t) => ({ ...t, aberta: false }))}
+        fotos={dadosTela}
+        indice={tela.indice}
+        aoMudarIndice={(indice) => setTela((t) => ({ ...t, indice }))}
+        aoEditar={(f) => setEditando(f.id)}
+        aoApagar={apagar}
+        aoTentarDeNovo={(f) => tentarDeNovo([f.id])}
+        aoRemoverDaFila={(f) => descartar([f.id])}
+        aoRecarregar={(f) => {
+          if (f.id in grandes) setGrandes((g) => semChave(g, f.id));
+          void recarregar();
+        }}
+      />
+
+      {fotoEditando && (
+        <FolhaEditarFoto
+          key={fotoEditando.id}
+          aberta
+          aoFechar={() => setEditando(null)}
+          categoriaInicial={fotoEditando.categoria}
+          legendaInicial={fotoEditando.legenda}
+          ajudaLegenda={ajudaLegenda}
+          aoSalvar={(d) => salvarEdicao(fotoEditando.id, d)}
+        />
+      )}
+    </section>
   );
 }

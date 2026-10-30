@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import { Navegacao, NavegacaoEsqueleto } from "@/components/layout/navegacao";
+import { FilaFotosGlobal } from "@/components/fotos/fila-fotos-global";
 import { lerContexto } from "@/lib/dal";
 
 /**
@@ -21,5 +22,10 @@ export default function AppLayout({ children }: LayoutProps<"/">) {
 async function NavegacaoDoUsuario() {
   const ctx = await lerContexto();
   if (!ctx?.papel || ctx.ativo !== true) return <NavegacaoEsqueleto />;
-  return <Navegacao papel={ctx.papel} oficina={ctx.oficina_nome} />;
+  return (
+    <>
+      <Navegacao papel={ctx.papel} oficina={ctx.oficina_nome} />
+      {ctx.usuario_id && <FilaFotosGlobal usuarioId={ctx.usuario_id} />}
+    </>
+  );
 }

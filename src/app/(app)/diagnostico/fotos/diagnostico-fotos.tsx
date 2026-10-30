@@ -6,10 +6,12 @@ import { Botao, classesBotao } from "@/components/ui/botao";
 import { Cartao } from "@/components/ui/estados";
 import { CaixaMensagem } from "@/components/ui/formulario";
 import { formatarBytes, formatarDiaHora } from "@/lib/formato";
-import { CHAVE_DIAGNOSTICO, guardarDiagnostico, type RegistroDiagnostico } from "@/lib/fotos/enviar";
+import { aquecerConexao, CHAVE_DIAGNOSTICO, guardarDiagnostico, type MedidaAquecimento, type RegistroDiagnostico } from "@/lib/fotos/enviar";
+import { abrirBanco } from "@/lib/fotos/fila-db";
+import { useFila } from "@/components/fotos/usar-fila";
 import { ErroFoto, navegadorGiraSozinho, prepararFoto, type DiagnosticoPreparo } from "@/lib/fotos/preparar";
 
-const EVENTO = "mf-diag-fotos";
+const EVENTO = CHAVE_DIAGNOSTICO;
 
 function assinar(aviso: () => void) {
   window.addEventListener("storage", aviso);
@@ -68,10 +70,16 @@ export function DiagnosticoFotos() {
   const [erro, setErro] = useState<string | null>(null);
   const [teste, setTeste] = useState<{ diag: DiagnosticoPreparo; foto: string; mini: string } | null>(null);
   const urls = useRef<string[]>([]);
+  const fila = useFila();
+  const [idb, setIdb] = useState<boolean | null>(null);
+  const [medindo, setMedindo] = useState(false);
+  const [conexao, setConexao] = useState<MedidaAquecimento | null>(null);
+  const [erroConexao, setErroConexao] = useState(false);
 
   useEffect(() => {
     let vivo = true;
     navegadorGiraSozinho().then((v) => vivo && setGira(v));
+    abrirBanco().then((db) => vivo && setIdb(Boolean(db)));
     const lista = urls.current;
     return () => {
       vivo = false;
@@ -100,6 +108,16 @@ export function DiagnosticoFotos() {
       setTestando(false);
       window.dispatchEvent(new Event(EVENTO));
     }
+  }
+
+  async function medirConexao() {
+    setMedindo(true);
+    setErroConexao(false);
+    const m = await aquecerConexao({ medir: true });
+    setMedindo(false);
+    if (!m) return setErroConexao(true);
+    setConexao(m);
+    guardarDiagnostico({ osId: null, fotoId: null, resultado: "conexao", conexao: m });
   }
 
   function limpar() {
@@ -131,8 +149,28 @@ export function DiagnosticoFotos() {
             <Linha r="createImageBitmap" v={sn(aparelho?.createImageBitmap)} />
             <Linha r="crypto.randomUUID" v={sn(aparelho?.randomUUID)} />
             <Linha r="Tela de toque" v={sn(aparelho?.toque)} />
+            <Linha r="Guarda a fila no aparelho (IndexedDB)" v={sn(idb)} />
+            <Linha r="Fotos na fila agora" v={String(fila.itens.length)} />
           </dl>
         </Cartao>
+      </section>
+
+      <section className="flex flex-col gap-3" aria-labelledby="t-conexao">
+        <h2 id="t-conexao" className="text-2xl">
+          Medir a conexão com o servidor
+        </h2>
+        <p className="text-base text-texto-suave">
+          Abra esta página logo depois de abrir o app e toque aqui: mostra quanto demora a sessão e o 1º pedido (frio) contra o 2º (quente).
+        </p>
+        <Botao variante="secundario" onClick={medirConexao} disabled={medindo} data-teste="diag-medir">
+          {medindo ? "Medindo…" : "Medir conexão"}
+        </Botao>
+        {erroConexao && <CaixaMensagem tipo="erro">Não deu para medir (sem sessão ou sem internet).</CaixaMensagem>}
+        {conexao && (
+          <Cartao>
+            <TabelaConexao m={conexao} />
+          </Cartao>
+        )}
       </section>
 
       <section className="flex flex-col gap-3" aria-labelledby="t-teste">
@@ -175,7 +213,7 @@ export function DiagnosticoFotos() {
         {registros.map((r, i) => (
           <Cartao key={`${r.quando}-${i}`}>
             <p className="text-lg font-bold" data-teste="diag-registro">
-              {r.resultado === "enviada" ? "Enviada" : r.resultado === "erro" ? "Erro" : "Só preparo"} · {formatarDiaHora(r.quando)}
+              {r.resultado === "enviada" ? "Enviada" : r.resultado === "erro" ? "Erro" : r.resultado === "conexao" ? "Conexão" : "Só preparo"} · {formatarDiaHora(r.quando)}
             </p>
             {r.erro && (
               <p className="text-base text-erro-texto">
@@ -183,6 +221,7 @@ export function DiagnosticoFotos() {
                 {r.erro}
               </p>
             )}
+            {r.conexao && <TabelaConexao m={r.conexao} />}
             {r.preparo && <TabelaPreparo d={r.preparo} />}
             {r.envio && (
               <dl className="mt-2 flex flex-col gap-1 text-base">
@@ -190,6 +229,19 @@ export function DiagnosticoFotos() {
                   <Linha key={e.etapa} r={`Envio: ${e.etapa}`} v={`${e.ms} ms`} />
                 ))}
                 <Linha r="Envio: total" v={`${r.envio.totalMs} ms`} />
+                {r.envio.sessao && (
+                  <Linha
+                    r="Sessão (detalhe)"
+                    v={`${r.envio.sessao.ms} ms · renovou/consultou o login: ${sn(r.envio.sessao.chamouAuth)} · token vence em ${r.envio.sessao.restanteS ?? "?"} s`}
+                  />
+                )}
+                {r.envio.registrarRede && (
+                  <Linha
+                    r="Registrar (só a rede)"
+                    v={`${r.envio.registrarRede.duracaoMs} ms${r.envio.registrarRede.conexaoMs != null ? ` · abrir conexão ${r.envio.registrarRede.conexaoMs} ms` : ""}`}
+                  />
+                )}
+                <Linha r="Conexão aquecida antes" v={r.envio.aquecidaHaS == null ? "não" : `sim, ${r.envio.aquecidaHaS} s antes`} />
                 <Linha r="Caminho" v={r.envio.caminho} mono />
               </dl>
             )}
@@ -202,6 +254,17 @@ export function DiagnosticoFotos() {
         )}
       </section>
     </div>
+  );
+}
+
+function TabelaConexao({ m }: { m: MedidaAquecimento }) {
+  return (
+    <dl className="flex flex-col gap-1 text-base" data-teste="diag-conexao">
+      <Linha r="Sessão (obter/renovar o login)" v={`${m.sessao.ms} ms · renovou/consultou o login: ${sn(m.sessao.chamouAuth)}`} />
+      <Linha r="Token vence em" v={m.sessao.restanteS == null ? "—" : `${Math.round(m.sessao.restanteS / 60)} min`} />
+      <Linha r="1º pedido ao servidor (frio)" v={`${m.primeiraMs} ms`} />
+      <Linha r="2º pedido (conexão aberta)" v={`${m.segundaMs} ms`} />
+    </dl>
   );
 }
 

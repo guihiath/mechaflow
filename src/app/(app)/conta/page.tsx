@@ -6,7 +6,7 @@ import { LogOut } from "lucide-react";
 import { Cabecalho } from "@/components/layout/cabecalho";
 import { classesBotao } from "@/components/ui/botao";
 import { Cartao, FormularioCarregando, Pagina } from "@/components/ui/estados";
-import { sair } from "@/acoes/sessao";
+import { FormSair } from "@/components/fotos/form-sair";
 import { exigirContexto } from "@/lib/dal";
 import { ROTULO_PAPEL } from "@/lib/formato";
 
@@ -50,12 +50,10 @@ async function Dados() {
         </p>
       )}
       <EscolherTema />
-      <form action={sair}>
-        <button type="submit" className={classesBotao("secundario")}>
+      <FormSair botaoClassName={classesBotao("secundario")}>
           <LogOut size={24} strokeWidth={2.25} aria-hidden />
           Sair da conta
-        </button>
-      </form>
+        </FormSair>
     </>
   );
 }

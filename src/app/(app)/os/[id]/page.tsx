@@ -331,7 +331,13 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
             )}
             {status === "aguardando_orcamento" && itens.length > 0 && <BotaoJaMandei />}
 
-            <FotosDaOS osId={id} podeEnviar={podeEnviarFoto(ctx.papel, status, os.mecanico_id === ctx.usuario_id)} />
+            <FotosDaOS
+              osId={id}
+              numeroOS={os.numero}
+              usuarioId={ctx.usuario_id}
+              papel={ctx.papel}
+              podeEnviar={podeEnviarFoto(ctx.papel, status, os.mecanico_id === ctx.usuario_id)}
+            />
           </div>
 
           {/* ------------------------------------------------ coluna direita (2/5) */}
@@ -489,7 +495,7 @@ itens: [],
     </Cartao>
 
     {/* Fotos antes dos itens: é o que o mecânico mais mexe (DESIGN §11.2) */}
-    <FotosDaOS osId={id} podeEnviar={podeEnviarFoto("mecanico", status, minha)} ehMecanico />
+    <FotosDaOS osId={id} numeroOS={os.numero} usuarioId={ctx.usuario_id} papel="mecanico" podeEnviar={podeEnviarFoto("mecanico", status, minha)} />
 
     <section aria-labelledby="titulo-itens" className="flex flex-col gap-3">
       <h2 id="titulo-itens" className="text-2xl">
