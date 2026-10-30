@@ -6,6 +6,7 @@ import { Phone } from "lucide-react";
 import { cancelarOS } from "@/acoes/os";
 import { Cabecalho } from "@/components/layout/cabecalho";
 import { BadgeStatus, EtiquetaModo, EtiquetaPagamento, SemMecanico } from "@/components/os/badge-status";
+import { FotosDaOS } from "@/components/fotos/fotos-da-os";
 import { DetalheCarregando } from "@/components/os/detalhe-carregando";
 import { LinhaItemOS, ListaItensOS } from "@/components/os/linha-item-os";
 import { LinhaTempo } from "@/components/os/linha-tempo";
@@ -25,6 +26,7 @@ import {
   param,
   soDigitos,
 } from "@/lib/formato";
+import { podeEnviarFoto } from "@/lib/fotos/regras";
 import { CANAL_NA_FRASE, montarEventos, ROTULO_FORMA_PAGAMENTO, textoUnidade } from "@/lib/os";
 import { ehStatusOS, osEncerrada, proximoPasso, type ModoOS, type StatusOS } from "@/lib/os-status";
 import { createClient } from "@/lib/supabase/server";
@@ -328,6 +330,8 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
               </CaixaMensagem>
             )}
             {status === "aguardando_orcamento" && itens.length > 0 && <BotaoJaMandei />}
+
+            <FotosDaOS osId={id} podeEnviar={podeEnviarFoto(ctx.papel, status, os.mecanico_id === ctx.usuario_id)} />
           </div>
 
           {/* ------------------------------------------------ coluna direita (2/5) */}
@@ -483,6 +487,9 @@ itens: [],
         </div>
       </dl>
     </Cartao>
+
+    {/* Fotos antes dos itens: é o que o mecânico mais mexe (DESIGN §11.2) */}
+    <FotosDaOS osId={id} podeEnviar={podeEnviarFoto("mecanico", status, minha)} ehMecanico />
 
     <section aria-labelledby="titulo-itens" className="flex flex-col gap-3">
       <h2 id="titulo-itens" className="text-2xl">
