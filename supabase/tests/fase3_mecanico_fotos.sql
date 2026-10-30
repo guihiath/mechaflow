@@ -13,7 +13,7 @@
 --   * observacao do balcao (observacoes) fora do alcance do mecanico; dono e
 --     atendente leem e editam;
 --   * fotos: tabela isolada A x B e por mecanico, limite de 40, regras de
---     enviar e apagar por papel e status;
+--     enviar, editar (categoria/legenda) e apagar por papel e status;
 --   * bucket privado e politicas de storage.objects (ler/listar/URL assinada =
 --     SELECT; subir = INSERT; apagar = DELETE), com set local role + claims.
 --
@@ -636,6 +636,8 @@ begin
   assert public.zz_erro($q$ select public.confirmar_foto('f3f00000-0000-4000-8000-000000000001') $q$) = 'foto_nao_encontrada',
     'dono B confirmou foto da A';
   assert not public.apagar_foto('f3f00000-0000-4000-8000-000000000001'), 'dono B apagou foto da A';
+  assert public.zz_erro($q$ select public.editar_foto('f3f00000-0000-4000-8000-000000000001', 'outro', 'invasao') $q$) = 'foto_nao_encontrada',
+    'dono B editou foto da A';
   assert public.zz_estado(format($q$ insert into storage.objects (bucket_id, name) values ('os-fotos', %L) $q$,
                                  current_setting('teste.oficina_a') || '/' || current_setting('teste.osD') || '/' || gen_random_uuid() || '.jpg')) = '42501',
     'DONO B SUBIU ARQUIVO NA PASTA DA A';
@@ -661,6 +663,8 @@ begin
                                    current_setting('teste.f1_caminho'))) = 0, 'mecanico (ve todas) apagou arquivo de foto de outro';
   assert public.zz_erro($q$ select public.apagar_foto('f3f00000-0000-4000-8000-000000000001') $q$) = 'foto_nao_pode_apagar',
     'mecanico (ve todas) apagou foto de outro';
+  assert public.zz_erro($q$ select public.editar_foto('f3f00000-0000-4000-8000-000000000001', 'outro') $q$) = 'foto_nao_pode_editar',
+    'mecanico (ve todas) editou foto de outro';
 end $$;
 
 select set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000003a2","role":"authenticated"}', true);
@@ -673,6 +677,17 @@ begin
                                    current_setting('teste.f2_caminho'))) = 0, 'mecanico apagou arquivo da foto do dono';
   assert public.zz_erro($q$ select public.apagar_foto('f3f00000-0000-4000-8000-000000000002') $q$) = 'foto_nao_pode_apagar',
     'mecanico apagou foto do dono';
+  -- editar: mesma regra de apagar
+  assert public.zz_erro($q$ select public.editar_foto('f3f00000-0000-4000-8000-000000000002', 'antes', 'x') $q$) = 'foto_nao_pode_editar',
+    'mecanico editou foto do dono';
+  assert (select categoria from public.os_fotos where id = 'f3f00000-0000-4000-8000-000000000002') = 'entrega', 'foto do dono mudou';
+  perform public.editar_foto('f3f00000-0000-4000-8000-000000000001', 'peca_defeituosa', '  Junta rompida ');
+  perform public.editar_foto('f3f00000-0000-4000-8000-000000000001', 'peca_defeituosa', '  Junta rompida ');  -- reenvio
+  assert (select categoria = 'peca_defeituosa' and legenda = 'Junta rompida' from public.os_fotos
+           where id = 'f3f00000-0000-4000-8000-000000000001'), 'mecanico nao editou a foto dele';
+  perform public.editar_foto('f3f00000-0000-4000-8000-000000000001', p_legenda => '');
+  assert (select categoria = 'peca_defeituosa' and legenda is null from public.os_fotos
+           where id = 'f3f00000-0000-4000-8000-000000000001'), 'legenda vazia deveria apagar a legenda e manter a categoria';
   -- a dele: arquivo e registro
   assert public.zz_afetadas(format($q$ delete from storage.objects where bucket_id = 'os-fotos' and name in (%L, %L) $q$,
                                    current_setting('teste.f1_caminho'), current_setting('teste.f1_mini'))) = 2,
@@ -703,11 +718,19 @@ begin
                                    current_setting('teste.f2_caminho'))) = 0, 'atendente apagou arquivo em OS entregue';
   assert public.zz_erro($q$ select public.apagar_foto('f3f00000-0000-4000-8000-000000000002') $q$) = 'foto_nao_pode_apagar',
     'atendente apagou foto em OS entregue';
+  assert public.zz_erro($q$ select public.editar_foto('f3f00000-0000-4000-8000-000000000002', 'depois') $q$) = 'foto_nao_pode_editar',
+    'atendente editou foto em OS entregue';
 end $$;
 
 select set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000003a1","role":"authenticated"}', true);
 do $$
 begin
+  -- dono edita em OS entregue; foto pendente (nao confirmada) nao se edita
+  perform public.editar_foto('f3f00000-0000-4000-8000-000000000002', 'depois', 'Caminhao entregue');
+  assert (select categoria = 'depois' and legenda = 'Caminhao entregue' from public.os_fotos
+           where id = 'f3f00000-0000-4000-8000-000000000002'), 'dono nao editou foto em OS entregue';
+  assert public.zz_erro($q$ select public.editar_foto('f3f00000-0000-4000-8000-000000000041', 'outro') $q$) = 'foto_nao_encontrada',
+    'editou foto pendente';
   perform set_config('storage.allow_delete_query', 'true', true);
   assert public.zz_afetadas(format($q$ delete from storage.objects where bucket_id = 'os-fotos' and name in (%L, %L) $q$,
                                    current_setting('teste.f2_caminho'), current_setting('teste.f2_mini'))) = 2,
@@ -736,6 +759,8 @@ begin
   assert public.zz_estado('select 1 from public.vw_os_fotos') = '42501', 'ANON LEU vw_os_fotos';
   assert public.zz_estado($q$ select public.registrar_foto(gen_random_uuid(), gen_random_uuid(), 1, 1, 1, 1) $q$) = '42501',
     'ANON CHAMOU registrar_foto';
+  assert public.zz_estado($q$ select public.editar_foto(gen_random_uuid(), 'outro') $q$) = '42501',
+    'ANON CHAMOU editar_foto';
   assert public.zz_estado($q$ select public.alterar_item_mecanico(gen_random_uuid(), 1) $q$) = '42501',
     'ANON CHAMOU alterar_item_mecanico';
   -- [STORAGE] anon nao ve nenhum arquivo do bucket

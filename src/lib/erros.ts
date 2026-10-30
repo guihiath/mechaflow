@@ -66,6 +66,7 @@ const MENSAGENS: Record<string, string> = {
   foto_nao_enviada: "A foto ainda não chegou. Toque em “Tentar de novo”.",
   foto_nao_encontrada: "Foto não encontrada. Ela pode ter sido apagada.",
   foto_nao_pode_apagar: "Você não pode apagar esta foto.",
+  foto_nao_pode_editar: "Você não pode mudar esta foto.",
 };
 
 /** Mensagens do Supabase Auth (signUp / signIn), que vêm em inglês. */

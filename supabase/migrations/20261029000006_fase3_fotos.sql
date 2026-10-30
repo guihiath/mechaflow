@@ -14,6 +14,7 @@
 --        Reenvio que da "ja existe" (409) = o arquivo chegou: segue para o 3.
 --   3. rpc('confirmar_foto', { p_id }) -> confere que os 2 arquivos estao no
 --        bucket e marca enviada_em. So foto enviada aparece na galeria.
+-- Editar categoria/legenda: rpc('editar_foto') (mesma regra de apagar, so foto enviada).
 -- Apagar: storage.remove([caminho, caminho_miniatura]) e depois
 --   rpc('apagar_foto', { p_id }) (a politica de DELETE do Storage usa a mesma
 --   regra da RPC; os dois passos sao idempotentes).
@@ -68,7 +69,7 @@ alter table public.os_fotos enable row level security;
 create index os_fotos_os_idx on public.os_fotos (os_id, criado_em);
 create index os_fotos_oficina_idx on public.os_fotos (oficina_id);
 comment on table public.os_fotos is
-  'Fotos da OS (arquivo no bucket privado os-fotos). Escrita so pelas RPCs registrar_foto / confirmar_foto / apagar_foto.';
+  'Fotos da OS (arquivo no bucket privado os-fotos). Escrita so pelas RPCs registrar_foto / confirmar_foto / editar_foto / apagar_foto.';
 
 -- Leitura: fotos das OS que eu enxergo. Escrita: so RPC.
 revoke all on table public.os_fotos from anon, authenticated;
@@ -331,6 +332,49 @@ begin
   return true;
 end;
 $$;
+
+-- Edita categoria e/ou legenda de uma foto ENVIADA, com a mesma regra de apagar
+-- (private.foto_apagavel). NULL = nao muda; legenda '' = apaga a legenda.
+-- Idempotente (mandar os mesmos valores de novo nao faz nada de errado).
+create or replace function public.editar_foto(
+  p_id        uuid,
+  p_categoria public.categoria_foto default null,
+  p_legenda   text default null
+)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_foto public.os_fotos;
+begin
+  perform private.exigir_papel(array['dono', 'atendente', 'mecanico']::public.papel_usuario[]);
+
+  select f.* into v_foto
+    from public.os_fotos f
+   where f.id = p_id
+     and f.oficina_id = private.minha_oficina_id()
+     and f.enviada_em is not null;
+  if not found then
+    raise exception 'foto_nao_encontrada';
+  end if;
+  perform private.travar_os(v_foto.os_id);   -- os_nao_encontrada se eu nao vejo a OS
+
+  if not private.foto_apagavel(v_foto) then
+    raise exception 'foto_nao_pode_editar';
+  end if;
+
+  update public.os_fotos f
+     set categoria = coalesce(p_categoria, f.categoria),
+         legenda   = case when p_legenda is null then f.legenda
+                          else left(nullif(btrim(p_legenda), ''), 200) end
+   where f.id = v_foto.id;
+end;
+$$;
+
+revoke all on function public.editar_foto(uuid, public.categoria_foto, text) from public, anon;
+grant execute on function public.editar_foto(uuid, public.categoria_foto, text) to authenticated;
 
 revoke all on function public.registrar_foto(uuid, uuid, integer, integer, integer, integer, public.categoria_foto, text) from public, anon;
 revoke all on function public.confirmar_foto(uuid) from public, anon;

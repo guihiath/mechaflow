@@ -562,7 +562,7 @@ export type Database = {
           tamanho_bytes: number
           tamanho_miniatura_bytes: number
         }
-        // Escrita so pelas RPCs registrar_foto / confirmar_foto / apagar_foto.
+        // Escrita so pelas RPCs registrar_foto / confirmar_foto / editar_foto / apagar_foto.
         Insert: {
           altura: number
           categoria?: Database["public"]["Enums"]["categoria_foto"]
@@ -1263,6 +1263,15 @@ export type Database = {
           veiculo_modelo: string | null
           veiculo_tipo: Database["public"]["Enums"]["tipo_veiculo"]
         }[]
+      }
+      editar_foto: {
+        // Mesma regra de apagar; so foto enviada. NULL = nao muda; legenda "" = apaga a legenda.
+        Args: {
+          p_categoria?: Database["public"]["Enums"]["categoria_foto"]
+          p_id: string
+          p_legenda?: string
+        }
+        Returns: undefined
       }
       entregar_os: {
         Args: {
