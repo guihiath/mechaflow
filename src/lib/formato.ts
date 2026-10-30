@@ -230,3 +230,27 @@ export function formatarTempoDesde(iso: string | null | undefined, agora: Date =
 export function formatarNumeroOS(numeroOS: number | string): string {
   return `OS #${numeroOS}`;
 }
+
+// ---------------------------------------------------------------- Fase 3 (fotos)
+
+/** Tipos de foto na ordem da tela (DESIGN §11.4). Valores = enum `categoria_foto` do banco. */
+export const CATEGORIAS_FOTO = ["diagnostico", "peca_defeituosa", "peca_trocada", "antes", "depois", "entrega", "outro"] as const;
+export type CategoriaFoto = (typeof CATEGORIAS_FOTO)[number];
+
+export const ROTULO_CATEGORIA_FOTO: Record<CategoriaFoto, string> = {
+  diagnostico: "Diagnóstico",
+  peca_defeituosa: "Peça com defeito",
+  peca_trocada: "Peça trocada",
+  antes: "Antes",
+  depois: "Depois",
+  entrega: "Entrega",
+  outro: "Outro",
+};
+
+/** 1536000 -> "1,5 MB"; 84000 -> "82 KB". */
+export function formatarBytes(bytes: number | null | undefined): string {
+  if (bytes == null || !Number.isFinite(bytes)) return "—";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} MB`;
+}
