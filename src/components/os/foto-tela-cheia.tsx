@@ -156,7 +156,8 @@ export function FotoTelaCheia({
 
     const vv = window.visualViewport;
     const ajustar = () => {
-      if (!vv) return;
+      // Com pinça (zoom nativo), não persegue a área visível: senão a camada encolhe junto e desfaz o zoom.
+      if (!vv || vv.scale > 1.01) return;
       dialogo.style.top = `${vv.offsetTop}px`;
       dialogo.style.height = `${vv.height}px`;
     };

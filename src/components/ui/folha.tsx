@@ -37,6 +37,7 @@ export function Folha({
   sujo = false,
   aoDescartar,
   recuperado = false,
+  aoPedirFechar,
 }: {
   aberta: boolean;
   aoFechar: () => void;
@@ -50,6 +51,11 @@ export function Folha({
   aoDescartar?: () => void;
   /** O conteudo veio de um rascunho guardado: mostra o aviso no topo. */
   recuperado?: boolean;
+  /**
+   * Fechar / Esc / voltar chamam esta funcao em vez de fechar: a folha continua aberta e o
+   * pai pergunta do jeito dele (ex.: "Descartar esta foto?"). Substitui o fluxo do `sujo`.
+   */
+  aoPedirFechar?: () => void;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const caixaConfirmar = useRef<HTMLDivElement>(null);
@@ -59,6 +65,7 @@ export function Folha({
   const aoFecharRef = useRef(aoFechar);
   const sujoRef = useRef(sujo);
   const confirmandoRef = useRef(false);
+  const aoPedirFecharRef = useRef(aoPedirFechar);
   const voltarPendente = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fechandoPorNos = useRef(false);
   const [confirmando, setConfirmando] = useState(false);
@@ -67,7 +74,8 @@ export function Folha({
     aoFecharRef.current = aoFechar;
     sujoRef.current = sujo;
     confirmandoRef.current = confirmando;
-  }, [aoFechar, sujo, confirmando]);
+    aoPedirFecharRef.current = aoPedirFechar;
+  }, [aoFechar, sujo, confirmando, aoPedirFechar]);
 
   useEffect(() => {
     if (confirmando) caixaConfirmar.current?.focus();
@@ -132,6 +140,12 @@ export function Folha({
 
     const aoVoltar = () => {
       if (window.history.state?.[CHAVE_HISTORICO] === chave) return;
+      if (aoPedirFecharRef.current) {
+        // O pai pergunta: a folha fica (o estado volta para o historico).
+        empurrar();
+        aoPedirFecharRef.current();
+        return;
+      }
       if (sujoRef.current && !confirmandoRef.current) {
         // Voltar com algo digitado: a folha fica e pergunta (o 2º voltar fecha).
         empurrar();
@@ -174,7 +188,8 @@ export function Folha({
   }, [aberta, chave]);
 
   function pedirFechar() {
-    if (sujo && !confirmando) setConfirmando(true);
+    if (aoPedirFechar) aoPedirFechar();
+    else if (sujo && !confirmando) setConfirmando(true);
     else aoFechar();
   }
 
