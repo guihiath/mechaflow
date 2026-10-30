@@ -11,6 +11,8 @@ const ROTAS_PUBLICAS = ["/login", "/cadastro", "/convite", "/termos", "/auth", "
 
 export function rotaPublica(pathname: string) {
   if (pathname === "/") return true;
+  // Vitrine de componentes (dados ficticios, sem Supabase), so fora da producao; em producao da 404.
+  if (process.env.NEXT_PUBLIC_AMBIENTE !== "producao" && (pathname === "/dev" || pathname.startsWith("/dev/"))) return true;
   return ROTAS_PUBLICAS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
 
