@@ -1,3 +1,6 @@
+import type { ReactNode } from "react";
+import { Camera } from "lucide-react";
+import { fotos as textoFotos } from "@/components/os/categorias-foto";
 import { BadgeStatus, EtiquetaPagamento, SemMecanico } from "@/components/os/badge-status";
 import { EtiquetaAcimaDoAprovado, EtiquetaSemPrecoContagem } from "@/components/os/etiquetas-fase3";
 import { Cartao, ChipPlaca } from "@/components/ui/estados";
@@ -25,6 +28,8 @@ export type DadosCartaoOS = {
   itensSemPreco?: number;
   /** Total atual acima do aprovado pelo cliente (so dono/atendente). */
   acimaDoAprovado?: boolean;
+  /** Mecanico (DESIGN §11.10): linha "5 fotos · 3 itens" no fim do cartao. */
+  contagem?: { fotos: number; itens: number };
 };
 
 /**
@@ -32,19 +37,36 @@ export type DadosCartaoOS = {
  * `semValores` (mecanico): nenhum R$ e nenhuma etiqueta de pagamento, mesmo que os dados venham.
  * `agora`: relogio unico da lista (o servidor passa o mesmo para todos os cards).
  */
-export function CartaoOS({ os, semValores, agora }: { os: DadosCartaoOS; semValores?: boolean; agora?: Date }) {
+export function CartaoOS({
+  os,
+  semValores,
+  agora,
+  etiquetaExtra,
+}: {
+  os: DadosCartaoOS;
+  semValores?: boolean;
+  agora?: Date;
+  /** Etiqueta a mais na linha do badge (ex.: "2 fotos não enviadas", componente do navegador). */
+  etiquetaExtra?: ReactNode;
+}) {
   const placa = formatarPlaca(os.placa);
   const rotuloStatus = INFO_STATUS[os.status].rotulo;
   const linhaVeiculo = [os.veiculo, os.cliente].filter(Boolean).join(" · ");
   const total = !semValores && typeof os.totalCentavos === "number" ? formatarReaisInteiros(os.totalCentavos) : "";
   const tempo = formatarTempoDesde(os.atualizadoEm, agora);
   const semPreco = !semValores ? (os.itensSemPreco ?? 0) : 0;
+  const linhaContagem = os.contagem
+    ? `${os.contagem.fotos > 0 ? textoFotos(os.contagem.fotos) : "Sem fotos"} · ${
+        os.contagem.itens === 0 ? "Sem itens" : os.contagem.itens === 1 ? "1 item" : `${os.contagem.itens} itens`
+      }`
+    : null;
   const rotulo = [
     `OS ${os.numero}`,
     `placa ${placa}`,
     os.cliente,
     rotuloStatus,
     semPreco > 0 ? (semPreco === 1 ? "1 item sem preço" : `${semPreco} itens sem preço`) : null,
+    linhaContagem,
   ]
     .filter(Boolean)
     .join(", ");
@@ -64,6 +86,7 @@ export function CartaoOS({ os, semValores, agora }: { os: DadosCartaoOS; semValo
             <EtiquetaSemPrecoContagem quantidade={semPreco} />
             {!semValores && os.acimaDoAprovado && <EtiquetaAcimaDoAprovado />}
             {!semValores && os.aReceber && <EtiquetaPagamento pago={false} />}
+            {etiquetaExtra}
           </span>
           {total && <span className="font-mono text-lg font-semibold">{total}</span>}
         </div>
@@ -72,6 +95,12 @@ export function CartaoOS({ os, semValores, agora }: { os: DadosCartaoOS; semValo
           {tempo && <span aria-hidden>·</span>}
           {os.mecanico ? <span>{os.mecanico}</span> : <SemMecanico />}
         </p>
+        {linhaContagem && (
+          <p className="flex items-center gap-1.5 text-sm text-texto-suave" data-teste="contagem-cartao">
+            <Camera size={16} strokeWidth={2.25} aria-hidden />
+            {linhaContagem}
+          </p>
+        )}
       </div>
     </Cartao>
   );

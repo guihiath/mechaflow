@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { BookOpen, ClipboardList, Search } from "lucide-react";
 import { Cabecalho } from "@/components/layout/cabecalho";
+import { EtiquetaFilaOS } from "@/components/fotos/etiqueta-fila-os";
 import { CartaoOS } from "@/components/os/cartao-os";
 import { CaixaErro, Cartao, EstadoVazio, ListaCarregando, Pagina } from "@/components/ui/estados";
 import { FiltroChips } from "@/components/ui/filtro-chips";
@@ -15,7 +16,7 @@ export const metadata: Metadata = { title: "Minhas OS" };
 
 const DIA = 24 * 60 * 60 * 1000;
 
-/** Lista do mecanico (DESIGN §10.10): por secoes, SEM nenhum valor (nem pedido ao banco). */
+/** Lista do mecanico (DESIGN §10.10 e §11.10): por secoes, SEM nenhum valor (nem pedido ao banco). */
 export default function MinhasOsPage({ searchParams }: PageProps<"/minhas-os">) {
   return (
     <>
@@ -44,10 +45,11 @@ type Linha = {
   iniciado_em: string | null;
   pronta_em: string | null;
   entregue_em: string | null;
+  qtd_fotos: number | null;
 };
 
 const COLUNAS =
-  "id, numero, status, placa, veiculo_marca, veiculo_modelo, cliente_nome, sintoma_relatado, mecanico_nome, atualizado_em, criado_em, iniciado_em, pronta_em, entregue_em";
+  "id, numero, status, placa, veiculo_marca, veiculo_modelo, cliente_nome, sintoma_relatado, mecanico_nome, atualizado_em, criado_em, iniciado_em, pronta_em, entregue_em, qtd_fotos";
 
 async function Conteudo({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const ctx = await exigirContexto(["mecanico"]);
@@ -93,12 +95,24 @@ async function Conteudo({ searchParams }: { searchParams: Promise<Record<string,
   if (verEntregues) secoes.push({ titulo: "Entregues nos últimos 30 dias", itens: (ent.data ?? []) as Linha[] });
   const visiveis = secoes.filter((s) => s.itens.length > 0);
 
+  // Itens por OS (DESIGN §11.10, "5 fotos · 3 itens"): vw_os.qtd_itens vem NULL para o
+  // mecanico, entao conta pela vw_os_itens pedindo SO o os_id (nenhuma coluna de valor).
+  // Em lotes de 100 ids para a URL nao crescer demais.
+  const ids = visiveis.flatMap((s) => s.itens.map((o) => o.id)).filter((x): x is string => Boolean(x));
+  const lotes: string[][] = [];
+  for (let i = 0; i < ids.length; i += 100) lotes.push(ids.slice(i, i + 100));
+  const respostas = await Promise.all(lotes.map((l) => supabase.from("vw_os_itens").select("os_id").in("os_id", l).limit(5000)));
+  const itensPorOS = new Map<string, number>();
+  const semContagem = respostas.some((r) => r.error);
+  for (const r of respostas) for (const it of r.data ?? []) if (it.os_id) itensPorOS.set(it.os_id, (itensPorOS.get(it.os_id) ?? 0) + 1);
+
   const base = todas ? "/minhas-os?ver=todas" : "/minhas-os";
   const cartao = (o: Linha) => (
     <li key={o.id}>
       <CartaoOS
         semValores
         agora={agora}
+        etiquetaExtra={o.id ? <EtiquetaFilaOS osId={o.id} usuarioId={ctx.usuario_id} /> : undefined}
         os={{
           href: `/os/${o.id}`,
           numero: o.numero ?? 0,
@@ -109,6 +123,7 @@ async function Conteudo({ searchParams }: { searchParams: Promise<Record<string,
           status: (o.status ?? "em_andamento") as StatusOS,
           atualizadoEm: o.atualizado_em,
           mecanico: o.mecanico_nome,
+          contagem: semContagem ? undefined : { fotos: o.qtd_fotos ?? 0, itens: itensPorOS.get(o.id ?? "") ?? 0 },
         }}
       />
     </li>

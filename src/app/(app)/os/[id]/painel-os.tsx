@@ -9,12 +9,13 @@ import {
   useId,
   useMemo,
   useRef,
+  useSyncExternalStore,
   useState,
   useTransition,
   type FormEvent,
   type ReactNode,
 } from "react";
-import { Check, CircleAlert, Plus, Search, ThumbsDown, ThumbsUp, TriangleAlert } from "lucide-react";
+import { Camera, Check, CircleAlert, CircleCheckBig, Images, Play, Plus, Search, ThumbsDown, ThumbsUp, TriangleAlert } from "lucide-react";
 import {
   adicionarItemOS,
   alterarItemMecanicoOS,
@@ -43,7 +44,7 @@ import {
   EtiquetaVoceLancou,
 } from "@/components/os/etiquetas-fase3";
 import { EtiquetaSemPreco } from "@/components/os/badge-status";
-import { BarraAcoesOS } from "@/components/os/barra-acoes-os";
+import { BarraAcoesMecanico, BarraAcoesOS, classesBotaoBarra } from "@/components/os/barra-acoes-os";
 import { LinhaItemOS, ListaItensOS } from "@/components/os/linha-item-os";
 import { AvisoDesfazer } from "@/components/ui/aviso-desfazer";
 import { Botao, BotaoLink } from "@/components/ui/botao";
@@ -55,6 +56,8 @@ import { AvisoLento, BotaoEnviar, CaixaMensagem, focarPrimeiroErro } from "@/com
 import { Quantidade } from "@/components/ui/quantidade";
 import { SUGESTOES_RECUSA, SugestoesTexto, acrescentarTexto } from "@/components/ui/sugestoes-texto";
 import type { EstadoAcao } from "@/lib/acao";
+import { assinarOSCheia, entregarFotosDaBarra, osCheia } from "@/lib/fotos/barra";
+import { LIMITE_FOTOS_OS } from "@/lib/fotos/regras";
 import { centavosParaCampo, formatarCentavos, formatarDiaHora, formatarTelefone, reaisParaCentavos } from "@/lib/formato";
 import {
   CANAIS_RESPOSTA,
@@ -441,6 +444,7 @@ export function PainelOS({ os, children }: { os: DadosPainel; children: ReactNod
  */
 export function BarraOS({ proximoPasso }: { proximoPasso?: string }) {
   const { os, abrir, passo, ocupado, erro, sucesso, definirPrecos } = useOS();
+  if (!os.gerencia) return <BarraMecanico proximoPasso={proximoPasso} />;
   const acima = ocupado ? (
     <AvisoLento />
   ) : erro ? (
@@ -508,31 +512,147 @@ export function BarraOS({ proximoPasso }: { proximoPasso?: string }) {
         if (!os.pago) primario = <Botao onClick={() => abrir({ tipo: "pagamento" })}>Registrar pagamento</Botao>;
         break;
     }
-  } else if (os.mecanicoDaOS) {
-    if (os.status === "aprovada") {
-      primario = (
-        <Botao disabled={ocupado} onClick={() => passo("aprovada", "em_andamento")}>
-          {rotuloOcupado("Começar serviço")}
-        </Botao>
-      );
-    } else if (os.status === "em_andamento") {
-      primario = (
-        <Botao onClick={() => abrir({ tipo: "pronta" })}>
-          <Check size={24} strokeWidth={2.5} aria-hidden />
-          Marcar como pronta
-        </Botao>
-      );
-    }
   }
 
   if (!primario && !secundario) {
-    return acima ? <div className="fixed inset-x-4 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-50 lg:static">{acima}</div> : null;
+    return acima ? <AcimaSemBarra>{acima}</AcimaSemBarra> : null;
   }
   return (
     <>
       <span hidden data-esconde-navegacao />
       <BarraAcoesOS primario={primario} secundario={secundario} acima={acima} proximoPasso={proximoPasso} />
     </>
+  );
+}
+
+function AcimaSemBarra({ children }: { children: ReactNode }) {
+  return <div className="fixed inset-x-4 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-50 lg:static">{children}</div>;
+}
+
+const ICONE_BARRA = { size: 26, strokeWidth: 2.25, "aria-hidden": true } as const;
+
+/**
+ * Barra do mecanico (DESIGN §11.2, F3-B6): status · item · foto, com "Tirar foto" como
+ * primario a direita (a acao que ele mais repete). So na OS dele e com a OS aberta;
+ * nos outros casos volta a barra de navegacao.
+ *
+ * | status               | esquerda        | meio        | direita            |
+ * | aguardando_orcamento | —               | Lançar item | Tirar foto         |
+ * | orcamento_enviado    | —               | —           | Tirar foto (toda)  |
+ * | aprovada             | Começar serviço | Lançar item | Tirar foto         |
+ * | em_andamento         | Marcar pronta   | Lançar item | Tirar foto         |
+ * | pronta               | —               | —           | Tirar foto (toda)  |
+ */
+function BarraMecanico({ proximoPasso }: { proximoPasso?: string }) {
+  const { os, abrir, passo, ocupado, erro, sucesso } = useOS();
+  const cheia = useSyncExternalStore(
+    assinarOSCheia,
+    () => osCheia(os.id),
+    () => false,
+  );
+  const aberta = os.status !== "entregue" && os.status !== "cancelada";
+  const avisoCheia = cheia ? (
+    <p className="text-base text-texto-suave" data-teste="aviso-limite-barra">
+      Esta OS chegou ao limite de {LIMITE_FOTOS_OS} fotos. Apague alguma para enviar outra.
+    </p>
+  ) : null;
+  const acima = ocupado ? (
+    <AvisoLento />
+  ) : erro ? (
+    <CaixaMensagem tipo="erro">{erro}</CaixaMensagem>
+  ) : sucesso ? (
+    <CaixaMensagem tipo="sucesso">{sucesso}</CaixaMensagem>
+  ) : (
+    avisoCheia ?? undefined
+  );
+
+  if (!os.mecanicoDaOS || !aberta) return acima ? <AcimaSemBarra>{acima}</AcimaSemBarra> : null;
+
+  const botoes: ReactNode[] = [];
+  const empilhado = os.status === "aguardando_orcamento" || os.status === "aprovada" || os.status === "em_andamento";
+
+  if (os.status === "aprovada") {
+    botoes.push(
+      <button
+        key="status"
+        type="button"
+        disabled={ocupado}
+        aria-label={ocupado ? undefined : "Começar serviço"}
+        onClick={() => passo("aprovada", "em_andamento")}
+        className={classesBotaoBarra("secundario", true)}
+      >
+        <Play {...ICONE_BARRA} />
+        {ocupado ? "Enviando…" : "Começar"}
+      </button>,
+    );
+  } else if (os.status === "em_andamento") {
+    botoes.push(
+      <button key="status" type="button" onClick={() => abrir({ tipo: "pronta" })} className={classesBotaoBarra("secundario", true)}>
+        <CircleCheckBig {...ICONE_BARRA} />
+        Marcar pronta
+      </button>,
+    );
+  }
+  if (os.podeLancar) {
+    botoes.push(
+      <button
+        key="item"
+        type="button"
+        aria-label="Lançar item: serviço ou peça"
+        onClick={() => abrir({ tipo: "lancar" })}
+        className={classesBotaoBarra("secundario", true)}
+        data-teste="barra-lancar"
+      >
+        <Plus {...ICONE_BARRA} />
+        Lançar item
+      </button>,
+    );
+  }
+  botoes.push(<BotaoFotoBarra key="foto" osId={os.id} empilhado={empilhado} desabilitado={cheia} />);
+
+  return (
+    <>
+      <span hidden data-esconde-navegacao />
+      <BarraAcoesMecanico botoes={botoes} acima={acima} proximoPasso={proximoPasso} />
+    </>
+  );
+}
+
+/**
+ * "Tirar foto" da barra: `<label>` com o `<input capture>` dentro (o Safari só abre a câmera
+ * com o toque direto). Os arquivos vão para a seção Fotos, que abre a folha do tipo.
+ * Desktop (ponteiro fino): "Escolher fotos", várias de uma vez.
+ */
+function BotaoFotoBarra({ osId, empilhado, desabilitado }: { osId: string; empilhado: boolean; desabilitado: boolean }) {
+  const id = useId();
+  return (
+    <label
+      htmlFor={id}
+      aria-disabled={desabilitado}
+      className={`${classesBotaoBarra("primario", empilhado)} has-[:focus-visible]:outline-3 has-[:focus-visible]:outline-foco ${
+        desabilitado ? "pointer-events-none opacity-50" : "cursor-pointer"
+      }`}
+      data-teste="barra-foto"
+    >
+      <Camera {...ICONE_BARRA} className="pointer-fine:hidden" />
+      <Images {...ICONE_BARRA} className="hidden pointer-fine:block" />
+      <span className="pointer-fine:hidden">Tirar foto</span>
+      <span className="hidden pointer-fine:inline">Escolher fotos</span>
+      <input
+        id={id}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="sr-only"
+        disabled={desabilitado}
+        onChange={(ev) => {
+          const arquivos = Array.from(ev.target.files ?? []);
+          ev.target.value = "";
+          entregarFotosDaBarra(osId, arquivos);
+        }}
+        data-teste="barra-foto-input"
+      />
+    </label>
   );
 }
 

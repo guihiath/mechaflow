@@ -14,6 +14,7 @@ import { EH_PRODUCAO } from "@/lib/brand";
 import type { Papel } from "@/lib/contexto";
 import { traduzirErro } from "@/lib/erros";
 import { CATEGORIAS_FOTO, type CategoriaFoto } from "@/lib/formato";
+import { ouvirFotosDaBarra, publicarOSCheia } from "@/lib/fotos/barra";
 import { aquecerConexao } from "@/lib/fotos/enviar";
 import { adicionarArquivos, aoConfirmarFoto, definirTipo, descartar, iniciarFila, tentarDeNovo, type ItemFila } from "@/lib/fotos/fila";
 import { BUCKET_FOTOS, LIMITE_FOTOS_OS, VALIDADE_URL_FOTO_S } from "@/lib/fotos/regras";
@@ -185,12 +186,24 @@ export function FotosOS({
   function aoEscolher(ev: ChangeEvent<HTMLInputElement>) {
     const arquivos = Array.from(ev.target.files ?? []);
     ev.target.value = ""; // deixa escolher o mesmo arquivo de novo
+    receber(arquivos);
+  }
+
+  function receber(arquivos: File[]) {
     if (!arquivos.length || cheio) return;
     void aquecerConexao();
     const entram = arquivos.slice(0, cabem);
     const ids = adicionarArquivos(entram, { osId, numeroOS });
     if (ids.length) setLote({ ids, cortadas: arquivos.length - entram.length, chave: Date.now() });
   }
+
+  // "Tirar foto" da barra do mecânico (DESIGN §11.2): mesmo caminho dos botões da seção.
+  const receberRef = useRef(receber);
+  useEffect(() => {
+    receberRef.current = receber;
+  });
+  useEffect(() => (podeEnviar ? ouvirFotosDaBarra(osId, (a) => receberRef.current(a)) : undefined), [osId, podeEnviar]);
+  useEffect(() => publicarOSCheia(osId, cheio), [osId, cheio]);
 
   function escolherTipo(categoria: CategoriaFoto, legenda: string) {
     if (!lote) return;
