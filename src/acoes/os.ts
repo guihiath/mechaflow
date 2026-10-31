@@ -402,7 +402,8 @@ export async function salvarItemOS(_anterior: EstadoAcao, dados: FormData): Prom
   }
 
   refresh();
-  return { ok: true, mensagem: "Item salvo." };
+  // comPreco: a folha "Definir preços" so diz "Todos os itens têm preço." se este ganhou preco.
+  return { ok: true, mensagem: "Item salvo.", dados: { comPreco: v.preco === null ? "0" : "1" } };
 }
 
 export async function removerItemOS(osId: string, itemId: string): Promise<EstadoAcao> {
@@ -813,6 +814,11 @@ export async function fecharOS(_anterior: EstadoAcao, dados: FormData): Promise<
   if (codigo) args.p_codigo_falha = codigo;
   const { error } = await supabase.rpc("entregar_os", args);
   if (error) {
+    // Alguem (ou o mecanico) deixou item sem preco no meio: a tela leva ao item.
+    if (error.message === "os_itens_sem_preco") {
+      refresh();
+      return { erro: "Há itens sem preço. Defina o preço antes de entregar.", dados: { semPreco: "1" } };
+    }
     const r = await erroDaOS(supabase, osId, error, "fechar a OS");
     return r?.erro === falha("fechar a OS")
       ? { erro: "Não foi possível fechar a OS. Nada foi perdido: confira a internet e tente de novo." }

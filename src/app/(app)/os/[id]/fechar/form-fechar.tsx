@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { fecharOS } from "@/acoes/os";
@@ -8,6 +9,7 @@ import { AreaTexto, Campo } from "@/components/ui/campo";
 import { Escolha } from "@/components/ui/escolha";
 import { BotaoEnviar, CaixaMensagem, focarPrimeiroErro } from "@/components/ui/formulario";
 import type { EstadoAcao } from "@/lib/acao";
+import { formatarCentavos } from "@/lib/formato";
 import { FORMAS_PAGAMENTO, type FormaPagamento } from "@/lib/os";
 
 const ERRO_FECHAR = "Não foi possível fechar a OS. Nada foi perdido: confira a internet e tente de novo.";
@@ -17,6 +19,7 @@ export function FormFechar({
   numero,
   placa,
   bloqueado,
+  acimaDoAprovadoCentavos = 0,
   causa: causaInicial,
   solucao: solucaoInicial,
   codigo: codigoInicial,
@@ -25,6 +28,8 @@ export function FormFechar({
   numero: number;
   placa: string;
   bloqueado: boolean;
+  /** Total atual acima do aprovado (so avisa na confirmacao, DESIGN §11.9). */
+  acimaDoAprovadoCentavos?: number;
   causa: string;
   solucao: string;
   codigo: string;
@@ -59,7 +64,7 @@ export function FormFechar({
           return;
         }
         setEstado(r);
-        if (r?.campos) {
+        if (r?.campos || r?.dados?.semPreco) {
           setConfirmando(false);
           focarPrimeiroErro(form.current);
         }
@@ -134,6 +139,14 @@ export function FormFechar({
       />
 
       {estado?.erro && <CaixaMensagem tipo="erro">{estado.erro}</CaixaMensagem>}
+      {estado?.dados?.semPreco === "1" && (
+        <Link
+          href={`/os/${osId}?precificar=1`}
+          className="-mt-4 inline-flex min-h-toque items-center self-start font-bold text-info-texto underline"
+        >
+          Definir preços
+        </Link>
+      )}
       {estado?.ok && estado.mensagem && <CaixaMensagem tipo="sucesso">{estado.mensagem}</CaixaMensagem>}
 
       {confirmando ? (
@@ -147,6 +160,11 @@ export function FormFechar({
           <p id="pergunta-entregar" className="text-lg font-bold">
             Entregar {placa} e fechar a OS #{numero}? Depois disso os itens não podem mais ser mudados.
           </p>
+          {acimaDoAprovadoCentavos > 0 && (
+            <p className="text-base font-bold text-alerta-texto">
+              O total está <span className="font-mono">{formatarCentavos(acimaDoAprovadoCentavos)}</span> acima do aprovado.
+            </p>
+          )}
           <Botao variante="secundario" disabled={enviando} onClick={() => setConfirmando(false)}>
             Voltar sem entregar
           </Botao>

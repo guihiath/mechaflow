@@ -68,7 +68,7 @@ export function LinhaItemOS({
     ? `${qtd} ${item.unidade || "un."}`
     : `${qtd} × ${temPreco ? formatarCentavos(preco) : "—"}${verCusto ? ` · Custo ${formatarCentavos(custo)}` : ""}`;
 
-  const corpo = (
+  const topo = (
     <>
       <Icone size={22} strokeWidth={2.25} aria-hidden className="mt-0.5 shrink-0 text-texto-suave" />
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -77,7 +77,6 @@ export function LinhaItemOS({
           {item.descricao}
         </span>
         <span className="font-mono text-sm text-texto-suave">{detalhe}</span>
-        {etiquetas && <span className="mt-1.5 flex flex-wrap gap-1.5">{etiquetas}</span>}
       </span>
       {!semValores && (
         <span className="shrink-0 text-right">
@@ -91,8 +90,18 @@ export function LinhaItemOS({
       {aoTocar && <ChevronRight size={22} strokeWidth={2.25} aria-hidden className="mt-0.5 shrink-0 text-texto-suave" />}
     </>
   );
+  // Etiquetas numa linha propria, com a largura toda (alinhada ao texto, depois do icone):
+  // em 360px a coluna do texto fica estreita ao lado do "Sem preço" e a etiqueta quebraria.
+  const corpo = (
+    <>
+      <span className="flex w-full items-start gap-3">{topo}</span>
+      {etiquetas && (
+        <span className="mt-1.5 flex flex-wrap gap-1.5 pl-[34px] whitespace-nowrap">{etiquetas}</span>
+      )}
+    </>
+  );
 
-  const classe = "flex min-h-16 w-full items-start gap-3 px-4 py-3 text-left";
+  const classe = "flex min-h-16 w-full flex-col px-4 py-3 text-left";
 
   return (
     <li>

@@ -2,9 +2,11 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import { BookOpen, CircleCheckBig, Clock, Contact, PackageSearch, Plus, Truck, Users, Wrench, ThumbsUp } from "lucide-react";
 import { Cabecalho } from "@/components/layout/cabecalho";
+import { CartaoOSSemPreco } from "@/components/os/cartao-os-sem-preco";
 import { BotaoLink } from "@/components/ui/botao";
 import { Cartao, ListaCarregando, Pagina } from "@/components/ui/estados";
 import { exigirContexto } from "@/lib/dal";
+import { STATUS_ABERTOS } from "@/lib/os-status";
 import { createClient } from "@/lib/supabase/server";
 
 export const metadata: Metadata = { title: "Início" };
@@ -26,7 +28,7 @@ async function Painel() {
   const ctx = await exigirContexto(["dono"]);
   const supabase = await createClient();
 
-  const [clientes, veiculos, pendentes, equipe, abertas] = await Promise.all([
+  const [clientes, veiculos, pendentes, equipe, abertas, semPreco] = await Promise.all([
     supabase.from("clientes").select("id", { count: "exact", head: true }),
     supabase.from("veiculos").select("id", { count: "exact", head: true }),
     supabase
@@ -35,7 +37,9 @@ async function Painel() {
       .eq("pendente_precificacao", true)
       .eq("ativo", true),
     supabase.from("perfis").select("id", { count: "exact", head: true }).eq("ativo", true),
-    supabase.from("ordens_servico").select("status").in("status", ["aguardando_orcamento", "orcamento_enviado", "aprovada", "em_andamento", "pronta"]).limit(5000),
+    supabase.from("ordens_servico").select("status").in("status", [...STATUS_ABERTOS]).limit(5000),
+    // OS abertas com item sem preco (pendencia do balcao, DESIGN §11.10)
+    supabase.from("vw_os").select("id", { count: "exact", head: true }).in("status", [...STATUS_ABERTOS]).gt("itens_sem_preco", 0),
   ]);
   const contar = (...st: string[]) => (abertas.data ?? []).filter((o) => st.includes(o.status)).length;
   const atalhosOS = [
@@ -66,6 +70,8 @@ async function Painel() {
         <Plus size={24} strokeWidth={2.25} aria-hidden />
         Abrir OS
       </BotaoLink>
+
+      <CartaoOSSemPreco quantidade={semPreco.count ?? 0} />
 
       <ul className="flex flex-col gap-3 lg:grid lg:grid-cols-2">
         {atalhosOS.map(({ href, titulo, valor, icone: Icone }) => (

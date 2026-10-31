@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
-import { ClipboardList, Plus } from "lucide-react";
+import { ClipboardList, Plus, TriangleAlert } from "lucide-react";
 import { Cabecalho } from "@/components/layout/cabecalho";
 import { BadgeStatus, EtiquetaPagamento, SemMecanico } from "@/components/os/badge-status";
 import { CartaoOS } from "@/components/os/cartao-os";
+import { EtiquetaAcimaDoAprovado, EtiquetaSemPrecoContagem } from "@/components/os/etiquetas-fase3";
 import { BotaoLink } from "@/components/ui/botao";
 import { Busca } from "@/components/ui/busca";
 import { CaixaErro, ChipPlaca, EstadoVazio, ListaCarregando, Pagina } from "@/components/ui/estados";
@@ -19,7 +20,7 @@ import {
   param,
   placaValida,
 } from "@/lib/formato";
-import { FILTROS_OS, lerFiltroOS, type FiltroOS, type StatusOS } from "@/lib/os-status";
+import { FILTROS_OS, lerFiltroOS, STATUS_ABERTOS, type FiltroOS, type StatusOS } from "@/lib/os-status";
 import { createClient } from "@/lib/supabase/server";
 
 export const metadata: Metadata = { title: "Ordens de serviço" };
@@ -33,6 +34,7 @@ const RESUMO: Record<FiltroOS, [string, string]> = {
   aprovadas: ["aprovada", "aprovadas"],
   em_andamento: ["em andamento", "em andamento"],
   prontas: ["pronta", "prontas"],
+  sem_preco: ["com item sem preço", "com item sem preço"],
   entregues: ["entregue", "entregues"],
   canceladas: ["cancelada", "canceladas"],
   todas: ["no total", "no total"],
@@ -50,6 +52,21 @@ export default function ListaOsPage({ searchParams }: PageProps<"/os">) {
         </Suspense>
       </Pagina>
     </>
+  );
+}
+
+/** OS com orcamento aprovado e total atual maior que o aprovado (DESIGN §11.10). */
+function acimaDoAprovado(o: {
+  modo: string | null;
+  status: string | null;
+  valor_aprovado_centavos: number | null;
+  total_centavos: number | null;
+}) {
+  return (
+    o.modo === "com_orcamento" &&
+    o.status !== "cancelada" &&
+    o.valor_aprovado_centavos != null &&
+    (o.total_centavos ?? 0) > o.valor_aprovado_centavos
   );
 }
 
@@ -72,10 +89,11 @@ async function Lista({ searchParams }: { searchParams: Promise<Params> }) {
   let consulta = supabase
     .from("vw_os")
     .select(
-      "id, numero, status, placa, veiculo_marca, veiculo_modelo, cliente_nome, mecanico_nome, sintoma_relatado, atualizado_em, total_centavos, pago_em",
+      "id, numero, status, modo, placa, veiculo_marca, veiculo_modelo, cliente_nome, mecanico_nome, sintoma_relatado, atualizado_em, total_centavos, pago_em, itens_sem_preco, valor_aprovado_centavos",
       { count: "exact" },
     )
     .in("status", [...filtro.status]);
+  if (filtro.semPreco) consulta = consulta.gt("itens_sem_preco", 0);
 
   if (q) {
     const soNumero = q.replace(/^#/, "");
@@ -95,13 +113,11 @@ async function Lista({ searchParams }: { searchParams: Promise<Params> }) {
       ? consulta.order("pronta_em", { ascending: true, nullsFirst: false })
       : consulta.order("atualizado_em", { ascending: false });
 
-  const [{ data: lista, count, error }, { data: abertas }] = await Promise.all([
+  const [{ data: lista, count, error }, { data: abertas }, { count: qtdSemPreco }] = await Promise.all([
     consulta.range(0, limite - 1),
-    supabase
-      .from("ordens_servico")
-      .select("status")
-      .in("status", ["aguardando_orcamento", "orcamento_enviado", "aprovada", "em_andamento", "pronta"])
-      .limit(5000),
+    supabase.from("ordens_servico").select("status").in("status", [...STATUS_ABERTOS]).limit(5000),
+    // Chip "Sem preço": OS abertas com item sem preco (contagem so para dono/atendente).
+    supabase.from("vw_os").select("id", { count: "exact", head: true }).in("status", [...STATUS_ABERTOS]).gt("itens_sem_preco", 0),
   ]);
 
   const contagemStatus = new Map<StatusOS, number>();
@@ -121,7 +137,12 @@ async function Lista({ searchParams }: { searchParams: Promise<Params> }) {
       valor: f.valor,
       rotulo: f.rotulo,
       href: href({ status: f.valor === "abertas" ? (q ? "abertas" : undefined) : f.valor, pagina: undefined }),
-      contagem: abertos && abertas ? f.status.reduce((soma, s) => soma + (contagemStatus.get(s) ?? 0), 0) : undefined,
+      icone: f.semPreco ? TriangleAlert : undefined,
+      contagem: f.semPreco
+        ? (qtdSemPreco ?? undefined)
+        : abertos && abertas
+          ? f.status.reduce((soma, s) => soma + (contagemStatus.get(s) ?? 0), 0)
+          : undefined,
     };
   });
 
@@ -179,6 +200,8 @@ async function Lista({ searchParams }: { searchParams: Promise<Params> }) {
                     mecanico: o.mecanico_nome,
                     totalCentavos: o.total_centavos ?? 0,
                     aReceber: o.status === "entregue" && !o.pago_em,
+                    itensSemPreco: o.itens_sem_preco ?? 0,
+                    acimaDoAprovado: acimaDoAprovado(o),
                   }}
                 />
               </li>
@@ -216,8 +239,10 @@ async function Lista({ searchParams }: { searchParams: Promise<Params> }) {
                     <td className="max-w-56 truncate px-4 font-bold">{o.cliente_nome}</td>
                     <td className="max-w-48 truncate px-4">{[o.veiculo_marca, o.veiculo_modelo].filter(Boolean).join(" ")}</td>
                     <td className="px-4">
-                      <span className="flex items-center gap-2">
+                      <span className="flex flex-wrap items-center gap-2 py-2">
                         {o.status && <BadgeStatus status={o.status as StatusOS} />}
+                        <EtiquetaSemPrecoContagem quantidade={o.itens_sem_preco ?? 0} />
+                        {acimaDoAprovado(o) && <EtiquetaAcimaDoAprovado />}
                         {o.status === "entregue" && !o.pago_em && <EtiquetaPagamento pago={false} />}
                       </span>
                     </td>
@@ -288,6 +313,16 @@ async function ListaVazia({
         titulo="Nenhuma OS ainda."
         texto="Comece pela placa do caminhão que chegou."
         acao={{ href: "/os/nova", rotulo: "Abrir OS" }}
+      />
+    );
+  }
+  if (filtro.semPreco) {
+    return (
+      <EstadoVazio
+        icone={ClipboardList}
+        titulo="Nenhuma OS sem preço."
+        texto="Todos os itens das OS abertas têm preço."
+        acao={{ href: "/os?status=todas", rotulo: "Ver todas", variante: "secundario" }}
       />
     );
   }

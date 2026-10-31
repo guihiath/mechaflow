@@ -36,7 +36,12 @@ import {
   type ItemCatalogoMecanico,
   type ItemCatalogoOS,
 } from "@/acoes/os";
-import { EtiquetaConferido, EtiquetaVoceLancou } from "@/components/os/etiquetas-fase3";
+import {
+  EtiquetaAposAprovacao,
+  EtiquetaConferido,
+  EtiquetaLancadoPor,
+  EtiquetaVoceLancou,
+} from "@/components/os/etiquetas-fase3";
 import { EtiquetaSemPreco } from "@/components/os/badge-status";
 import { BarraAcoesOS } from "@/components/os/barra-acoes-os";
 import { LinhaItemOS, ListaItensOS } from "@/components/os/linha-item-os";
@@ -50,7 +55,7 @@ import { AvisoLento, BotaoEnviar, CaixaMensagem, focarPrimeiroErro } from "@/com
 import { Quantidade } from "@/components/ui/quantidade";
 import { SUGESTOES_RECUSA, SugestoesTexto, acrescentarTexto } from "@/components/ui/sugestoes-texto";
 import type { EstadoAcao } from "@/lib/acao";
-import { centavosParaCampo, formatarCentavos, formatarTelefone, reaisParaCentavos } from "@/lib/formato";
+import { centavosParaCampo, formatarCentavos, formatarDiaHora, formatarTelefone, reaisParaCentavos } from "@/lib/formato";
 import {
   CANAIS_RESPOSTA,
   FORMAS_PAGAMENTO,
@@ -76,6 +81,14 @@ export type ItemOSCliente = {
   subtotalCentavos: number | null;
   /** So o dono recebe. */
   custoUnitarioCentavos?: number | null;
+  /** Nome de quem lancou, so quando entrou pelo mecanico (etiqueta "Lançado por João"). */
+  lancadoPorNome?: string | null;
+  /** Quando entrou (ISO, UTC): "Lançado por João em 29/10 às 14:20". */
+  criadoEm?: string | null;
+  /** OS com orcamento ja aprovada quando o item entrou (etiqueta "Após a aprovação"). */
+  aposAprovacao?: boolean;
+  /** Item do mecanico que o balcao ja precificou (sai do aviso). */
+  conferido?: boolean;
 };
 
 /**
@@ -130,11 +143,15 @@ export type DadosPainel = {
   itensMecanico?: ItemMecanico[];
   /** Mecanico da OS, em status que deixa lancar (F3.3). */
   podeLancar?: boolean;
+  /** `?precificar=1` (vindo do fechamento): abre "Definir preços" ao carregar. */
+  precificarAoAbrir?: boolean;
 };
 
 type FolhaAberta =
   | { tipo: "item-novo" }
   | { tipo: "item"; item: ItemOSCliente }
+  /** "Definir preços": itens sem preco em sequencia (DESIGN §11.9). */
+  | { tipo: "precificar"; fila: string[] }
   | { tipo: "lancar" }
   | { tipo: "item-mecanico"; item: ItemMecanico }
   | { tipo: "resposta" }
@@ -155,6 +172,11 @@ type Ctx = {
   erro: string | null;
   /** Mostra um erro acima da barra (ex.: a folha fechou porque a OS mudou). */
   mostrarErro: (erro: string) => void;
+  /** Abre a folha do 1o item sem preco e segue para os proximos (dono/atendente). */
+  definirPrecos: () => void;
+  /** Recado de sucesso acima da barra ("Todos os itens têm preço."). */
+  sucesso: string | null;
+  mostrarSucesso: (texto: string) => void;
   /** Rascunho de cada folha (C1): sobrevive a fechar a folha e a recarregar a pagina. */
   lerRascunho: (chave: string) => Record<string, string> | undefined;
   guardarRascunho: (chave: string, campos: Record<string, string>) => void;
@@ -278,6 +300,7 @@ export function PainelOS({ os, children }: { os: DadosPainel; children: ReactNod
   const [folha, setFolha] = useState<FolhaAberta | null>(null);
   const [desfazer, setDesfazer] = useState<Desfazer | null>(null);
   const [erro, setErro] = useState<string | null>(null);
+  const [sucesso, setSucesso] = useState<string | null>(null);
   const [ocupado, iniciar] = useTransition();
   const contador = useRef(0);
   const rascunhos = useRef<Record<string, Record<string, string>>>({});
@@ -345,13 +368,33 @@ export function PainelOS({ os, children }: { os: DadosPainel; children: ReactNod
     setDesfazer(null);
   }
 
+  const filaSemPreco = () => itensOrdenados(os.itens).filter((i) => i.precoUnitarioCentavos === null).map((i) => i.id);
+  const definirPrecos = () => {
+    const fila = filaSemPreco();
+    setErro(null);
+    setSucesso(null);
+    if (fila.length) setFolha({ tipo: "precificar", fila });
+  };
+
+  // Vindo do fechamento ("Definir preços" -> /os/[id]?precificar=1): abre a folha do 1o item sem preco.
+  const precificarAoAbrir = useRef(os.precificarAoAbrir && os.gerencia);
+  useEffect(() => {
+    if (!precificarAoAbrir.current) return;
+    precificarAoAbrir.current = false;
+    const fila = itensOrdenados(os.itens).filter((i) => i.precoUnitarioCentavos === null).map((i) => i.id);
+    if (fila.length) setFolha({ tipo: "precificar", fila });
+  }, [os.itens]);
+
   const ctx: Ctx = {
     os,
-    abrir: (f) => (setErro(null), setFolha(f)),
+    abrir: (f) => (setErro(null), setSucesso(null), setFolha(f)),
     passo,
     ocupado,
     erro,
     mostrarErro: (e) => (setDesfazer(null), setErro(e)),
+    definirPrecos,
+    sucesso,
+    mostrarSucesso: (t) => (setErro(null), setSucesso(t)),
     lerRascunho,
     guardarRascunho,
     limparRascunho,
@@ -375,6 +418,7 @@ export function PainelOS({ os, children }: { os: DadosPainel; children: ReactNod
       )}
       {folha?.tipo === "item-novo" && <FolhaItem aoFechar={fechar} />}
       {folha?.tipo === "item" && <FolhaItem aoFechar={fechar} item={folha.item} />}
+      {folha?.tipo === "precificar" && <FolhaItem aoFechar={fechar} fila={folha.fila} />}
       {folha?.tipo === "lancar" && <FolhaItemMecanico aoFechar={fechar} />}
       {folha?.tipo === "item-mecanico" && <FolhaItemMecanico aoFechar={fechar} item={folha.item} />}
       {folha?.tipo === "resposta" && (
@@ -396,8 +440,14 @@ export function PainelOS({ os, children }: { os: DadosPainel; children: ReactNod
  * Celular: fixa no rodape e esconde a navegacao. Desktop: card "Próximo passo".
  */
 export function BarraOS({ proximoPasso }: { proximoPasso?: string }) {
-  const { os, abrir, passo, ocupado, erro } = useOS();
-  const acima = ocupado ? <AvisoLento /> : erro ? <CaixaMensagem tipo="erro">{erro}</CaixaMensagem> : undefined;
+  const { os, abrir, passo, ocupado, erro, sucesso, definirPrecos } = useOS();
+  const acima = ocupado ? (
+    <AvisoLento />
+  ) : erro ? (
+    <CaixaMensagem tipo="erro">{erro}</CaixaMensagem>
+  ) : sucesso ? (
+    <CaixaMensagem tipo="sucesso">{sucesso}</CaixaMensagem>
+  ) : undefined;
   const add = (
     <Botao variante="secundario" onClick={() => abrir({ tipo: "item-novo" })}>
       Adicionar item
@@ -445,7 +495,13 @@ export function BarraOS({ proximoPasso }: { proximoPasso?: string }) {
         secundario = add;
         break;
       case "pronta":
-        primario = <BotaoLink href={`/os/${os.id}/fechar`}>Fechar e entregar</BotaoLink>;
+        // Com item sem preco a entrega esta bloqueada: o primario leva ao que destrava (DESIGN §11.9).
+        primario =
+          (os.itensSemPreco ?? 0) > 0 ? (
+            <Botao onClick={definirPrecos}>Definir preços ({os.itensSemPreco})</Botao>
+          ) : (
+            <BotaoLink href={`/os/${os.id}/fechar`}>Fechar e entregar</BotaoLink>
+          );
         secundario = add;
         break;
       case "entregue":
@@ -552,9 +608,18 @@ export function BotaoTrocarModo() {
 }
 
 /** Lista de itens: cada linha abre a folha de edicao (dono/atendente, OS aberta). */
+/** Servicos antes das pecas (mesma ordem da lista e do "Definir preços"). */
+function itensOrdenados(itens: ItemOSCliente[]) {
+  return [...itens].sort((a, b) => (a.tipo === b.tipo ? 0 : a.tipo === "servico" ? -1 : 1));
+}
+
+/**
+ * Lista de itens: cada linha abre a folha de edicao (dono/atendente, OS aberta).
+ * Etiquetas da Fase 3 na linha de baixo: "Lançado por João" e "Após a aprovação".
+ */
 export function ListaItensEditavel({ editavel, mostrarCusto }: { editavel: boolean; mostrarCusto: boolean }) {
   const { os, abrir } = useOS();
-  const ordenados = [...os.itens].sort((a, b) => (a.tipo === b.tipo ? 0 : a.tipo === "servico" ? -1 : 1));
+  const ordenados = itensOrdenados(os.itens);
   return (
     <ListaItensOS rotulo="Serviços e peças">
       {ordenados.map((i) => (
@@ -562,6 +627,14 @@ export function ListaItensEditavel({ editavel, mostrarCusto }: { editavel: boole
           key={i.id}
           mostrarCusto={mostrarCusto}
           aoTocar={editavel ? () => abrir({ tipo: "item", item: i }) : undefined}
+          etiquetas={
+            i.lancadoPorNome || (i.aposAprovacao && os.modo === "com_orcamento") ? (
+              <>
+                {i.lancadoPorNome && <EtiquetaLancadoPor nome={i.lancadoPorNome} />}
+                {i.aposAprovacao && os.modo === "com_orcamento" && <EtiquetaAposAprovacao />}
+              </>
+            ) : undefined
+          }
           item={{
             tipo: i.tipo,
             descricao: i.descricao,
@@ -573,6 +646,49 @@ export function ListaItensEditavel({ editavel, mostrarCusto }: { editavel: boole
         />
       ))}
     </ListaItensOS>
+  );
+}
+
+/** Primeiro nome ("João Carlos" -> "João"), como nas etiquetas. */
+const primeiroNome = (nome: string) => nome.trim().split(/\s+/)[0] || nome;
+
+/**
+ * Aviso dos itens do mecanico (DESIGN §11.9), logo abaixo do topo: so aparece se houver
+ * item lancado pelo mecanico que o balcao ainda nao conferiu. "Definir preços" abre a
+ * folha do 1o item sem preco e segue em sequencia.
+ */
+export function AvisoItensMecanico() {
+  const { os } = useOS();
+  const pendentes = os.itens.filter((i) => i.lancadoPorNome && !i.conferido);
+  if (!pendentes.length || os.status === "entregue" || os.status === "cancelada") return null;
+  const nomes = [...new Set(pendentes.map((i) => primeiroNome(i.lancadoPorNome ?? "")))];
+  const quem = nomes.length === 1 ? nomes[0] : `${nomes.slice(0, -1).join(", ")} e ${nomes[nomes.length - 1]}`;
+  const n = pendentes.length;
+  const semPreco = pendentes.filter((i) => i.precoUnitarioCentavos === null).length;
+  const texto =
+    `${quem} ${nomes.length === 1 ? "lançou" : "lançaram"} ${n === 1 ? "1 item" : `${n} itens`}.` +
+    (semPreco === 0
+      ? " Toque no item para conferir."
+      : n === 1
+        ? " Está sem preço."
+        : semPreco === 1
+          ? " 1 está sem preço."
+          : ` ${semPreco} estão sem preço.`);
+  return (
+    <div className="flex flex-col gap-2">
+      <CaixaMensagem tipo="alerta">{texto}</CaixaMensagem>
+      {(os.itensSemPreco ?? 0) > 0 && <BotaoDefinirPrecos />}
+    </div>
+  );
+}
+
+/** "Definir preços" (primario pequeno, 48px, largura total no celular). */
+export function BotaoDefinirPrecos() {
+  const { definirPrecos } = useOS();
+  return (
+    <Botao onClick={definirPrecos} className="h-toque lg:w-auto lg:self-start">
+      Definir preços
+    </Botao>
   );
 }
 
@@ -589,8 +705,14 @@ type CatalogoSeletor = { itens: ItemSeletor[]; maisUsados: { servico: string[]; 
 /** Dono/atendente: item do catalogo com preco (o mecanico nunca chega aqui). */
 const comPreco = (i: ItemSeletor | null): ItemCatalogoOS | null => (i && "precoCentavos" in i ? i : null);
 
-function FolhaItem({ aoFechar, item }: { aoFechar: () => void; item?: ItemOSCliente }) {
-  const { os } = useOS();
+function FolhaItem({ aoFechar, item: itemAberto, fila }: { aoFechar: () => void; item?: ItemOSCliente; fila?: string[] }) {
+  const { os, mostrarSucesso } = useOS();
+  // "Definir preços": a folha passa pelos itens sem preco da fila, um de cada vez.
+  const [indice, setIndice] = useState(0);
+  const proximos = (de: number) =>
+    (fila ?? []).slice(de + 1).filter((id) => os.itens.some((i) => i.id === id && i.precoUnitarioCentavos === null));
+  const item = fila ? os.itens.find((i) => i.id === fila[indice]) : itemAberto;
+  const restantes = fila ? proximos(indice).length : 0;
   const [escolhido, setEscolhido] = useState<Escolhido | null>(null);
   const [adicionados, setAdicionados] = useState(0);
   const [mensagem, setMensagem] = useState<string | null>(null);
@@ -605,6 +727,19 @@ function FolhaItem({ aoFechar, item }: { aoFechar: () => void; item?: ItemOSClie
       : "Não foi possível adicionar o item. Confira a internet e tente de novo.",
     (r) => {
       descartarRef.current?.();
+      if (fila) {
+        const seguir = proximos(indice);
+        if (seguir.length) {
+          setIndice(fila.indexOf(seguir[0]));
+          return "limpar";
+        }
+        // Ultimo da fila: so diz "todos" se nenhum outro item ficou sem preco.
+        const outros = os.itens.filter((i) => i.id !== item?.id && i.precoUnitarioCentavos === null).length;
+        const salvouPreco = r?.dados?.comPreco === "1";
+        if (salvouPreco && outros === 0) mostrarSucesso("Todos os itens têm preço.");
+        aoFechar();
+        return;
+      }
       if (editando) {
         aoFechar();
         return;
@@ -618,6 +753,12 @@ function FolhaItem({ aoFechar, item }: { aoFechar: () => void; item?: ItemOSClie
 
   const titulo = editando ? "Editar item" : escolhido ? escolhido.descricao || "Item avulso" : `Adicionar à OS #${os.numero}`;
 
+  // Fila vazia (o item sumiu ou ja tem preco): nada para mostrar.
+  useEffect(() => {
+    if (fila && !item) aoFechar();
+  }, [fila, item, aoFechar]);
+  if (fila && !item) return null;
+
   return (
     <Folha
       aberta
@@ -627,7 +768,23 @@ function FolhaItem({ aoFechar, item }: { aoFechar: () => void; item?: ItemOSClie
       recuperado={rasc.recuperado}
       aoDescartar={() => descartarRef.current?.()}
       rodape={
-        passo2 ? (
+        fila ? (
+          <>
+            <button
+              type="button"
+              onClick={aoFechar}
+              className="inline-flex min-h-toque w-full items-center justify-center text-base font-bold text-info-texto underline underline-offset-4"
+            >
+              Concluir
+            </button>
+            <BotaoForm
+              form="form-item-os"
+              enviando={envio.enviando}
+              rotulo={restantes > 0 ? `Salvar e ir para o próximo (${restantes})` : "Salvar preço"}
+              rotuloEnviando="Salvando…"
+            />
+          </>
+        ) : passo2 ? (
           <BotaoForm
             form="form-item-os"
             enviando={envio.enviando}
@@ -656,7 +813,9 @@ function FolhaItem({ aoFechar, item }: { aoFechar: () => void; item?: ItemOSClie
       )}
       {passo2 ? (
         <FormItem
+          key={item?.id ?? "novo"}
           item={item}
+          focarPreco={Boolean(fila) || item?.precoUnitarioCentavos === null}
           escolhido={escolhido && { ...escolhido, catalogo: comPreco(escolhido.catalogo) }}
           envio={envio}
           aoRemover={() => {
@@ -879,6 +1038,7 @@ function SeletorItem({
 
 function FormItem({
   item,
+  focarPreco,
   escolhido,
   envio,
   aoRemover,
@@ -886,6 +1046,8 @@ function FormItem({
   descartarRef,
 }: {
   item?: ItemOSCliente;
+  /** Item sem preco (ou "Definir preços"): o campo de preco ja vem com o foco. */
+  focarPreco?: boolean;
   escolhido: { catalogo: ItemCatalogoOS | null; descricao: string; tipo: TipoItemOS } | null;
   envio: ReturnType<typeof useEnvio>;
   aoRemover: () => void;
@@ -941,12 +1103,29 @@ function FormItem({
     [aoRascunho, descartarRef],
   );
 
+  // Item sem preco: o campo de preco ja vem marcado. Depois do showModal da Folha
+  // (ele foca o 1o elemento), por isso no proximo ciclo.
+  const campoPreco = useRef<HTMLInputElement>(null);
+  const [focarAoAbrir] = useState(() => Boolean(focarPreco) && !preco);
+  useEffect(() => {
+    if (!focarAoAbrir) return;
+    const t = window.setTimeout(() => campoPreco.current?.focus({ preventScroll: true }), 0);
+    return () => window.clearTimeout(t);
+  }, [focarAoAbrir]);
+
   const precoCent = reaisParaCentavos(preco);
   const subtotal = qtd !== null && typeof precoCent === "number" && !Number.isNaN(precoCent) ? Math.round(qtd * precoCent) : null;
   const ehPeca = tipo === "peca";
 
   return (
     <form id="form-item-os" onSubmit={envio.enviar} noValidate className="flex flex-col gap-5">
+      {item?.lancadoPorNome && (
+        <p className="-mt-1 text-sm text-texto-suave">
+          Lançado por {primeiroNome(item.lancadoPorNome)}
+          {item.criadoEm ? ` em ${formatarDiaHora(item.criadoEm)}` : ""}
+          {item.aposAprovacao && os.modo === "com_orcamento" ? " · depois da aprovação" : ""}
+        </p>
+      )}
       <input type="hidden" name="os_id" value={os.id} />
       {item && <input type="hidden" name="item_id" value={item.id} />}
       {!item && <input type="hidden" name="chave" value={chave} />}
@@ -995,6 +1174,7 @@ function FormItem({
       <Campo
         rotulo="Preço unitário (R$)"
         name="preco"
+        ref={campoPreco}
         inputMode="decimal"
         autoComplete="off"
         placeholder="0,00"

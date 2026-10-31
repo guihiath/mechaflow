@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { TriangleAlert } from "lucide-react";
 import { formatarCentavos } from "@/lib/formato";
 
@@ -6,6 +7,7 @@ import { formatarCentavos } from "@/lib/formato";
  * - Sem `totalCentavos` (ex.: mecanico): nao renderiza nada.
  * - `custoPecasCentavos` (so dono): mostra custo e margem abaixo de "Só você vê".
  * - `itensSemPreco` > 0: aviso de que o total ainda nao esta certo.
+ * - `children`: vai logo abaixo do Total (ex.: `AprovadoAgora`, DESIGN §11.9).
  */
 export function ResumoTotais({
   servicosCentavos,
@@ -13,12 +15,14 @@ export function ResumoTotais({
   totalCentavos,
   itensSemPreco = 0,
   custoPecasCentavos,
+  children,
 }: {
   servicosCentavos?: number | null;
   pecasCentavos?: number | null;
   totalCentavos?: number | null;
   itensSemPreco?: number;
   custoPecasCentavos?: number | null;
+  children?: ReactNode;
 }) {
   if (typeof totalCentavos !== "number") return null;
 
@@ -46,6 +50,8 @@ export function ResumoTotais({
           <dd className="text-right font-mono text-[1.75rem] leading-9 font-semibold">{formatarCentavos(totalCentavos)}</dd>
         </div>
       </dl>
+
+      {children}
 
       {itensSemPreco > 0 && (
         <p role="status" className="flex items-start gap-1.5 text-base font-bold text-alerta-texto">

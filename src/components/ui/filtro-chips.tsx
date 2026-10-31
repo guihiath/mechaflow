@@ -1,11 +1,13 @@
 import Link from "next/link";
-import { Check } from "lucide-react";
+import { Check, type LucideIcon } from "lucide-react";
 
 export type OpcaoFiltro = {
   valor: string;
   rotulo: string;
   /** Destino do chip (GET, ex.: `/os?status=prontas&q=abc`). */
   href: string;
+  /** Icone opcional antes do rotulo (ex.: TriangleAlert no "Sem preço"). */
+  icone?: LucideIcon;
   /** Contagem opcional: "Prontas (3)". */
   contagem?: number;
 };
@@ -42,7 +44,11 @@ export function FiltroChips({
                     : "border-borda bg-superficie text-texto active:bg-superficie-2"
                 }`}
               >
-                {eAtivo && <Check size={18} strokeWidth={2.5} aria-hidden className="shrink-0" />}
+                {eAtivo ? (
+                  <Check size={18} strokeWidth={2.5} aria-hidden className="shrink-0" />
+                ) : (
+                  o.icone && <o.icone size={18} strokeWidth={2.25} aria-hidden className="shrink-0 text-alerta-texto" />
+                )}
                 {o.rotulo}
                 {typeof o.contagem === "number" && <span className="font-medium">({o.contagem})</span>}
               </Link>

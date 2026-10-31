@@ -43,7 +43,7 @@ async function Conteudo({ params }: { params: Promise<{ id: string }> }) {
   const { data: os, error } = await supabase
     .from("vw_os")
     .select(
-      "id, numero, status, placa, veiculo_marca, veiculo_modelo, cliente_nome, codigo_falha, causa_encontrada, solucao_aplicada, total_centavos, qtd_itens, itens_sem_preco",
+      "id, numero, status, modo, placa, veiculo_marca, veiculo_modelo, cliente_nome, codigo_falha, causa_encontrada, solucao_aplicada, total_centavos, qtd_itens, itens_sem_preco, valor_aprovado_centavos, orcamento_aprovado_em, itens_apos_aprovacao",
     )
     .eq("id", id)
     .maybeSingle();
@@ -62,6 +62,13 @@ async function Conteudo({ params }: { params: Promise<{ id: string }> }) {
 
   const placa = formatarPlaca(os.placa);
   const semPreco = os.itens_sem_preco ?? 0;
+  // Itens depois da aprovacao (DESIGN §11.9): so avisa, nao bloqueia (decisao nº 4).
+  const total = os.total_centavos ?? 0;
+  const aprovado = os.valor_aprovado_centavos;
+  const apos = os.itens_apos_aprovacao ?? 0;
+  const comAprovacao = os.modo === "com_orcamento" && os.orcamento_aprovado_em != null && aprovado != null;
+  const diferenca = comAprovacao ? total - (aprovado ?? 0) : 0;
+  const avisoApos = comAprovacao && apos > 0;
 
   return (
     <>
@@ -80,10 +87,27 @@ async function Conteudo({ params }: { params: Promise<{ id: string }> }) {
             <CaixaMensagem tipo="erro">
               {semPreco === 1 ? "1 item está sem preço." : `${semPreco} itens estão sem preço.`} Defina o preço antes de fechar.
             </CaixaMensagem>
-            <Link href={`/os/${id}#titulo-itens`} className="inline-flex min-h-toque items-center self-start font-bold text-info-texto underline">
-              Ver itens
+            <Link
+              href={`/os/${id}?precificar=1`}
+              className="inline-flex min-h-toque items-center self-start font-bold text-info-texto underline"
+            >
+              Definir preços
             </Link>
           </div>
+        )}
+        {avisoApos && (
+          <CaixaMensagem tipo="alerta">
+            {apos === 1 ? "1 item foi adicionado depois da aprovação." : `${apos} itens foram adicionados depois da aprovação.`}{" "}
+            Aprovado: <span className="font-mono">{formatarCentavos(aprovado)}</span> · Agora:{" "}
+            <span className="font-mono">{formatarCentavos(total)}</span>
+            {diferenca !== 0 && (
+              <span className="font-mono">
+                {" "}
+                ({diferenca > 0 ? "+" : "−"} {formatarCentavos(Math.abs(diferenca))})
+              </span>
+            )}
+            . Confira se o cliente está sabendo.
+          </CaixaMensagem>
         )}
         {(os.qtd_itens ?? 0) === 0 && (
           <CaixaMensagem tipo="alerta">Esta OS não tem nenhum item. O total vai ficar R$ 0,00.</CaixaMensagem>
@@ -94,6 +118,7 @@ async function Conteudo({ params }: { params: Promise<{ id: string }> }) {
           numero={os.numero ?? 0}
           placa={placa}
           bloqueado={semPreco > 0}
+          acimaDoAprovadoCentavos={comAprovacao && diferenca > 0 ? diferenca : 0}
           causa={os.causa_encontrada ?? ""}
           solucao={os.solucao_aplicada ?? ""}
           codigo={os.codigo_falha ?? ""}

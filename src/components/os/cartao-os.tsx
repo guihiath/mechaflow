@@ -1,4 +1,5 @@
 import { BadgeStatus, EtiquetaPagamento, SemMecanico } from "@/components/os/badge-status";
+import { EtiquetaAcimaDoAprovado, EtiquetaSemPrecoContagem } from "@/components/os/etiquetas-fase3";
 import { Cartao, ChipPlaca } from "@/components/ui/estados";
 import { formatarPlaca, formatarReaisInteiros, formatarTempoDesde } from "@/lib/formato";
 import { INFO_STATUS, type StatusOS } from "@/lib/os-status";
@@ -20,6 +21,10 @@ export type DadosCartaoOS = {
   totalCentavos?: number | null;
   /** OS entregue e nao paga: etiqueta "A receber" (so dono/atendente). */
   aReceber?: boolean;
+  /** Itens sem preco (so dono/atendente): etiqueta "2 sem preço". */
+  itensSemPreco?: number;
+  /** Total atual acima do aprovado pelo cliente (so dono/atendente). */
+  acimaDoAprovado?: boolean;
 };
 
 /**
@@ -33,7 +38,16 @@ export function CartaoOS({ os, semValores, agora }: { os: DadosCartaoOS; semValo
   const linhaVeiculo = [os.veiculo, os.cliente].filter(Boolean).join(" · ");
   const total = !semValores && typeof os.totalCentavos === "number" ? formatarReaisInteiros(os.totalCentavos) : "";
   const tempo = formatarTempoDesde(os.atualizadoEm, agora);
-  const rotulo = [`OS ${os.numero}`, `placa ${placa}`, os.cliente, rotuloStatus].filter(Boolean).join(", ");
+  const semPreco = !semValores ? (os.itensSemPreco ?? 0) : 0;
+  const rotulo = [
+    `OS ${os.numero}`,
+    `placa ${placa}`,
+    os.cliente,
+    rotuloStatus,
+    semPreco > 0 ? (semPreco === 1 ? "1 item sem preço" : `${semPreco} itens sem preço`) : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
 
   return (
     <Cartao href={os.href} faixa={INFO_STATUS[os.status].faixa} rotulo={rotulo} className="min-h-28">
@@ -47,6 +61,8 @@ export function CartaoOS({ os, semValores, agora }: { os: DadosCartaoOS; semValo
         <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
           <span className="flex flex-wrap items-center gap-2">
             <BadgeStatus status={os.status} />
+            <EtiquetaSemPrecoContagem quantidade={semPreco} />
+            {!semValores && os.acimaDoAprovado && <EtiquetaAcimaDoAprovado />}
             {!semValores && os.aReceber && <EtiquetaPagamento pago={false} />}
           </span>
           {total && <span className="font-mono text-lg font-semibold">{total}</span>}

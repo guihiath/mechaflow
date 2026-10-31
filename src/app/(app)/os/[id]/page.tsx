@@ -7,6 +7,7 @@ import { cancelarOS } from "@/acoes/os";
 import { Cabecalho } from "@/components/layout/cabecalho";
 import { BadgeStatus, EtiquetaModo, EtiquetaPagamento, SemMecanico } from "@/components/os/badge-status";
 import { FotosDaOS } from "@/components/fotos/fotos-da-os";
+import { AprovadoAgora } from "@/components/os/aprovado-agora";
 import { DetalheCarregando } from "@/components/os/detalhe-carregando";
 import { LinhaTempo } from "@/components/os/linha-tempo";
 import { ResumoTotais } from "@/components/os/resumo-totais";
@@ -30,8 +31,10 @@ import { CANAL_NA_FRASE, montarEventos, ROTULO_FORMA_PAGAMENTO } from "@/lib/os"
 import { ehStatusOS, osEncerrada, proximoPasso, type ModoOS, type StatusOS } from "@/lib/os-status";
 import { createClient } from "@/lib/supabase/server";
 import {
+  AvisoItensMecanico,
   BarraOS,
   BotaoAdicionarItem,
+  BotaoDefinirPrecos,
   BotaoJaMandei,
   BotaoLancarItem,
   BotaoReabrir,
@@ -159,16 +162,23 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
       precoUnitarioCentavos: i.preco_unitario_centavos,
       subtotalCentavos: i.subtotal_centavos,
       ...(ehDono ? { custoUnitarioCentavos: i.custo_unitario_centavos } : {}),
+      lancadoPorNome: i.lancado_pelo_mecanico ? (i.lancado_por_nome ?? "mecânico") : null,
+      criadoEm: i.criado_em,
+      aposAprovacao: Boolean(i.apos_aprovacao),
+      conferido: i.precificado_pelo_balcao_em != null,
     })),
+    precificarAoAbrir: param(sp.precificar) === "1",
   };
 
   const aberta = param(sp.aberta);
   const entregue = param(sp.entregue) === "1";
-  const passouAprovado =
-    modo === "com_orcamento" &&
-    os.valor_aprovado_centavos != null &&
-    (os.total_centavos ?? 0) > os.valor_aprovado_centavos &&
-    !encerrada;
+  // Aprovado x atual (DESIGN §11.9): so com orcamento, depois da aprovacao. Nao bloqueia nada.
+  const mostrarAprovado =
+    modo === "com_orcamento" && os.orcamento_aprovado_em != null && os.valor_aprovado_centavos != null && status !== "cancelada";
+  const itensApos = itens.filter((i) => i.apos_aprovacao);
+  const semPreco = os.itens_sem_preco ?? 0;
+  // Aviso do mecanico ja traz o "Definir preços"; sem ele, o botao fica abaixo dos totais.
+  const temAvisoMecanico = !encerrada && itens.some((i) => i.lancado_pelo_mecanico && i.precificado_pelo_balcao_em == null);
   const podeTrocarModo =
     (modo === "com_orcamento" && (status === "aguardando_orcamento" || status === "orcamento_enviado")) ||
     (modo === "direto" && status === "em_andamento" && itens.length === 0);
@@ -260,7 +270,7 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
       <Pagina larga>
         {aberta && <CaixaMensagem tipo="sucesso">OS #{aberta} aberta.</CaixaMensagem>}
         {entregue && <CaixaMensagem tipo="sucesso">OS #{os.numero} entregue. Veículo liberado.</CaixaMensagem>}
-        {(aberta || entregue) && <LimparUrl />}
+        {(aberta || entregue || dados.precificarAoAbrir) && <LimparUrl />}
         {status === "cancelada" && (
           <CaixaMensagem tipo="erro">
             OS cancelada em {formatarDiaMes(os.cancelado_em)}
@@ -271,6 +281,7 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
         <div className="flex flex-col gap-6 lg:grid lg:grid-cols-5 lg:items-start lg:gap-8">
           {/* ------------------------------------------------ coluna esquerda (3/5) */}
           <div className="flex flex-col gap-6 lg:col-span-3">
+            {/* Desktop: o aviso dos itens do mecanico fica acima dos itens (DESIGN §11.9) */}
             <div className="flex flex-col gap-2">
               <div className="[&>span]:text-[2.25rem] min-[400px]:[&>span]:text-[2.75rem]">
                 <ChipPlaca placa={placa} grande />
@@ -283,6 +294,11 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
               {status !== "cancelada" && <p className="text-base text-texto-suave">{frase}</p>}
               {podeTrocarModo && <BotaoTrocarModo />}
               {status === "pronta" && <BotaoReabrir />}
+            </div>
+
+            {/* Celular: aviso dos itens do mecanico logo abaixo do topo (DESIGN §11.9) */}
+            <div className="lg:hidden">
+              <AvisoItensMecanico />
             </div>
 
             {/* Celular: cliente e telefone logo abaixo do topo (DESIGN §10.5) */}
@@ -301,6 +317,10 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
               </div>
             </Cartao>
             {cartaoAutorizacao && <div className="flex flex-col gap-6 lg:hidden">{cartaoAutorizacao}</div>}
+
+            <div className="hidden lg:block">
+              <AvisoItensMecanico />
+            </div>
 
             <section aria-labelledby="titulo-itens" className="flex flex-col gap-3">
               <h2 id="titulo-itens" className="text-2xl">
@@ -325,12 +345,17 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
               totalCentavos={os.total_centavos ?? 0}
               itensSemPreco={os.itens_sem_preco ?? 0}
               custoPecasCentavos={ehDono ? (os.custo_total_centavos ?? 0) : undefined}
-            />
-            {passouAprovado && (
-              <CaixaMensagem tipo="alerta">
-                O total passou do valor aprovado ({formatarCentavos(os.valor_aprovado_centavos)}). Avise o cliente.
-              </CaixaMensagem>
-            )}
+            >
+              {mostrarAprovado && (
+                <AprovadoAgora
+                  aprovadoCentavos={os.valor_aprovado_centavos ?? 0}
+                  agoraCentavos={os.total_centavos ?? 0}
+                  itensAposAprovacao={os.itens_apos_aprovacao ?? itensApos.length}
+                  itensAposSemPreco={itensApos.filter((i) => i.preco_unitario_centavos == null).length}
+                />
+              )}
+            </ResumoTotais>
+            {semPreco > 0 && !encerrada && !temAvisoMecanico && <BotaoDefinirPrecos />}
             {status === "aguardando_orcamento" && itens.length > 0 && <BotaoJaMandei />}
 
             <FotosDaOS

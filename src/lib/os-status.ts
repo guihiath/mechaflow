@@ -137,20 +137,36 @@ export function osEncerrada(status: StatusOS): boolean {
 
 // ---------------------------------------------------------------- filtros da lista
 
-export type FiltroOS = "abertas" | "orcamento" | "aprovadas" | "em_andamento" | "prontas" | "entregues" | "canceladas" | "todas";
+export type FiltroOS =
+  | "abertas"
+  | "orcamento"
+  | "aprovadas"
+  | "em_andamento"
+  | "prontas"
+  | "sem_preco"
+  | "entregues"
+  | "canceladas"
+  | "todas";
 
-/** Ordem dos chips da lista de OS (DESIGN §10.3). `rotuloVazio` vai em "Nenhuma OS {…}." */
-export const FILTROS_OS: { valor: FiltroOS; rotulo: string; rotuloVazio: string; status: readonly StatusOS[] }[] = [
-  {
-    valor: "abertas",
-    rotulo: "Abertas",
-    rotuloVazio: "aberta",
-    status: ["aguardando_orcamento", "orcamento_enviado", "aprovada", "em_andamento", "pronta"],
-  },
+export const STATUS_ABERTOS: readonly StatusOS[] = ["aguardando_orcamento", "orcamento_enviado", "aprovada", "em_andamento", "pronta"];
+
+/**
+ * Ordem dos chips da lista de OS (DESIGN §10.3 e §11.10). `rotuloVazio` vai em "Nenhuma OS {…}."
+ * `semPreco`: so OS abertas com pelo menos um item sem preco (`vw_os.itens_sem_preco > 0`).
+ */
+export const FILTROS_OS: {
+  valor: FiltroOS;
+  rotulo: string;
+  rotuloVazio: string;
+  status: readonly StatusOS[];
+  semPreco?: boolean;
+}[] = [
+  { valor: "abertas", rotulo: "Abertas", rotuloVazio: "aberta", status: STATUS_ABERTOS },
   { valor: "orcamento", rotulo: "Orçamento", rotuloVazio: "em orçamento", status: ["aguardando_orcamento", "orcamento_enviado"] },
   { valor: "aprovadas", rotulo: "Aprovadas", rotuloVazio: "aprovada", status: ["aprovada"] },
   { valor: "em_andamento", rotulo: "Em andamento", rotuloVazio: "em andamento", status: ["em_andamento"] },
   { valor: "prontas", rotulo: "Prontas", rotuloVazio: "pronta", status: ["pronta"] },
+  { valor: "sem_preco", rotulo: "Sem preço", rotuloVazio: "sem preço", status: STATUS_ABERTOS, semPreco: true },
   { valor: "entregues", rotulo: "Entregues", rotuloVazio: "entregue", status: ["entregue"] },
   { valor: "canceladas", rotulo: "Canceladas", rotuloVazio: "cancelada", status: ["cancelada"] },
   { valor: "todas", rotulo: "Todas", rotuloVazio: "", status: STATUS_OS },
