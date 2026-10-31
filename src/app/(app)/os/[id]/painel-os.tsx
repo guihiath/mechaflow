@@ -17,19 +17,26 @@ import {
 import { Check, CircleAlert, Plus, Search, ThumbsDown, ThumbsUp, TriangleAlert } from "lucide-react";
 import {
   adicionarItemOS,
+  alterarItemMecanicoOS,
   atribuirMecanicoOS,
+  carregarCatalogoMecanicoOS,
   carregarCatalogoOS,
+  lancarItemMecanicoOS,
   comecarServicoOS,
   marcarProntaOS,
   mudarStatusOS,
   registrarPagamentoOS,
   registrarRespostaOS,
+  removerItemMecanicoOS,
   removerItemOS,
   salvarItemOS,
   trocarModoOS,
+  type CatalogoMecanico,
   type CatalogoOS,
+  type ItemCatalogoMecanico,
   type ItemCatalogoOS,
 } from "@/acoes/os";
+import { EtiquetaConferido, EtiquetaVoceLancou } from "@/components/os/etiquetas-fase3";
 import { EtiquetaSemPreco } from "@/components/os/badge-status";
 import { BarraAcoesOS } from "@/components/os/barra-acoes-os";
 import { LinhaItemOS, ListaItensOS } from "@/components/os/linha-item-os";
@@ -72,6 +79,26 @@ export type ItemOSCliente = {
 };
 
 /**
+ * Item na tela do MECANICO (F3-B3): nenhuma chave de valor. As marcas vem do banco
+ * (vw_os_itens) ja reduzidas a booleanos pelo servidor.
+ */
+export type ItemMecanico = {
+  id: string;
+  tipo: TipoItemOS;
+  descricao: string;
+  quantidade: number;
+  unidade: string;
+  /** Entrou fora do catalogo (descricao editavel). */
+  avulso: boolean;
+  /** Ele mesmo lancou. */
+  meu: boolean;
+  /** Ele lancou e o balcao ja conferiu (so leitura). */
+  conferido: boolean;
+  /** vw_os_itens.mecanico_pode_alterar: editar/remover agora. */
+  podeAlterar: boolean;
+};
+
+/**
  * O que o navegador recebe da OS. Para o MECANICO os campos de valor vem null/0
  * e `equipe`/`itens` vem vazios: o servidor nem os busca (DESIGN §10.0 regra 4).
  */
@@ -99,11 +126,17 @@ export type DadosPainel = {
   pago?: boolean;
   equipe: PessoaOS[];
   itens: ItemOSCliente[];
+  /** So na versao do mecanico. */
+  itensMecanico?: ItemMecanico[];
+  /** Mecanico da OS, em status que deixa lancar (F3.3). */
+  podeLancar?: boolean;
 };
 
 type FolhaAberta =
   | { tipo: "item-novo" }
   | { tipo: "item"; item: ItemOSCliente }
+  | { tipo: "lancar" }
+  | { tipo: "item-mecanico"; item: ItemMecanico }
   | { tipo: "resposta" }
   | { tipo: "pronta" }
   | { tipo: "mecanico" }
@@ -120,6 +153,8 @@ type Ctx = {
   passo: (de: StatusOS, para: StatusOS) => void;
   ocupado: boolean;
   erro: string | null;
+  /** Mostra um erro acima da barra (ex.: a folha fechou porque a OS mudou). */
+  mostrarErro: (erro: string) => void;
   /** Rascunho de cada folha (C1): sobrevive a fechar a folha e a recarregar a pagina. */
   lerRascunho: (chave: string) => Record<string, string> | undefined;
   guardarRascunho: (chave: string, campos: Record<string, string>) => void;
@@ -140,6 +175,8 @@ function useEnvio(
   falha: string,
   /** Devolver "limpar" apaga a mensagem/erros (a folha continua aberta para outro item). */
   aoOk: (r: EstadoAcao) => void | "limpar",
+  /** Erro que pede para fechar a folha (`dados.fechar`, itens do mecanico). */
+  aoFecharPorErro?: (r: EstadoAcao) => void,
 ) {
   const [estado, setEstado] = useState<EstadoAcao>(null);
   const [enviando, iniciar] = useTransition();
@@ -156,6 +193,7 @@ function useEnvio(
         setEstado(r);
         if (r?.ok && aoOk(r) === "limpar") setEstado(null);
         else if (r?.campos) focarPrimeiroErro(form);
+        else if (!r?.ok && r?.dados?.fechar && aoFecharPorErro) aoFecharPorErro(r);
       } catch {
         setEstado({ erro: falha });
       } finally {
@@ -313,6 +351,7 @@ export function PainelOS({ os, children }: { os: DadosPainel; children: ReactNod
     passo,
     ocupado,
     erro,
+    mostrarErro: (e) => (setDesfazer(null), setErro(e)),
     lerRascunho,
     guardarRascunho,
     limparRascunho,
@@ -336,6 +375,8 @@ export function PainelOS({ os, children }: { os: DadosPainel; children: ReactNod
       )}
       {folha?.tipo === "item-novo" && <FolhaItem aoFechar={fechar} />}
       {folha?.tipo === "item" && <FolhaItem aoFechar={fechar} item={folha.item} />}
+      {folha?.tipo === "lancar" && <FolhaItemMecanico aoFechar={fechar} />}
+      {folha?.tipo === "item-mecanico" && <FolhaItemMecanico aoFechar={fechar} item={folha.item} />}
       {folha?.tipo === "resposta" && (
         <FolhaResposta aoFechar={fechar} aoAprovar={() => aposStatus(os.status, "aprovada")} />
       )}
@@ -538,8 +579,15 @@ export function ListaItensEditavel({ editavel, mostrarCusto }: { editavel: boole
 // =================================================================== folha: item
 
 const catalogoCache: { dados: CatalogoOS | null } = { dados: null };
+/** Mecanico: catalogo sem nenhuma chave de valor (vem de outra Server Action). */
+const catalogoMecanicoCache: { dados: CatalogoMecanico | null } = { dados: null };
 
-type Escolhido = { catalogo: ItemCatalogoOS | null; descricao: string; tipo: TipoItemOS };
+type ItemSeletor = ItemCatalogoMecanico | ItemCatalogoOS;
+type Escolhido = { catalogo: ItemSeletor | null; descricao: string; tipo: TipoItemOS };
+type CatalogoSeletor = { itens: ItemSeletor[]; maisUsados: { servico: string[]; peca: string[] } };
+
+/** Dono/atendente: item do catalogo com preco (o mecanico nunca chega aqui). */
+const comPreco = (i: ItemSeletor | null): ItemCatalogoOS | null => (i && "precoCentavos" in i ? i : null);
 
 function FolhaItem({ aoFechar, item }: { aoFechar: () => void; item?: ItemOSCliente }) {
   const { os } = useOS();
@@ -609,7 +657,7 @@ function FolhaItem({ aoFechar, item }: { aoFechar: () => void; item?: ItemOSClie
       {passo2 ? (
         <FormItem
           item={item}
-          escolhido={escolhido}
+          escolhido={escolhido && { ...escolhido, catalogo: comPreco(escolhido.catalogo) }}
           envio={envio}
           aoRemover={() => {
             descartarRef.current?.();
@@ -631,23 +679,45 @@ function FolhaItem({ aoFechar, item }: { aoFechar: () => void; item?: ItemOSClie
   );
 }
 
-function SeletorItem({ mensagem, aoEscolher }: { mensagem: string | null; aoEscolher: (e: Escolhido) => void }) {
+/**
+ * Passo 1 da folha de item: Servicos/Pecas, busca, "Mais usados", "Todos" e o item fora do catalogo.
+ * `semValores` (mecanico, DESIGN §11.3): catalogo de outra Server Action, sem preco nem
+ * "Sem preço", abre em Pecas e chama o avulso de "fora do catálogo".
+ */
+function SeletorItem({
+  mensagem,
+  aoEscolher,
+  semValores = false,
+}: {
+  mensagem: string | null;
+  aoEscolher: (e: Escolhido) => void;
+  semValores?: boolean;
+}) {
   const { os } = useOS();
-  const [catalogo, setCatalogo] = useState<CatalogoOS | null>(catalogoCache.dados);
+  const cache = semValores ? catalogoMecanicoCache : catalogoCache;
+  const [catalogo, setCatalogo] = useState<CatalogoSeletor | null>(cache.dados);
   const [erro, setErro] = useState(false);
   const [tentativa, setTentativa] = useState(0);
-  const [aba, setAba] = useState<TipoItemOS>(os.temServico ? "peca" : "servico");
+  const [aba, setAba] = useState<TipoItemOS>(semValores || os.temServico ? "peca" : "servico");
   const [busca, setBusca] = useState("");
   const idBusca = useId();
 
   useEffect(() => {
     let vivo = true;
-    carregarCatalogoOS()
+    const carregar = semValores
+      ? carregarCatalogoMecanicoOS().then((r) => {
+          if (!("erro" in r)) catalogoMecanicoCache.dados = r;
+          return r;
+        })
+      : carregarCatalogoOS().then((r) => {
+          if (!("erro" in r)) catalogoCache.dados = r;
+          return r;
+        });
+    carregar
       .then((r) => {
         if (!vivo) return;
         if ("erro" in r) setErro(true);
         else {
-          catalogoCache.dados = r;
           setCatalogo(r);
           setErro(false);
         }
@@ -656,14 +726,14 @@ function SeletorItem({ mensagem, aoEscolher }: { mensagem: string | null; aoEsco
     return () => {
       vivo = false;
     };
-  }, [tentativa]);
+  }, [tentativa, semValores]);
 
   const termo = busca.trim().toLowerCase();
   const daAba = useMemo(() => (catalogo?.itens ?? []).filter((i) => i.tipo === aba), [catalogo, aba]);
   const filtrados = termo
     ? daAba.filter((i) => i.nome.toLowerCase().includes(termo) || (i.codigo ?? "").toLowerCase().includes(termo))
     : daAba;
-  const maisUsados = !termo && catalogo ? catalogo.maisUsados[aba].map((id) => daAba.find((i) => i.id === id)).filter((i): i is ItemCatalogoOS => Boolean(i)) : [];
+  const maisUsados = !termo && catalogo ? catalogo.maisUsados[aba].map((id) => daAba.find((i) => i.id === id)).filter((i): i is ItemSeletor => Boolean(i)) : [];
 
   const avulso = (
     <button
@@ -672,11 +742,17 @@ function SeletorItem({ mensagem, aoEscolher }: { mensagem: string | null; aoEsco
       className="flex min-h-14 w-full items-center gap-2 rounded-md border-2 border-dashed border-borda px-4 text-left text-lg font-bold text-info-texto active:bg-superficie-2"
     >
       <Plus size={22} strokeWidth={2.5} aria-hidden className="shrink-0" />
-      {busca.trim() ? `Item avulso: “${busca.trim()}”` : "Item avulso"}
+      {semValores
+        ? busca.trim()
+          ? `Peça ou serviço fora do catálogo: “${busca.trim()}”`
+          : "Peça ou serviço fora do catálogo"
+        : busca.trim()
+          ? `Item avulso: “${busca.trim()}”`
+          : "Item avulso"}
     </button>
   );
 
-  const linha = (i: ItemCatalogoOS) => (
+  const linha = (i: ItemSeletor) => (
     <li key={i.id} className="border-b border-borda-sutil last:border-b-0">
       <button
         type="button"
@@ -692,11 +768,12 @@ function SeletorItem({ mensagem, aoEscolher }: { mensagem: string | null; aoEsco
             </span>
           )}
         </span>
-        {i.precoCentavos !== null ? (
-          <span className="shrink-0 font-mono text-base">{formatarCentavos(i.precoCentavos)}</span>
-        ) : (
-          <EtiquetaSemPreco />
-        )}
+        {"precoCentavos" in i &&
+          (i.precoCentavos !== null ? (
+            <span className="shrink-0 font-mono text-base">{formatarCentavos(i.precoCentavos)}</span>
+          ) : (
+            <EtiquetaSemPreco />
+          ))}
       </button>
     </li>
   );
@@ -809,7 +886,7 @@ function FormItem({
   descartarRef,
 }: {
   item?: ItemOSCliente;
-  escolhido: Escolhido | null;
+  escolhido: { catalogo: ItemCatalogoOS | null; descricao: string; tipo: TipoItemOS } | null;
   envio: ReturnType<typeof useEnvio>;
   aoRemover: () => void;
   /** Avisa a folha se ha algo digitado (fechar pede confirmacao). */
@@ -954,6 +1031,267 @@ function FormItem({
       {item && (
         <ConfirmarAcao
           acao={() => removerItemOS(os.id, item.id)}
+          rotulo="Remover item"
+          pergunta={`Remover “${item.descricao}” da OS #${os.numero}?`}
+          rotuloConfirmar="Remover item"
+          rotuloEnviando="Removendo…"
+          aoConcluir={aoRemover}
+        />
+      )}
+    </form>
+  );
+}
+
+// =================================================================== mecanico: itens (F3-B3, DESIGN §11.3)
+
+/** "Lançar serviço ou peça" (secundario, largura total, abaixo da lista do mecanico). */
+export function BotaoLancarItem() {
+  const { abrir } = useOS();
+  return (
+    <Botao variante="secundario" onClick={() => abrir({ tipo: "lancar" })}>
+      <Plus size={24} strokeWidth={2.25} aria-hidden />
+      Lançar serviço ou peça
+    </Botao>
+  );
+}
+
+/**
+ * Lista do mecanico, sem valores: item dele que ainda pode mexer vira botao
+ * ("Você lançou" + chevron); o que o balcao ja conferiu fica "Conferido pelo balcão".
+ */
+export function ListaItensMecanico() {
+  const { os, abrir } = useOS();
+  const itens = [...(os.itensMecanico ?? [])].sort((a, b) => (a.tipo === b.tipo ? 0 : a.tipo === "servico" ? -1 : 1));
+  return (
+    <ListaItensOS rotulo="Serviços e peças">
+      {itens.map((i) => (
+        <LinhaItemOS
+          key={i.id}
+          semValores
+          aoTocar={i.podeAlterar ? () => abrir({ tipo: "item-mecanico", item: i }) : undefined}
+          etiquetas={i.conferido ? <EtiquetaConferido /> : i.meu ? <EtiquetaVoceLancou /> : undefined}
+          item={{ tipo: i.tipo, descricao: i.descricao, quantidade: i.quantidade, unidade: textoUnidade(i.unidade) }}
+        />
+      ))}
+    </ListaItensOS>
+  );
+}
+
+function FolhaItemMecanico({ aoFechar, item }: { aoFechar: () => void; item?: ItemMecanico }) {
+  const { os, mostrarErro } = useOS();
+  const [escolhido, setEscolhido] = useState<Escolhido | null>(null);
+  const [lancados, setLancados] = useState(0);
+  const [mensagem, setMensagem] = useState<string | null>(null);
+  const editando = Boolean(item);
+  const passo2 = editando || escolhido;
+  const [rasc, setRasc] = useState({ sujo: false, recuperado: false });
+  const descartarRef = useRef<(() => void) | null>(null);
+  const envio = useEnvio(
+    editando ? alterarItemMecanicoOS : lancarItemMecanicoOS,
+    editando
+      ? "Não foi possível salvar o item. Nada foi perdido: confira a internet e toque de novo."
+      : "Não foi possível lançar. Nada foi perdido: confira a internet e toque de novo.",
+    (r) => {
+      descartarRef.current?.();
+      if (editando) {
+        aoFechar();
+        return;
+      }
+      setLancados((n) => n + 1);
+      setMensagem(r?.mensagem ?? "Item lançado.");
+      setEscolhido(null);
+      return "limpar";
+    },
+    // A OS mudou, passou para outro mecanico ou o balcao conferiu: fecha guardando o rascunho.
+    (r) => {
+      aoFechar();
+      if (r?.erro) mostrarErro(r.erro);
+    },
+  );
+
+  const titulo = editando ? "Editar item" : escolhido ? escolhido.descricao || "Fora do catálogo" : `Lançar na OS #${os.numero}`;
+
+  return (
+    <Folha
+      aberta
+      aoFechar={aoFechar}
+      titulo={titulo}
+      sujo={rasc.sujo}
+      recuperado={rasc.recuperado}
+      aoDescartar={() => descartarRef.current?.()}
+      rodape={
+        passo2 ? (
+          <BotaoForm
+            form="form-item-mecanico"
+            enviando={envio.enviando}
+            rotulo={editando ? "Salvar item" : "Lançar na OS"}
+            rotuloEnviando={editando ? "Salvando…" : "Lançando…"}
+          />
+        ) : lancados > 0 ? (
+          <Botao variante="secundario" onClick={aoFechar}>
+            Concluir
+          </Botao>
+        ) : undefined
+      }
+    >
+      {escolhido && !editando && (
+        <button
+          type="button"
+          onClick={() => {
+            setEscolhido(null);
+            envio.setEstado(null);
+          }}
+          className="-mt-2 mb-2 inline-flex min-h-toque items-center text-base font-bold text-info-texto underline underline-offset-4"
+        >
+          ← Escolher outro
+        </button>
+      )}
+      {passo2 ? (
+        <FormItemMecanico
+          item={item}
+          escolhido={escolhido}
+          envio={envio}
+          aoRemover={() => {
+            descartarRef.current?.();
+            aoFechar();
+          }}
+          aoRascunho={setRasc}
+          descartarRef={descartarRef}
+        />
+      ) : (
+        <SeletorItem
+          semValores
+          mensagem={mensagem}
+          aoEscolher={(e) => {
+            setMensagem(null);
+            setEscolhido(e);
+          }}
+        />
+      )}
+    </Folha>
+  );
+}
+
+/** Passo 2 do mecanico: o que e (fora do catalogo), servico/peca e quantidade. Nenhum campo de valor. */
+function FormItemMecanico({
+  item,
+  escolhido,
+  envio,
+  aoRemover,
+  aoRascunho,
+  descartarRef,
+}: {
+  item?: ItemMecanico;
+  escolhido: Escolhido | null;
+  envio: ReturnType<typeof useEnvio>;
+  aoRemover: () => void;
+  aoRascunho: (e: { sujo: boolean; recuperado: boolean }) => void;
+  descartarRef: { current: (() => void) | null };
+}) {
+  const { os } = useOS();
+  const editando = Boolean(item);
+  const cat = escolhido?.catalogo ?? null;
+  const novoAvulso = !item && !cat;
+  const comDescricao = novoAvulso || Boolean(item?.avulso);
+  const descricaoNova = novoAvulso ? (escolhido?.descricao ?? "").trim() : "";
+  // Chave de idempotencia no rascunho: reenviar depois de uma falha de rede nao duplica.
+  const r = useRascunho(
+    `mec-item-${item?.id ?? cat?.id ?? "avulso"}`,
+    {
+      chave: crypto.randomUUID(),
+      tipo: item?.tipo ?? escolhido?.tipo ?? "peca",
+      descricao: item?.descricao ?? escolhido?.descricao ?? "",
+      qtd: String(item?.quantidade ?? 1),
+    },
+    { digitados: ["descricao", "qtd"], fixos: descricaoNova ? { descricao: descricaoNova } : undefined },
+  );
+  const { chave, descricao } = r.v;
+  const tipo = r.v.tipo as TipoItemOS;
+  const unidade = item?.unidade ?? cat?.unidade ?? "un";
+  const fracionada = unidadeFracionada(unidade);
+  const [qtdInicial] = useState(() => {
+    const n = Number(r.v.qtd);
+    return Number.isFinite(n) && n > 0 ? n : 1;
+  });
+  const { sujo, recuperado, limpar } = r;
+
+  useEffect(() => {
+    aoRascunho({ sujo, recuperado });
+  }, [sujo, recuperado, aoRascunho]);
+  useEffect(() => {
+    descartarRef.current = limpar;
+  });
+  useEffect(
+    () => () => {
+      aoRascunho({ sujo: false, recuperado: false });
+      descartarRef.current = null;
+    },
+    [aoRascunho, descartarRef],
+  );
+
+  // OS com orcamento ja aprovada: o balcao vai ver que o item entrou depois (DESIGN §11.3).
+  const aposAprovacao = !editando && os.modo === "com_orcamento" && (os.status === "aprovada" || os.status === "em_andamento");
+
+  return (
+    <form id="form-item-mecanico" onSubmit={envio.enviar} noValidate className="flex flex-col gap-5">
+      <input type="hidden" name="os_id" value={os.id} />
+      {item && <input type="hidden" name="item_id" value={item.id} />}
+      {item && <input type="hidden" name="com_descricao" value={comDescricao ? "1" : "0"} />}
+      {!item && <input type="hidden" name="chave" value={chave} />}
+      {!item && <input type="hidden" name="tipo" value={tipo} />}
+      {cat && <input type="hidden" name="catalogo_id" value={cat.id} />}
+      {!item && <input type="hidden" name="unidade" value={unidade} />}
+
+      {comDescricao ? (
+        <Campo
+          rotulo="O que é?"
+          name="descricao"
+          value={descricao}
+          onChange={(e) => r.mudar("descricao", e.target.value)}
+          maxLength={200}
+          autoComplete="off"
+          ajuda="Ex.: anel de vedação do bico. Dica: use o microfone do teclado."
+          erro={envio.campos.descricao}
+        />
+      ) : (
+        <>
+          <input type="hidden" name="descricao" value={descricao} />
+          {editando && <p className="text-lg font-bold">{descricao}</p>}
+        </>
+      )}
+      {novoAvulso && (
+        <Escolha
+          rotulo="É serviço ou peça?"
+          name="tipo_opcao"
+          valor={tipo}
+          aoMudar={(t) => r.mudar("tipo", t)}
+          opcoes={[
+            { valor: "servico", rotulo: "Serviço" },
+            { valor: "peca", rotulo: "Peça" },
+          ]}
+        />
+      )}
+
+      <Quantidade
+        valorInicial={qtdInicial}
+        minimo={fracionada ? 0.1 : 1}
+        decimal={fracionada}
+        unidade={textoUnidade(unidade)}
+        aoMudar={(n) => {
+          if (n !== null) r.mudar("qtd", String(n));
+        }}
+        erro={envio.campos.quantidade}
+      />
+
+      {aposAprovacao && (
+        <CaixaMensagem tipo="info">O cliente já aprovou o orçamento. O balcão vai ver que este item entrou depois.</CaixaMensagem>
+      )}
+      {envio.estado?.erro && <CaixaMensagem tipo="erro">{envio.estado.erro}</CaixaMensagem>}
+      {envio.enviando && <p role="status" className="text-sm text-texto-suave">{editando ? "Salvando…" : "Lançando…"}</p>}
+
+      {item && (
+        <ConfirmarAcao
+          acao={() => removerItemMecanicoOS(os.id, item.id)}
           rotulo="Remover item"
           pergunta={`Remover “${item.descricao}” da OS #${os.numero}?`}
           rotuloConfirmar="Remover item"

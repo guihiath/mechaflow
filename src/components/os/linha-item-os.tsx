@@ -42,11 +42,14 @@ export function LinhaItemOS({
   semValores,
   mostrarCusto,
   aoTocar,
+  etiquetas,
 }: {
   item: DadosItemOS;
   semValores?: boolean;
   mostrarCusto?: boolean;
   aoTocar?: () => void;
+  /** Ate 2 etiquetas na linha de baixo (DESIGN §11.13), ex.: "Você lançou". */
+  etiquetas?: ReactNode;
 }) {
   const Icone = item.tipo === "servico" ? Wrench : Package;
   const qtd = formatarQuantidade(item.quantidade);
@@ -74,6 +77,7 @@ export function LinhaItemOS({
           {item.descricao}
         </span>
         <span className="font-mono text-sm text-texto-suave">{detalhe}</span>
+        {etiquetas && <span className="mt-1.5 flex flex-wrap gap-1.5">{etiquetas}</span>}
       </span>
       {!semValores && (
         <span className="shrink-0 text-right">

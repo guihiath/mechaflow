@@ -8,7 +8,6 @@ import { Cabecalho } from "@/components/layout/cabecalho";
 import { BadgeStatus, EtiquetaModo, EtiquetaPagamento, SemMecanico } from "@/components/os/badge-status";
 import { FotosDaOS } from "@/components/fotos/fotos-da-os";
 import { DetalheCarregando } from "@/components/os/detalhe-carregando";
-import { LinhaItemOS, ListaItensOS } from "@/components/os/linha-item-os";
 import { LinhaTempo } from "@/components/os/linha-tempo";
 import { ResumoTotais } from "@/components/os/resumo-totais";
 import { ConfirmarComMotivo } from "@/components/ui/confirmar-acao";
@@ -27,19 +26,22 @@ import {
   soDigitos,
 } from "@/lib/formato";
 import { podeEnviarFoto } from "@/lib/fotos/regras";
-import { CANAL_NA_FRASE, montarEventos, ROTULO_FORMA_PAGAMENTO, textoUnidade } from "@/lib/os";
+import { CANAL_NA_FRASE, montarEventos, ROTULO_FORMA_PAGAMENTO } from "@/lib/os";
 import { ehStatusOS, osEncerrada, proximoPasso, type ModoOS, type StatusOS } from "@/lib/os-status";
 import { createClient } from "@/lib/supabase/server";
 import {
   BarraOS,
   BotaoAdicionarItem,
   BotaoJaMandei,
+  BotaoLancarItem,
   BotaoReabrir,
   BotaoTrocarMecanico,
   BotaoTrocarModo,
   ListaItensEditavel,
+  ListaItensMecanico,
   PainelOS,
   type DadosPainel,
+  type ItemMecanico,
 } from "./painel-os";
 
 export const metadata: Metadata = { title: "OS" };
@@ -421,7 +423,12 @@ supabase
   )
   .eq("id", id)
   .maybeSingle(),
-supabase.from("vw_os_itens").select("id, tipo, descricao, quantidade, unidade").eq("os_id", id).order("criado_em"),
+// Itens: so marcas (booleanos/data), nunca preco, custo ou subtotal (ARQUITETURA F3.5).
+supabase
+  .from("vw_os_itens")
+  .select("id, tipo, descricao, quantidade, unidade, servico_id, peca_id, lancado_pelo_mecanico, lancado_por, precificado_pelo_balcao_em, mecanico_pode_alterar")
+  .eq("os_id", id)
+  .order("criado_em"),
 supabase.from("vw_os_historico").select("id, evento, de_status, para_status, observacao, por_nome, em").eq("os_id", id).order("em"),
   ]);
   if (error || itensR.error || histR.error) return <Erro id={id} voltar="/minhas-os" />;
@@ -429,7 +436,22 @@ supabase.from("vw_os_historico").select("id, evento, de_status, para_status, obs
 
   const status = os.status as StatusOS;
   const minha = os.mecanico_id === ctx.usuario_id;
-  const itens = itensR.data ?? [];
+  const itens: ItemMecanico[] = (itensR.data ?? []).map((i) => {
+    const meu = Boolean(i.lancado_pelo_mecanico) && i.lancado_por === ctx.usuario_id;
+    return {
+      id: i.id!,
+      tipo: i.tipo ?? "servico",
+      descricao: i.descricao ?? "",
+      quantidade: Number(i.quantidade ?? 1),
+      unidade: i.unidade ?? "un",
+      avulso: !i.servico_id && !i.peca_id,
+      meu,
+      conferido: meu && i.precificado_pelo_balcao_em != null,
+      podeAlterar: Boolean(i.mecanico_pode_alterar),
+    };
+  });
+  // Mesma regra do banco (private.mecanico_lanca_itens + OS atribuida a ele).
+  const podeLancar = minha && (status === "aguardando_orcamento" || status === "aprovada" || status === "em_andamento");
   const recado =
 status === "aprovada" && minha ? { tipo: "info" as const, texto: "Aprovada pelo cliente. Pode começar o serviço." } : RECADO[status];
 
@@ -451,6 +473,8 @@ temServico: false,
 semItensComTroca: false,
 equipe: [],
 itens: [],
+itensMecanico: itens,
+podeLancar,
   };
 
   return (
@@ -502,25 +526,22 @@ itens: [],
         Serviços e peças ({itens.length})
       </h2>
       {itens.length ? (
-        <ListaItensOS rotulo="Serviços e peças">
-          {[...itens]
-            .sort((a, b) => (a.tipo === b.tipo ? 0 : a.tipo === "servico" ? -1 : 1))
-            .map((i) => (
-              <LinhaItemOS
-                key={i.id}
-                semValores
-                item={{
-                  tipo: i.tipo ?? "servico",
-                  descricao: i.descricao ?? "",
-                  quantidade: Number(i.quantidade ?? 1),
-                  unidade: textoUnidade(i.unidade),
-                }}
-              />
-            ))}
-        </ListaItensOS>
+        <ListaItensMecanico />
+      ) : podeLancar ? (
+        <div>
+          <p className="text-lg font-bold">Nenhum serviço ou peça lançado ainda.</p>
+          <p className="text-base text-texto-suave">Lance o que você fez e as peças que usou.</p>
+        </div>
       ) : (
         <p className="text-base text-texto-suave">Nenhum serviço ou peça lançado ainda.</p>
       )}
+      {minha && status === "orcamento_enviado" && (
+        <p className="text-base text-texto-suave">O orçamento está com o cliente. Para lançar mais, fale com o balcão.</p>
+      )}
+      {minha && status === "pronta" && (
+        <p className="text-base text-texto-suave">A OS está pronta. Para lançar mais, fale com o dono.</p>
+      )}
+      {podeLancar && <BotaoLancarItem />}
     </section>
 
     {(os.causa_encontrada || os.solucao_aplicada) && (

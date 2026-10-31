@@ -416,6 +416,190 @@ export async function removerItemOS(osId: string, itemId: string): Promise<Estad
   return { ok: true, mensagem: "Item removido." };
 }
 
+// =========================================================== itens do MECANICO (Fase 3, F3-B3)
+//
+// Regras no banco (ARQUITETURA F3.3/F3.5): adicionar_item_os sem preco/custo,
+// alterar_item_mecanico e remover_item_mecanico. Nada aqui le ou devolve valor:
+// o catalogo vem das tabelas base (sem colunas de dinheiro) e as respostas so tem texto.
+
+/** Item do catalogo para a folha do mecanico: nenhuma chave de valor. */
+export type ItemCatalogoMecanico = Omit<ItemCatalogoOS, "precoCentavos" | "custoCentavos">;
+export type CatalogoMecanico = { itens: ItemCatalogoMecanico[]; maisUsados: { servico: string[]; peca: string[] } };
+
+const ERRO_ENVIO = "Algo deu errado ao enviar. Recarregue a página e tente de novo.";
+
+/** Catalogo ativo SEM preco (tabelas base) + "mais usados" das OS que ele ve. */
+export async function carregarCatalogoMecanicoOS(): Promise<CatalogoMecanico | { erro: string }> {
+  if (!(await contextoParaAcao(["mecanico"]))) return { erro: TEXTO_SEM_PERMISSAO };
+  const supabase = await createClient();
+  const [servicos, pecas, usados] = await Promise.all([
+    supabase.from("catalogo_servicos").select("id, nome").eq("ativo", true).order("nome").limit(1000),
+    supabase.from("catalogo_pecas").select("id, nome, codigo, unidade").eq("ativo", true).order("nome").limit(2000),
+    supabase.from("vw_catalogo_mais_usados").select("tipo, catalogo_id, usos").order("usos", { ascending: false }).limit(60),
+  ]);
+  if (servicos.error || pecas.error) return { erro: "Não foi possível carregar o catálogo." };
+
+  const itens: ItemCatalogoMecanico[] = [
+    ...(servicos.data ?? []).map((s) => ({ id: s.id, tipo: "servico" as const, nome: s.nome, codigo: null, unidade: "un" as const })),
+    ...(pecas.data ?? []).map((p) => ({
+      id: p.id,
+      tipo: "peca" as const,
+      nome: p.nome,
+      codigo: p.codigo,
+      unidade: (UNIDADES_ITEM as readonly string[]).includes(p.unidade) ? (p.unidade as UnidadeItem) : ("un" as const),
+    })),
+  ];
+  const ativos = new Set(itens.map((i) => i.id));
+  const maisUsados = { servico: [] as string[], peca: [] as string[] };
+  for (const u of usados.data ?? []) {
+    if (!u.catalogo_id || !u.tipo || !ativos.has(u.catalogo_id)) continue;
+    const lista = maisUsados[u.tipo];
+    if (lista.length < 5) lista.push(u.catalogo_id);
+  }
+  return { itens, maisUsados };
+}
+
+/**
+ * Erro das RPCs de item do mecanico, com os textos do DESIGN §11.3.
+ * `dados.fechar = "1"`: a folha fecha (o rascunho fica) e a tela atualiza.
+ */
+async function erroItemMecanico(supabase: Cliente, osId: string, usuarioId: string, error: ErroSupabase, verbo: string): Promise<EstadoAcao> {
+  const msg = error?.message ?? "";
+  if (msg === "status_nao_permite_itens" || msg === "os_fechada" || msg === "status_mudou") {
+    const { data } = await supabase.from("vw_os").select("status").eq("id", osId).maybeSingle();
+    refresh();
+    const agora = ehStatusOS(data?.status) ? ` (agora: ${rotuloStatus(data.status)})` : "";
+    return { erro: `Esta OS mudou enquanto você lançava${agora}. Não dá mais para lançar itens nela.`, dados: { fechar: "1" } };
+  }
+  if (msg === "acesso_negado" || error?.code === "42501") {
+    const { data } = await supabase.from("vw_os").select("mecanico_id, mecanico_nome").eq("id", osId).maybeSingle();
+    if (data && data.mecanico_id !== usuarioId) {
+      refresh();
+      return {
+        erro: data.mecanico_nome
+          ? `Esta OS passou para o ${data.mecanico_nome}. Você não pode mais lançar nela.`
+          : "Esta OS não está mais com você. Você não pode mais lançar nela.",
+        dados: { fechar: "1" },
+      };
+    }
+    return SEM_PERMISSAO;
+  }
+  if (msg === "item_ja_precificado") {
+    refresh();
+    return { erro: "O balcão já conferiu este item. Para mudar, fale com o dono.", dados: { fechar: "1" } };
+  }
+  if (msg === "item_nao_encontrado" || msg === "os_nao_encontrada") {
+    refresh();
+    return { erro: "Item não encontrado. Ele pode ter sido removido.", dados: { fechar: "1" } };
+  }
+  if (msg === "descricao_obrigatoria") return erroCampos({ descricao: "Escreva o que é. Pode ser curto." });
+  if (msg === "quantidade_invalida") return erroCampos({ quantidade: "Quantidade inválida. Use números. Ex.: 2 ou 2,5" });
+  const traduzido = traduzirErro(error, "os");
+  return {
+    erro:
+      traduzido === GENERICO || traduzido.startsWith("Sem conexão")
+        ? `Não foi possível ${verbo}. Nada foi perdido: confira a internet e toque de novo.`
+        : traduzido,
+  };
+}
+
+function lerItemMecanico(dados: FormData, comDescricao: boolean) {
+  const descricao = texto(dados, "descricao");
+  const quantidade = textoParaQuantidade(texto(dados, "quantidade"));
+  const campos = {
+    descricao: !comDescricao
+      ? undefined
+      : !descricao
+        ? "Escreva o que é. Pode ser curto."
+        : descricao.length > 200
+          ? "Máximo de 200 caracteres."
+          : undefined,
+    quantidade:
+      quantidade === null || Number.isNaN(quantidade) || quantidade <= 0 || quantidade > 9_999_999
+        ? "Quantidade inválida. Use números. Ex.: 2 ou 2,5"
+        : undefined,
+  };
+  return { descricao, quantidade: quantidade as number, campos };
+}
+
+/**
+ * Mecanico lanca servico/peca (catalogo ou fora do catalogo) na OS dele.
+ * Idempotente pela chave do navegador. NUNCA envia preco/custo: o banco copia o do
+ * catalogo e o item fora do catalogo fica para o balcao precificar.
+ */
+export async function lancarItemMecanicoOS(_anterior: EstadoAcao, dados: FormData): Promise<EstadoAcao> {
+  const ctx = await contextoParaAcao(["mecanico"]);
+  if (!ctx) return SEM_PERMISSAO;
+  const osId = texto(dados, "os_id");
+  const chave = texto(dados, "chave");
+  const tipo = texto(dados, "tipo");
+  const catalogoId = texto(dados, "catalogo_id");
+  const unidade = texto(dados, "unidade") || "un";
+  if (
+    !UUID.test(osId) ||
+    !UUID.test(chave) ||
+    (tipo !== "servico" && tipo !== "peca") ||
+    (catalogoId && !UUID.test(catalogoId)) ||
+    !(UNIDADES_ITEM as readonly string[]).includes(unidade)
+  ) {
+    return { erro: ERRO_ENVIO };
+  }
+  const v = lerItemMecanico(dados, !catalogoId);
+  if (temErros(v.campos)) return erroCampos(v.campos);
+
+  const supabase = await createClient();
+  const args: Database["public"]["Functions"]["adicionar_item_os"]["Args"] = {
+    p_chave_idempotencia: chave,
+    p_os_id: osId,
+    p_tipo: tipo,
+    p_quantidade: v.quantidade,
+    p_unidade: unidade,
+  };
+  if (catalogoId) {
+    if (tipo === "servico") args.p_servico_id = catalogoId;
+    else args.p_peca_id = catalogoId;
+  } else {
+    args.p_descricao = v.descricao;
+  }
+  const { error } = await supabase.rpc("adicionar_item_os", args);
+  if (error) return erroItemMecanico(supabase, osId, ctx.usuario_id, error, "lançar");
+  refresh();
+  const nome = catalogoId ? texto(dados, "descricao") || "Item" : v.descricao;
+  return { ok: true, mensagem: `${nome} lançado.` };
+}
+
+/** Mecanico muda a quantidade (e a descricao, se for fora do catalogo) de um item DELE. */
+export async function alterarItemMecanicoOS(_anterior: EstadoAcao, dados: FormData): Promise<EstadoAcao> {
+  const ctx = await contextoParaAcao(["mecanico"]);
+  if (!ctx) return SEM_PERMISSAO;
+  const osId = texto(dados, "os_id");
+  const itemId = texto(dados, "item_id");
+  const comDescricao = texto(dados, "com_descricao") === "1";
+  if (!UUID.test(osId) || !UUID.test(itemId)) return { erro: ERRO_ENVIO };
+  const v = lerItemMecanico(dados, comDescricao);
+  if (temErros(v.campos)) return erroCampos(v.campos);
+
+  const supabase = await createClient();
+  const args: Database["public"]["Functions"]["alterar_item_mecanico"]["Args"] = { p_item_id: itemId, p_quantidade: v.quantidade };
+  if (comDescricao) args.p_descricao = v.descricao;
+  const { error } = await supabase.rpc("alterar_item_mecanico", args);
+  if (error) return erroItemMecanico(supabase, osId, ctx.usuario_id, error, "salvar o item");
+  refresh();
+  return { ok: true, mensagem: "Item salvo." };
+}
+
+/** Mecanico remove um item DELE. Reenvio (ja removido) conta como feito. */
+export async function removerItemMecanicoOS(osId: string, itemId: string): Promise<EstadoAcao> {
+  const ctx = await contextoParaAcao(["mecanico"]);
+  if (!ctx) return SEM_PERMISSAO;
+  if (!UUID.test(osId) || !UUID.test(itemId)) return SEM_PERMISSAO;
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("remover_item_mecanico", { p_item_id: itemId });
+  if (error) return erroItemMecanico(supabase, osId, ctx.usuario_id, error, "remover o item");
+  refresh();
+  return { ok: true, mensagem: "Item removido." };
+}
+
 // =========================================================== status
 
 const VERBO_STATUS: Partial<Record<StatusOS, string>> = {
