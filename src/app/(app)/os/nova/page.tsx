@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { Cabecalho } from "@/components/layout/cabecalho";
+import { EsconderNavegacao } from "@/components/layout/marcador-pagina";
 import { CaixaErro, FormularioCarregando, Pagina } from "@/components/ui/estados";
 import { exigirContexto } from "@/lib/dal";
 import { normalizarPlaca, param, placaValida } from "@/lib/formato";
@@ -13,7 +14,7 @@ export const metadata: Metadata = { title: "Abrir OS" };
 export default function NovaOsPage({ searchParams }: PageProps<"/os/nova">) {
   return (
     <>
-      <span hidden data-esconde-navegacao />
+      <EsconderNavegacao />
       <Cabecalho titulo="Abrir OS" voltar="/os" />
       <Pagina>
         <Suspense fallback={<FormularioCarregando />}>

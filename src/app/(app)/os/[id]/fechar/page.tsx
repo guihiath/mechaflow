@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { Suspense } from "react";
 import { Cabecalho } from "@/components/layout/cabecalho";
+import { EsconderNavegacao } from "@/components/layout/marcador-pagina";
 import { CaixaErro, ChipPlaca, FormularioCarregando, Pagina } from "@/components/ui/estados";
 import { CaixaMensagem } from "@/components/ui/formulario";
 import { exigirContexto } from "@/lib/dal";
@@ -18,7 +19,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export default function FecharOsPage({ params }: PageProps<"/os/[id]/fechar">) {
   return (
     <>
-      <span hidden data-esconde-navegacao />
+      <EsconderNavegacao />
       <Suspense
         fallback={
           <>
@@ -98,13 +99,21 @@ async function Conteudo({ params }: { params: Promise<{ id: string }> }) {
         {avisoApos && (
           <CaixaMensagem tipo="alerta">
             {apos === 1 ? "1 item foi adicionado depois da aprovação." : `${apos} itens foram adicionados depois da aprovação.`}{" "}
-            Aprovado: <span className="font-mono">{formatarCentavos(aprovado)}</span> · Agora:{" "}
-            <span className="font-mono">{formatarCentavos(total)}</span>
+            {/* Valores sem quebrar no meio e com tabular-nums na fonte do texto (M4 do F3-R1). */}
+            <span className="whitespace-nowrap">
+              Aprovado: <span className="tabular-nums">{formatarCentavos(aprovado)}</span>
+            </span>{" "}
+            ·{" "}
+            <span className="whitespace-nowrap">
+              Agora: <span className="tabular-nums">{formatarCentavos(total)}</span>
+            </span>
             {diferenca !== 0 && (
-              <span className="font-mono">
+              <>
                 {" "}
-                ({diferenca > 0 ? "+" : "−"} {formatarCentavos(Math.abs(diferenca))})
-              </span>
+                <span className="whitespace-nowrap tabular-nums">
+                  ({diferenca > 0 ? "+" : "−"} {formatarCentavos(Math.abs(diferenca))})
+                </span>
+              </>
             )}
             . Confira se o cliente está sabendo.
           </CaixaMensagem>

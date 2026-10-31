@@ -269,19 +269,22 @@ export function FotoTelaCheia({
           </h2>
 
           {/* Topo: Fechar + "3 de 12" */}
-          <div className="flex h-14 shrink-0 items-center justify-between gap-2 bg-[#14161A] pt-[env(safe-area-inset-top)] pr-4 pl-1">
-            <button
-              ref={botaoFechar}
-              type="button"
-              onClick={aoFechar}
-              className="inline-flex min-h-toque items-center gap-1.5 rounded-md px-3 text-base font-bold text-[#EDEBE6] active:bg-superficie-2"
-            >
-              <X size={22} strokeWidth={2.25} aria-hidden />
-              Fechar
-            </button>
-            <p className="text-xs font-bold text-[#B4B0A8]" aria-hidden>
-              {idx + 1} de {total}
-            </p>
+          {/* O recuo do entalhe (PWA instalado) soma por fora da linha de 56 px (F3-B8, I2). */}
+          <div data-teste="topo-tela-cheia" className="shrink-0 bg-[#14161A] pt-[env(safe-area-inset-top)]">
+            <div className="flex h-14 items-center justify-between gap-2 pr-4 pl-1">
+              <button
+                ref={botaoFechar}
+                type="button"
+                onClick={aoFechar}
+                className="inline-flex min-h-toque items-center gap-1.5 rounded-md px-3 text-base font-bold text-[#EDEBE6] active:bg-superficie-2"
+              >
+                <X size={22} strokeWidth={2.25} aria-hidden />
+                Fechar
+              </button>
+              <p className="text-xs font-bold text-[#B4B0A8]" aria-hidden>
+                {idx + 1} de {total}
+              </p>
+            </div>
           </div>
 
           {/* Meio: foto inteira; miniatura ampliada por baixo enquanto a grande carrega */}

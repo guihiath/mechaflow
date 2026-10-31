@@ -72,7 +72,8 @@ export function LinhaItemOS({
     <>
       <Icone size={22} strokeWidth={2.25} aria-hidden className="mt-0.5 shrink-0 text-texto-suave" />
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="line-clamp-2 text-lg font-bold">
+        {/* Nome inteiro, sem "…": o balcão precisa ler o que o mecânico digitou para dar o preço (F3-B8, I3). */}
+        <span className="text-lg font-bold break-words hyphens-auto">
           <span className="sr-only">{item.tipo === "servico" ? "Serviço: " : "Peça: "}</span>
           {item.descricao}
         </span>

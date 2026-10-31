@@ -20,6 +20,7 @@ export function ConfirmarAcao({
   rotuloEnviando = "Enviando…",
   variante = "perigo",
   aoConcluir,
+  aoMudarAberto,
 }: {
   acao: () => Promise<EstadoAcao>;
   rotulo: string;
@@ -28,6 +29,8 @@ export function ConfirmarAcao({
   rotuloEnviando?: string;
   variante?: VarianteBotao;
   aoConcluir?: () => void;
+  /** Avisa o pai quando a confirmacao abre/fecha (ex.: esconder o rodape da folha). */
+  aoMudarAberto?: (aberto: boolean) => void;
 }) {
   const [aberto, setAberto] = useState(false);
   const [erro, setErro] = useState<string>();
@@ -36,6 +39,15 @@ export function ConfirmarAcao({
   const abrir = useRef<HTMLButtonElement>(null);
   const jaAbriu = useRef(false);
   const idPergunta = useId();
+
+  const aoMudarAbertoRef = useRef(aoMudarAberto);
+  useEffect(() => {
+    aoMudarAbertoRef.current = aoMudarAberto;
+  });
+  useEffect(() => {
+    if (jaAbriu.current || aberto) aoMudarAbertoRef.current?.(aberto);
+  }, [aberto]);
+  useEffect(() => () => aoMudarAbertoRef.current?.(false), []);
 
   useEffect(() => {
     if (aberto) {

@@ -5,6 +5,7 @@ import { Suspense } from "react";
 import { Phone } from "lucide-react";
 import { cancelarOS } from "@/acoes/os";
 import { Cabecalho } from "@/components/layout/cabecalho";
+import { EsconderNavegacao } from "@/components/layout/marcador-pagina";
 import { BadgeStatus, EtiquetaModo, EtiquetaPagamento, SemMecanico } from "@/components/os/badge-status";
 import { FotosDaOS } from "@/components/fotos/fotos-da-os";
 import { AprovadoAgora } from "@/components/os/aprovado-agora";
@@ -177,6 +178,7 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
     modo === "com_orcamento" && os.orcamento_aprovado_em != null && os.valor_aprovado_centavos != null && status !== "cancelada";
   const itensApos = itens.filter((i) => i.apos_aprovacao);
   const semPreco = os.itens_sem_preco ?? 0;
+  const aposSemPreco = itensApos.filter((i) => i.preco_unitario_centavos == null).length;
   // Aviso do mecanico ja traz o "Definir preços"; sem ele, o botao fica abaixo dos totais.
   const temAvisoMecanico = !encerrada && itens.some((i) => i.lancado_pelo_mecanico && i.precificado_pelo_balcao_em == null);
   const podeTrocarModo =
@@ -265,7 +267,7 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
 
   return (
     <PainelOS os={dados}>
-      <span hidden data-esconde-navegacao />
+      <EsconderNavegacao />
       <Cabecalho titulo={`OS #${os.numero}`} voltar="/os" />
       <Pagina larga>
         {aberta && <CaixaMensagem tipo="sucesso">OS #{aberta} aberta.</CaixaMensagem>}
@@ -343,7 +345,9 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
               servicosCentavos={os.total_servicos_centavos ?? 0}
               pecasCentavos={os.total_pecas_centavos ?? 0}
               totalCentavos={os.total_centavos ?? 0}
-              itensSemPreco={os.itens_sem_preco ?? 0}
+              // M5 do F3-R1: se todo item sem preco entrou depois da aprovacao, o AprovadoAgora
+              // ja diz isso ("+ 1 item sem preço" e a caixa); a linha da Fase 2 seria a 3a vez.
+              itensSemPreco={mostrarAprovado && aposSemPreco > 0 && aposSemPreco === semPreco ? 0 : (os.itens_sem_preco ?? 0)}
               custoPecasCentavos={ehDono ? (os.custo_total_centavos ?? 0) : undefined}
             >
               {mostrarAprovado && (
@@ -351,7 +355,7 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
                   aprovadoCentavos={os.valor_aprovado_centavos ?? 0}
                   agoraCentavos={os.total_centavos ?? 0}
                   itensAposAprovacao={os.itens_apos_aprovacao ?? itensApos.length}
-                  itensAposSemPreco={itensApos.filter((i) => i.preco_unitario_centavos == null).length}
+                  itensAposSemPreco={aposSemPreco}
                 />
               )}
             </ResumoTotais>

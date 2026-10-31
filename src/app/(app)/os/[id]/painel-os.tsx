@@ -43,6 +43,7 @@ import {
   EtiquetaLancadoPor,
   EtiquetaVoceLancou,
 } from "@/components/os/etiquetas-fase3";
+import { EsconderNavegacao } from "@/components/layout/marcador-pagina";
 import { EtiquetaSemPreco } from "@/components/os/badge-status";
 import { BarraAcoesMecanico, BarraAcoesOS, classesBotaoBarra } from "@/components/os/barra-acoes-os";
 import { LinhaItemOS, ListaItensOS } from "@/components/os/linha-item-os";
@@ -153,8 +154,9 @@ export type DadosPainel = {
 type FolhaAberta =
   | { tipo: "item-novo" }
   | { tipo: "item"; item: ItemOSCliente }
-  /** "Definir preços": itens sem preco em sequencia (DESIGN §11.9). */
-  | { tipo: "precificar"; fila: string[] }
+  /** "Definir preços": itens sem preco em sequencia (DESIGN §11.9). "Conferir itens"
+   * (F3-B8, I4): itens do mecanico ainda nao conferidos, mesma folha em sequencia. */
+  | { tipo: "precificar"; fila: string[]; modo: ModoFila }
   | { tipo: "lancar" }
   | { tipo: "item-mecanico"; item: ItemMecanico }
   | { tipo: "resposta" }
@@ -163,6 +165,13 @@ type FolhaAberta =
   | { tipo: "comecar" }
   | { tipo: "pagamento" }
   | { tipo: "modo" };
+
+/** Folha "Editar item" em sequencia: "precos" passa pelos sem preco; "conferir", pelos do mecanico nao conferidos. */
+type ModoFila = "precos" | "conferir";
+
+/** Item ainda na fila daquele modo (some da fila quando ganha preco / e conferido). */
+const pendenteNaFila = (modo: ModoFila, i: ItemOSCliente) =>
+  modo === "precos" ? i.precoUnitarioCentavos === null : Boolean(i.lancadoPorNome) && !i.conferido;
 
 type Desfazer = { chave: number; mensagem: string; de: StatusOS; para: StatusOS };
 
@@ -177,6 +186,8 @@ type Ctx = {
   mostrarErro: (erro: string) => void;
   /** Abre a folha do 1o item sem preco e segue para os proximos (dono/atendente). */
   definirPrecos: () => void;
+  /** Abre a folha dos itens do mecanico ainda nao conferidos, em sequencia (F3-B8, I4). */
+  conferirItens: () => void;
   /** Recado de sucesso acima da barra ("Todos os itens têm preço."). */
   sucesso: string | null;
   mostrarSucesso: (texto: string) => void;
@@ -376,7 +387,13 @@ export function PainelOS({ os, children }: { os: DadosPainel; children: ReactNod
     const fila = filaSemPreco();
     setErro(null);
     setSucesso(null);
-    if (fila.length) setFolha({ tipo: "precificar", fila });
+    if (fila.length) setFolha({ tipo: "precificar", fila, modo: "precos" });
+  };
+  const conferirItens = () => {
+    const fila = itensOrdenados(os.itens).filter((i) => pendenteNaFila("conferir", i)).map((i) => i.id);
+    setErro(null);
+    setSucesso(null);
+    if (fila.length) setFolha({ tipo: "precificar", fila, modo: "conferir" });
   };
 
   // Vindo do fechamento ("Definir preços" -> /os/[id]?precificar=1): abre a folha do 1o item sem preco.
@@ -385,7 +402,7 @@ export function PainelOS({ os, children }: { os: DadosPainel; children: ReactNod
     if (!precificarAoAbrir.current) return;
     precificarAoAbrir.current = false;
     const fila = itensOrdenados(os.itens).filter((i) => i.precoUnitarioCentavos === null).map((i) => i.id);
-    if (fila.length) setFolha({ tipo: "precificar", fila });
+    if (fila.length) setFolha({ tipo: "precificar", fila, modo: "precos" });
   }, [os.itens]);
 
   const ctx: Ctx = {
@@ -396,6 +413,7 @@ export function PainelOS({ os, children }: { os: DadosPainel; children: ReactNod
     erro,
     mostrarErro: (e) => (setDesfazer(null), setErro(e)),
     definirPrecos,
+    conferirItens,
     sucesso,
     mostrarSucesso: (t) => (setErro(null), setSucesso(t)),
     lerRascunho,
@@ -421,7 +439,7 @@ export function PainelOS({ os, children }: { os: DadosPainel; children: ReactNod
       )}
       {folha?.tipo === "item-novo" && <FolhaItem aoFechar={fechar} />}
       {folha?.tipo === "item" && <FolhaItem aoFechar={fechar} item={folha.item} />}
-      {folha?.tipo === "precificar" && <FolhaItem aoFechar={fechar} fila={folha.fila} />}
+      {folha?.tipo === "precificar" && <FolhaItem aoFechar={fechar} fila={folha.fila} modoFila={folha.modo} />}
       {folha?.tipo === "lancar" && <FolhaItemMecanico aoFechar={fechar} />}
       {folha?.tipo === "item-mecanico" && <FolhaItemMecanico aoFechar={fechar} item={folha.item} />}
       {folha?.tipo === "resposta" && (
@@ -519,7 +537,7 @@ export function BarraOS({ proximoPasso }: { proximoPasso?: string }) {
   }
   return (
     <>
-      <span hidden data-esconde-navegacao />
+      <EsconderNavegacao />
       <BarraAcoesOS primario={primario} secundario={secundario} acima={acima} proximoPasso={proximoPasso} />
     </>
   );
@@ -612,7 +630,7 @@ function BarraMecanico({ proximoPasso }: { proximoPasso?: string }) {
 
   return (
     <>
-      <span hidden data-esconde-navegacao />
+      <EsconderNavegacao />
       <BarraAcoesMecanico botoes={botoes} acima={acima} proximoPasso={proximoPasso} />
     </>
   );
@@ -785,20 +803,40 @@ export function AvisoItensMecanico() {
   const quem = nomes.length === 1 ? nomes[0] : `${nomes.slice(0, -1).join(", ")} e ${nomes[nomes.length - 1]}`;
   const n = pendentes.length;
   const semPreco = pendentes.filter((i) => i.precoUnitarioCentavos === null).length;
+  const lancou = nomes.length === 1 ? "lançou" : "lançaram";
+  const qtd = n === 1 ? "1 item" : `${n} itens`;
+  // Todos com preco (ex.: vieram do catalogo): nomeia os itens que faltam conferir (F3-B8, I4).
+  const descricoes = itensOrdenados(pendentes).map((i) => i.descricao);
   const texto =
-    `${quem} ${nomes.length === 1 ? "lançou" : "lançaram"} ${n === 1 ? "1 item" : `${n} itens`}.` +
-    (semPreco === 0
-      ? " Toque no item para conferir."
-      : n === 1
-        ? " Está sem preço."
-        : semPreco === 1
-          ? " 1 está sem preço."
-          : ` ${semPreco} estão sem preço.`);
+    semPreco === 0
+      ? n <= 2
+        ? `${quem} ${lancou} ${qtd}: ${descricoes.join(" e ")}. Confira e salve.`
+        : `${quem} ${lancou} ${qtd} para conferir.`
+      : `${quem} ${lancou} ${qtd}.` +
+        (n === 1 ? " Está sem preço." : semPreco === 1 ? " 1 está sem preço." : ` ${semPreco} estão sem preço.`);
   return (
     <div className="flex flex-col gap-2">
       <CaixaMensagem tipo="alerta">{texto}</CaixaMensagem>
-      {(os.itensSemPreco ?? 0) > 0 && <BotaoDefinirPrecos />}
+      {semPreco > 0 ? (
+        <BotaoDefinirPrecos />
+      ) : (
+        <>
+          <BotaoConferirItens />
+          {/* Item do proprio balcao sem preco: o "Definir preços" de baixo some quando ha este aviso. */}
+          {(os.itensSemPreco ?? 0) > 0 && <BotaoDefinirPrecos />}
+        </>
+      )}
     </div>
+  );
+}
+
+/** "Conferir itens" (mesmo estilo do "Definir preços"): itens do mecanico ainda nao conferidos. */
+export function BotaoConferirItens() {
+  const { conferirItens } = useOS();
+  return (
+    <Botao onClick={conferirItens} className="h-toque lg:w-auto lg:self-start">
+      Conferir itens
+    </Botao>
   );
 }
 
@@ -825,12 +863,22 @@ type CatalogoSeletor = { itens: ItemSeletor[]; maisUsados: { servico: string[]; 
 /** Dono/atendente: item do catalogo com preco (o mecanico nunca chega aqui). */
 const comPreco = (i: ItemSeletor | null): ItemCatalogoOS | null => (i && "precoCentavos" in i ? i : null);
 
-function FolhaItem({ aoFechar, item: itemAberto, fila }: { aoFechar: () => void; item?: ItemOSCliente; fila?: string[] }) {
+function FolhaItem({
+  aoFechar,
+  item: itemAberto,
+  fila,
+  modoFila = "precos",
+}: {
+  aoFechar: () => void;
+  item?: ItemOSCliente;
+  fila?: string[];
+  modoFila?: ModoFila;
+}) {
   const { os, mostrarSucesso } = useOS();
-  // "Definir preços": a folha passa pelos itens sem preco da fila, um de cada vez.
+  // "Definir preços" / "Conferir itens": a folha passa pelos itens da fila, um de cada vez.
   const [indice, setIndice] = useState(0);
   const proximos = (de: number) =>
-    (fila ?? []).slice(de + 1).filter((id) => os.itens.some((i) => i.id === id && i.precoUnitarioCentavos === null));
+    (fila ?? []).slice(de + 1).filter((id) => os.itens.some((i) => i.id === id && pendenteNaFila(modoFila, i)));
   const item = fila ? os.itens.find((i) => i.id === fila[indice]) : itemAberto;
   const restantes = fila ? proximos(indice).length : 0;
   const [escolhido, setEscolhido] = useState<Escolhido | null>(null);
@@ -853,10 +901,11 @@ function FolhaItem({ aoFechar, item: itemAberto, fila }: { aoFechar: () => void;
           setIndice(fila.indexOf(seguir[0]));
           return "limpar";
         }
-        // Ultimo da fila: so diz "todos" se nenhum outro item ficou sem preco.
-        const outros = os.itens.filter((i) => i.id !== item?.id && i.precoUnitarioCentavos === null).length;
+        // Ultimo da fila: so diz "todos" se nenhum outro item ficou sem preco / sem conferir.
+        const outros = os.itens.filter((i) => i.id !== item?.id && pendenteNaFila(modoFila, i)).length;
         const salvouPreco = r?.dados?.comPreco === "1";
-        if (salvouPreco && outros === 0) mostrarSucesso("Todos os itens têm preço.");
+        if (salvouPreco && outros === 0)
+          mostrarSucesso(modoFila === "conferir" ? "Itens do mecânico conferidos." : "Todos os itens têm preço.");
         aoFechar();
         return;
       }
@@ -890,17 +939,41 @@ function FolhaItem({ aoFechar, item: itemAberto, fila }: { aoFechar: () => void;
       rodape={
         fila ? (
           <>
-            <button
-              type="button"
-              onClick={aoFechar}
-              className="inline-flex min-h-toque w-full items-center justify-center text-base font-bold text-info-texto underline underline-offset-4"
-            >
-              Concluir
-            </button>
+            {/* "Pular" vai para o proximo sem salvar (F3-B8, I5); no ultimo, fecha. */}
+            <div className="flex">
+              <button
+                type="button"
+                disabled={envio.enviando}
+                onClick={() => {
+                  const seguir = proximos(indice);
+                  envio.setEstado(null);
+                  if (seguir.length) setIndice(fila.indexOf(seguir[0]));
+                  else aoFechar();
+                }}
+                className="inline-flex min-h-toque flex-1 items-center justify-center text-base font-bold text-info-texto underline underline-offset-4 disabled:opacity-60"
+              >
+                Pular
+              </button>
+              <button
+                type="button"
+                onClick={aoFechar}
+                className="inline-flex min-h-toque flex-1 items-center justify-center text-base font-bold text-info-texto underline underline-offset-4"
+              >
+                Concluir
+              </button>
+            </div>
             <BotaoForm
               form="form-item-os"
               enviando={envio.enviando}
-              rotulo={restantes > 0 ? `Salvar e ir para o próximo (${restantes})` : "Salvar preço"}
+              rotulo={
+                modoFila === "conferir"
+                  ? restantes > 0
+                    ? `Conferido e ir para o próximo (${restantes})`
+                    : "Conferido"
+                  : restantes > 0
+                    ? `Salvar e ir para o próximo (${restantes})`
+                    : "Salvar preço"
+              }
               rotuloEnviando="Salvando…"
             />
           </>
@@ -936,6 +1009,7 @@ function FolhaItem({ aoFechar, item: itemAberto, fila }: { aoFechar: () => void;
           key={item?.id ?? "novo"}
           item={item}
           focarPreco={Boolean(fila) || item?.precoUnitarioCentavos === null}
+          exigirPreco={Boolean(fila)}
           escolhido={escolhido && { ...escolhido, catalogo: comPreco(escolhido.catalogo) }}
           envio={envio}
           aoRemover={() => {
@@ -1156,6 +1230,9 @@ function SeletorItem({
   );
 }
 
+/** Mesmo texto no navegador e na Server Action (salvarItemOS com exigir_preco). */
+const ERRO_PRECO_FILA = "Digite o preço. Para deixar este para depois, toque em Pular.";
+
 function FormItem({
   item,
   focarPreco,
@@ -1164,10 +1241,13 @@ function FormItem({
   aoRemover,
   aoRascunho,
   descartarRef,
+  exigirPreco = false,
 }: {
   item?: ItemOSCliente;
   /** Item sem preco (ou "Definir preços"): o campo de preco ja vem com o foco. */
   focarPreco?: boolean;
+  /** Folha em sequencia ("Definir preços"/"Conferir itens"): preco obrigatorio; "Pular" deixa para depois (I5). */
+  exigirPreco?: boolean;
   escolhido: { catalogo: ItemCatalogoOS | null; descricao: string; tipo: TipoItemOS } | null;
   envio: ReturnType<typeof useEnvio>;
   aoRemover: () => void;
@@ -1238,7 +1318,21 @@ function FormItem({
   const ehPeca = tipo === "peca";
 
   return (
-    <form id="form-item-os" onSubmit={envio.enviar} noValidate className="flex flex-col gap-5">
+    <form
+      id="form-item-os"
+      onSubmit={(e) => {
+        if (exigirPreco && !preco.trim()) {
+          e.preventDefault();
+          envio.setEstado({ campos: { preco: ERRO_PRECO_FILA } });
+          focarPrimeiroErro(e.currentTarget);
+          return;
+        }
+        envio.enviar(e);
+      }}
+      noValidate
+      className="flex flex-col gap-5"
+    >
+      {exigirPreco && <input type="hidden" name="exigir_preco" value="1" />}
       {item?.lancadoPorNome && (
         <p className="-mt-1 text-sm text-texto-suave">
           Lançado por {primeiroNome(item.lancadoPorNome)}
@@ -1301,7 +1395,13 @@ function FormItem({
         className="font-mono"
         value={preco}
         onChange={(e) => setPreco(e.target.value.replace(/[^\d.,]/g, ""))}
-        ajuda={cat && cat.precoCentavos !== null ? `Preço do catálogo: ${formatarCentavos(cat.precoCentavos)}.` : "Pode deixar vazio: o item fica “Sem preço”."}
+        ajuda={
+          cat && cat.precoCentavos !== null
+            ? `Preço do catálogo: ${formatarCentavos(cat.precoCentavos)}.`
+            : exigirPreco
+              ? undefined
+              : "Pode deixar vazio: o item fica “Sem preço”."
+        }
         erro={envio.campos.preco}
       />
 
@@ -1379,6 +1479,8 @@ export function ListaItensMecanico() {
 
 function FolhaItemMecanico({ aoFechar, item }: { aoFechar: () => void; item?: ItemMecanico }) {
   const { os, mostrarErro } = useOS();
+  // Com a confirmacao de remover aberta, so uma decisao na tela: o rodape some (M7 do F3-R1).
+  const [removendo, setRemovendo] = useState(false);
   const [escolhido, setEscolhido] = useState<Escolhido | null>(null);
   const [lancados, setLancados] = useState(0);
   const [mensagem, setMensagem] = useState<string | null>(null);
@@ -1420,7 +1522,7 @@ function FolhaItemMecanico({ aoFechar, item }: { aoFechar: () => void; item?: It
       recuperado={rasc.recuperado}
       aoDescartar={() => descartarRef.current?.()}
       rodape={
-        passo2 ? (
+        removendo ? undefined : passo2 ? (
           <BotaoForm
             form="form-item-mecanico"
             enviando={envio.enviando}
@@ -1457,6 +1559,7 @@ function FolhaItemMecanico({ aoFechar, item }: { aoFechar: () => void; item?: It
           }}
           aoRascunho={setRasc}
           descartarRef={descartarRef}
+          aoConfirmarRemover={setRemovendo}
         />
       ) : (
         <SeletorItem
@@ -1480,6 +1583,7 @@ function FormItemMecanico({
   aoRemover,
   aoRascunho,
   descartarRef,
+  aoConfirmarRemover,
 }: {
   item?: ItemMecanico;
   escolhido: Escolhido | null;
@@ -1487,6 +1591,8 @@ function FormItemMecanico({
   aoRemover: () => void;
   aoRascunho: (e: { sujo: boolean; recuperado: boolean }) => void;
   descartarRef: { current: (() => void) | null };
+  /** A confirmacao de remover abriu/fechou (a folha esconde o "Salvar item", M7 do F3-R1). */
+  aoConfirmarRemover?: (aberta: boolean) => void;
 }) {
   const { os } = useOS();
   const editando = Boolean(item);
@@ -1597,6 +1703,7 @@ function FormItemMecanico({
           rotuloConfirmar="Remover item"
           rotuloEnviando="Removendo…"
           aoConcluir={aoRemover}
+          aoMudarAberto={aoConfirmarRemover}
         />
       )}
     </form>

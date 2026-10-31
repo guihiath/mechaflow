@@ -84,7 +84,8 @@ export function FolhaTipoFoto({
         )}
         {uma ? (
           <div className="flex items-center gap-3">
-            <Previa item={itens[0]} tamanho="size-24" />
+            {/* 64 px (era 96): no Safari do iPhone o "Outro" ficava abaixo da dobra (M1 do F3-R1). */}
+            <Previa item={itens[0]} tamanho="size-16" />
             <p className="text-base font-bold text-texto-suave">Foto 1 de 1</p>
           </div>
         ) : (

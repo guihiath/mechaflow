@@ -162,7 +162,7 @@ export function FormFechar({
           </p>
           {acimaDoAprovadoCentavos > 0 && (
             <p className="text-base font-bold text-alerta-texto">
-              O total está <span className="font-mono">{formatarCentavos(acimaDoAprovadoCentavos)}</span> acima do aprovado.
+              O total está <span className="whitespace-nowrap tabular-nums">{formatarCentavos(acimaDoAprovadoCentavos)}</span> acima do aprovado.
             </p>
           )}
           <Botao variante="secundario" disabled={enviando} onClick={() => setConfirmando(false)}>

@@ -9,14 +9,14 @@ import { fotos } from "@/components/os/categorias-foto";
  * - enviando: foto `atual` de `total`, `progresso` 0-100 do total (barra amarela fina)
  * - retomando: fila guardada sendo enviada fora da OS ("Enviando 2 fotos guardadas (OS #1042)…")
  * - sem_internet: `guardadas` fotos esperando a rede voltar
- * - falhou: `quantidade` fotos nao enviadas (botao "Tentar de novo")
+ * - falhou: `quantidade` fotos nao enviadas (botao "Tentar de novo"); fora da OS, com `numeroOS`
  * - concluido: `total` fotos enviadas (some sozinha em 3 s; chama `aoSumir`)
  */
 export type SituacaoEnvio =
   | { tipo: "enviando"; atual: number; total: number; progresso?: number }
   | { tipo: "retomando"; quantidade: number; numeroOS: number | string; progresso?: number }
   | { tipo: "sem_internet"; guardadas: number }
-  | { tipo: "falhou"; quantidade: number }
+  | { tipo: "falhou"; quantidade: number; numeroOS?: number | string }
   | { tipo: "concluido"; total: number };
 
 export function textoSituacaoEnvio(s: SituacaoEnvio): string {
@@ -28,7 +28,7 @@ export function textoSituacaoEnvio(s: SituacaoEnvio): string {
     case "sem_internet":
       return `Sem internet. ${fotos(s.guardadas)} ${s.guardadas === 1 ? "guardada" : "guardadas"} no celular.`;
     case "falhou":
-      return `${fotos(s.quantidade)} ${s.quantidade === 1 ? "não enviada" : "não enviadas"}.`;
+      return `${fotos(s.quantidade)} ${s.quantidade === 1 ? "não enviada" : "não enviadas"}${s.numeroOS != null ? ` (OS #${s.numeroOS})` : ""}.`;
     case "concluido":
       return `${fotos(s.total)} ${s.total === 1 ? "enviada" : "enviadas"}.`;
   }

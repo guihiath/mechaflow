@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Check, type LucideIcon } from "lucide-react";
+import { FaixaChips } from "./faixa-chips";
 
 export type OpcaoFiltro = {
   valor: string;
@@ -16,7 +17,8 @@ export type OpcaoFiltro = {
  * Filtro por chips (DESIGN §10.3): links GET, entao o voltar do navegador funciona.
  * Celular: uma linha com rolagem horizontal, o ultimo chip cortado pela borda da tela
  * (mostra que ha mais). Desktop: quebra linha.
- * Ativo: fundo amarelo + icone Check (nao so cor) + aria-current.
+ * Ativo: fundo amarelo + icone Check (nao so cor) + aria-current; ao abrir, o ativo vem
+ * para dentro da faixa (FaixaChips, F3-B8 I6).
  */
 export function FiltroChips({
   opcoes,
@@ -29,7 +31,7 @@ export function FiltroChips({
 }) {
   return (
     <nav aria-label={rotulo} className="-mx-4 lg:mx-0">
-      <ul className="flex snap-x gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] lg:flex-wrap lg:overflow-visible lg:px-0">
+      <FaixaChips ativo={ativo} className="flex snap-x gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] lg:flex-wrap lg:overflow-visible lg:px-0">
         {opcoes.map((o) => {
           const eAtivo = o.valor === ativo;
           return (
@@ -55,7 +57,7 @@ export function FiltroChips({
             </li>
           );
         })}
-      </ul>
+      </FaixaChips>
     </nav>
   );
 }

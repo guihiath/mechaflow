@@ -43,7 +43,12 @@ export function useSituacaoEnvio(itens: ItemFila[], filtro: (i: ItemFila) => boo
       ? { tipo: "retomando", quantidade: andando.length, numeroOS, progresso }
       : { tipo: "enviando", atual: Math.min(enviadas + 1, total), total, progresso };
   } else if (semRede.length) situacao = { tipo: "sem_internet", guardadas: semRede.length };
-  else if (falhas.length) situacao = { tipo: "falhou", quantidade: falhas.length };
+  else if (falhas.length) {
+    // Fora da OS (faixa global, M2 do F3-R1): diz de qual OS, se forem todas da mesma.
+    const das = new Set(falhas.map((i) => i.numeroOS));
+    const numero = numeroOS != null && das.size === 1 ? falhas[0].numeroOS : null;
+    situacao = { tipo: "falhou", quantidade: falhas.length, ...(numero != null ? { numeroOS: numero } : {}) };
+  }
   else if (enviadas > 0) situacao = { tipo: "concluido", total: enviadas };
 
   return {

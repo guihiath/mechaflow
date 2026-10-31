@@ -377,6 +377,9 @@ export async function salvarItemOS(_anterior: EstadoAcao, dados: FormData): Prom
   const v = lerValoresItem(dados, ehDono);
   if (!UUID.test(itemId) || !UUID.test(osId)) return { erro: "Algo deu errado ao enviar. Recarregue a página e tente de novo." };
   if (temErros(v.campos)) return erroCampos(v.campos);
+  // "Definir preços"/"Conferir itens" (F3-B8, I5): em sequencia o preco e obrigatorio.
+  if (texto(dados, "exigir_preco") === "1" && v.preco === null)
+    return erroCampos({ preco: "Digite o preço. Para deixar este para depois, toque em Pular." });
 
   const supabase = await createClient();
   const { data, error } = await supabase

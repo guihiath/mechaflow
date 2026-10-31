@@ -142,8 +142,13 @@
   /* Rodapes maiores que a barra inferior (DESIGN §10.3 item 7 e §10.11, I6):
      "Abrir OS" fixo acima da barra em /os; rodape com 1-2 botoes em /os/nova, detalhe e fechar. */
   @media (max-width: 1023.98px) {
-    html:has([data-rodape-extra]) { scroll-padding-bottom: calc(8rem + env(safe-area-inset-bottom) + 1rem); }
-    html:has([data-esconde-navegacao]) { scroll-padding-bottom: calc(9rem + env(safe-area-inset-bottom)); }
+    /* Marcas no <html> postas por components/layout/marcador-pagina.tsx (F3-B8, C1).
+       O :has() vale so antes do JavaScript: com cacheComponents a pagina anterior fica
+       escondida no DOM e o :has() continuaria valendo depois de voltar. */
+    html:not([data-marcas-js]):has([data-rodape-extra]),
+    html[data-rodape-extra] { scroll-padding-bottom: calc(8rem + env(safe-area-inset-bottom) + 1rem); }
+    html:not([data-marcas-js]):has([data-esconde-navegacao]),
+    html[data-sem-navegacao] { scroll-padding-bottom: calc(9rem + env(safe-area-inset-bottom)); }
   }
   @media (min-width: 1024px) {
     html { scroll-padding-bottom: 1rem; }
@@ -163,11 +168,13 @@
 }
 
 /* Telas de OS com barra de acoes / rodape fixo (DESIGN §10.2): a barra de navegacao
-   do celular some. A pagina marca isso com um elemento [data-esconde-navegacao].
+   do celular some. A pagina marca isso com <EsconderNavegacao /> (html[data-sem-navegacao];
+   o [data-esconde-navegacao] so vale antes do JavaScript, ver acima).
    A barra de acoes tem a mesma altura da navegacao: o espaco no fim da pagina
    (padding do .area-conteudo) continua valendo para ela. */
 @media (max-width: 1023.98px) {
-  body:has([data-esconde-navegacao]) .navegacao-inferior { display: none; }
+  html:not([data-marcas-js]) body:has([data-esconde-navegacao]) .navegacao-inferior,
+  html[data-sem-navegacao] .navegacao-inferior { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
