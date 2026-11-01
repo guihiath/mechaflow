@@ -1,5 +1,6 @@
 // Tipos do banco no formato do `supabase gen types typescript`.
 // Escrito a mao a partir de supabase/migrations/20261028000001..4 (Fase 1).
+// Fase 4 (vistoria): migracoes 20261101000001..4.
 // Para regenerar: npx supabase gen types typescript --project-id qjzhzyzmifashtvffxdx > src/lib/supabase/database.types.ts
 
 export type Json =
@@ -18,6 +19,397 @@ export type Database = {
   }
   public: {
     Tables: {
+      checklist_modelos: {
+        // Modelo de checklist (1 padrao por oficina). Dono: update { nome }.
+        Row: {
+          atualizado_em: string
+          criado_em: string
+          id: string
+          nome: string
+          oficina_id: string
+          padrao: boolean
+        }
+        Insert: {
+          atualizado_em?: string
+          criado_em?: string
+          id?: string
+          nome: string
+          oficina_id?: string
+          padrao?: boolean
+        }
+        Update: {
+          atualizado_em?: string
+          criado_em?: string
+          id?: string
+          nome?: string
+          oficina_id?: string
+          padrao?: boolean
+        }
+        Relationships: []
+      }
+      checklist_modelo_itens: {
+        // Dono: insert { modelo_id, descricao } (ordem = fim), update { descricao, ativo }; ordem: rpc mover_item_checklist. Sem delete.
+        Row: {
+          ativo: boolean
+          atualizado_em: string
+          criado_em: string
+          descricao: string
+          id: string
+          modelo_id: string
+          oficina_id: string
+          ordem: number
+        }
+        Insert: {
+          ativo?: boolean
+          atualizado_em?: string
+          criado_em?: string
+          descricao: string
+          id?: string
+          modelo_id: string
+          oficina_id?: string
+          ordem?: number
+        }
+        Update: {
+          ativo?: boolean
+          atualizado_em?: string
+          criado_em?: string
+          descricao?: string
+          id?: string
+          modelo_id?: string
+          oficina_id?: string
+          ordem?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "checklist_modelo_itens_modelo_fk"
+            columns: ["modelo_id", "oficina_id"]
+            isOneToOne: false
+            referencedRelation: "checklist_modelos"
+            referencedColumns: ["id", "oficina_id"]
+          },
+        ]
+      }
+      vistorias: {
+        // Escrita so pelas RPCs da vistoria. Concluida = imutavel (trigger). km/horimetro: copia da conclusao (em rascunho use vw_vistorias).
+        Row: {
+          anulada_em: string | null
+          anulada_por: string | null
+          assinado_por_nome: string | null
+          assinatura_altura: number | null
+          assinatura_caminho: string | null
+          assinatura_id: string | null
+          assinatura_largura: number | null
+          assinatura_registrada_por: string | null
+          assinatura_tamanho_bytes: number | null
+          atualizado_em: string
+          combustivel: Database["public"]["Enums"]["nivel_combustivel"] | null
+          concluida_em: string | null
+          concluida_por: string | null
+          criado_em: string
+          criado_por: string | null
+          hash_conteudo: string | null
+          horimetro: number | null
+          id: string
+          km: number | null
+          motivo_anulacao: string | null
+          objetos: string[]
+          observacoes: string | null
+          sem_avarias: boolean
+          oficina_id: string
+          os_id: string
+          sem_assinatura_motivo: Database["public"]["Enums"]["motivo_sem_assinatura"] | null
+          status: Database["public"]["Enums"]["status_vistoria"]
+          tipo: Database["public"]["Enums"]["tipo_vistoria"]
+          veiculo_id: string
+        }
+        Insert: {
+          anulada_em?: string | null
+          anulada_por?: string | null
+          assinado_por_nome?: string | null
+          assinatura_altura?: number | null
+          assinatura_caminho?: string | null
+          assinatura_id?: string | null
+          assinatura_largura?: number | null
+          assinatura_registrada_por?: string | null
+          assinatura_tamanho_bytes?: number | null
+          atualizado_em?: string
+          combustivel?: Database["public"]["Enums"]["nivel_combustivel"] | null
+          concluida_em?: string | null
+          concluida_por?: string | null
+          criado_em?: string
+          criado_por?: string | null
+          hash_conteudo?: string | null
+          horimetro?: number | null
+          id?: string
+          km?: number | null
+          motivo_anulacao?: string | null
+          objetos?: string[]
+          observacoes?: string | null
+          sem_avarias?: boolean
+          oficina_id: string
+          os_id: string
+          sem_assinatura_motivo?: Database["public"]["Enums"]["motivo_sem_assinatura"] | null
+          status?: Database["public"]["Enums"]["status_vistoria"]
+          tipo?: Database["public"]["Enums"]["tipo_vistoria"]
+          veiculo_id: string
+        }
+        Update: {
+          anulada_em?: string | null
+          anulada_por?: string | null
+          assinado_por_nome?: string | null
+          assinatura_altura?: number | null
+          assinatura_caminho?: string | null
+          assinatura_id?: string | null
+          assinatura_largura?: number | null
+          assinatura_registrada_por?: string | null
+          assinatura_tamanho_bytes?: number | null
+          atualizado_em?: string
+          combustivel?: Database["public"]["Enums"]["nivel_combustivel"] | null
+          concluida_em?: string | null
+          concluida_por?: string | null
+          criado_em?: string
+          criado_por?: string | null
+          hash_conteudo?: string | null
+          horimetro?: number | null
+          id?: string
+          km?: number | null
+          motivo_anulacao?: string | null
+          objetos?: string[]
+          observacoes?: string | null
+          sem_avarias?: boolean
+          oficina_id?: string
+          os_id?: string
+          sem_assinatura_motivo?: Database["public"]["Enums"]["motivo_sem_assinatura"] | null
+          status?: Database["public"]["Enums"]["status_vistoria"]
+          tipo?: Database["public"]["Enums"]["tipo_vistoria"]
+          veiculo_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vistorias_os_fk"
+            columns: ["os_id", "oficina_id"]
+            isOneToOne: false
+            referencedRelation: "ordens_servico"
+            referencedColumns: ["id", "oficina_id"]
+          },
+          {
+            foreignKeyName: "vistorias_veiculo_fk"
+            columns: ["veiculo_id", "oficina_id"]
+            isOneToOne: false
+            referencedRelation: "veiculos"
+            referencedColumns: ["id", "oficina_id"]
+          },
+        ]
+      }
+      vistoria_itens: {
+        // Checklist COPIADO do modelo. Escrita: marcar_item_vistoria / marcar_itens_restantes_ok.
+        Row: {
+          descricao: string
+          id: string
+          marcado_em: string | null
+          marcado_por: string | null
+          modelo_item_id: string | null
+          observacao: string | null
+          oficina_id: string
+          ordem: number
+          situacao: Database["public"]["Enums"]["situacao_item_vistoria"] | null
+          vistoria_id: string
+        }
+        Insert: {
+          descricao: string
+          id?: string
+          marcado_em?: string | null
+          marcado_por?: string | null
+          modelo_item_id?: string | null
+          observacao?: string | null
+          oficina_id: string
+          ordem: number
+          situacao?: Database["public"]["Enums"]["situacao_item_vistoria"] | null
+          vistoria_id: string
+        }
+        Update: {
+          descricao?: string
+          id?: string
+          marcado_em?: string | null
+          marcado_por?: string | null
+          modelo_item_id?: string | null
+          observacao?: string | null
+          oficina_id?: string
+          ordem?: number
+          situacao?: Database["public"]["Enums"]["situacao_item_vistoria"] | null
+          vistoria_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vistoria_itens_vistoria_fk"
+            columns: ["vistoria_id", "oficina_id"]
+            isOneToOne: false
+            referencedRelation: "vistorias"
+            referencedColumns: ["id", "oficina_id"]
+          },
+        ]
+      }
+      vistoria_avarias: {
+        // Escrita: salvar_avaria / remover_avaria (id gerado no navegador).
+        Row: {
+          atualizado_em: string
+          criado_em: string
+          criado_por: string | null
+          descricao: string | null
+          id: string
+          lado: Database["public"]["Enums"]["lado_avaria"]
+          oficina_id: string
+          vistoria_id: string
+        }
+        Insert: {
+          atualizado_em?: string
+          criado_em?: string
+          criado_por?: string | null
+          descricao?: string | null
+          id: string
+          lado: Database["public"]["Enums"]["lado_avaria"]
+          oficina_id: string
+          vistoria_id: string
+        }
+        Update: {
+          atualizado_em?: string
+          criado_em?: string
+          criado_por?: string | null
+          descricao?: string | null
+          id?: string
+          lado?: Database["public"]["Enums"]["lado_avaria"]
+          oficina_id?: string
+          vistoria_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vistoria_avarias_vistoria_fk"
+            columns: ["vistoria_id", "oficina_id"]
+            isOneToOne: false
+            referencedRelation: "vistorias"
+            referencedColumns: ["id", "oficina_id"]
+          },
+        ]
+      }
+      vistoria_complementos: {
+        // So insert, pela RPC complementar_vistoria. Nunca muda.
+        Row: {
+          criado_em: string
+          criado_por: string | null
+          id: string
+          oficina_id: string
+          texto: string | null
+          vistoria_id: string
+        }
+        Insert: {
+          criado_em?: string
+          criado_por?: string | null
+          id: string
+          oficina_id: string
+          texto?: string | null
+          vistoria_id: string
+        }
+        Update: {
+          criado_em?: string
+          criado_por?: string | null
+          id?: string
+          oficina_id?: string
+          texto?: string | null
+          vistoria_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vistoria_complementos_vistoria_fk"
+            columns: ["vistoria_id", "oficina_id"]
+            isOneToOne: false
+            referencedRelation: "vistorias"
+            referencedColumns: ["id", "oficina_id"]
+          },
+        ]
+      }
+      vistoria_fotos: {
+        // Bucket 'vistorias'. Escrita: registrar_foto_vistoria / confirmar_foto_vistoria / apagar_foto_vistoria.
+        Row: {
+          altura: number
+          avaria_id: string | null
+          caminho: string
+          caminho_miniatura: string
+          complemento_id: string | null
+          criado_em: string
+          criado_por: string | null
+          enviada_em: string | null
+          id: string
+          largura: number
+          legenda: string | null
+          oficina_id: string
+          os_id: string
+          tamanho_bytes: number
+          tamanho_miniatura_bytes: number
+          tipo: Database["public"]["Enums"]["tipo_foto_vistoria"]
+          vistoria_id: string
+        }
+        Insert: {
+          altura: number
+          avaria_id?: string | null
+          caminho?: string
+          caminho_miniatura?: string
+          complemento_id?: string | null
+          criado_em?: string
+          criado_por?: string | null
+          enviada_em?: string | null
+          id: string
+          largura: number
+          legenda?: string | null
+          oficina_id: string
+          os_id: string
+          tamanho_bytes: number
+          tamanho_miniatura_bytes: number
+          tipo: Database["public"]["Enums"]["tipo_foto_vistoria"]
+          vistoria_id: string
+        }
+        Update: {
+          altura?: number
+          avaria_id?: string | null
+          caminho?: string
+          caminho_miniatura?: string
+          complemento_id?: string | null
+          criado_em?: string
+          criado_por?: string | null
+          enviada_em?: string | null
+          id?: string
+          largura?: number
+          legenda?: string | null
+          oficina_id?: string
+          os_id?: string
+          tamanho_bytes?: number
+          tamanho_miniatura_bytes?: number
+          tipo?: Database["public"]["Enums"]["tipo_foto_vistoria"]
+          vistoria_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vistoria_fotos_vistoria_fk"
+            columns: ["vistoria_id", "oficina_id"]
+            isOneToOne: false
+            referencedRelation: "vistorias"
+            referencedColumns: ["id", "oficina_id"]
+          },
+          {
+            foreignKeyName: "vistoria_fotos_avaria_fk"
+            columns: ["avaria_id", "vistoria_id"]
+            isOneToOne: false
+            referencedRelation: "vistoria_avarias"
+            referencedColumns: ["id", "vistoria_id"]
+          },
+          {
+            foreignKeyName: "vistoria_fotos_complemento_fk"
+            columns: ["complemento_id", "vistoria_id"]
+            isOneToOne: false
+            referencedRelation: "vistoria_complementos"
+            referencedColumns: ["id", "vistoria_id"]
+          },
+        ]
+      }
       catalogo_pecas: {
         Row: {
           ativo: boolean
@@ -973,6 +1365,90 @@ export type Database = {
       }
     }
     Views: {
+      vw_vistorias: {
+        // km/horimetro: da OS em rascunho, copia da conclusao depois. pode_*: regra de quem consulta.
+        Row: {
+          anulada_em: string | null
+          anulada_por: string | null
+          anulada_por_nome: string | null
+          assinado_por_nome: string | null
+          assinatura_caminho: string | null
+          assinatura_id: string | null
+          atualizado_em: string | null
+          combustivel: Database["public"]["Enums"]["nivel_combustivel"] | null
+          concluida_em: string | null
+          concluida_por: string | null
+          concluida_por_nome: string | null
+          criado_em: string | null
+          criado_por: string | null
+          criado_por_nome: string | null
+          fotos_pendentes: number | null
+          hash_conteudo: string | null
+          horimetro: number | null
+          id: string | null
+          itens_com_problema: number | null
+          itens_marcados: number | null
+          itens_total: number | null
+          km: number | null
+          motivo_anulacao: string | null
+          objetos: string[] | null
+          observacoes: string | null
+          oficina_id: string | null
+          os_id: string | null
+          os_numero: number | null
+          placa: string | null
+          pode_anular: boolean | null
+          pode_complementar: boolean | null
+          pode_editar: boolean | null
+          qtd_avarias: number | null
+          qtd_complementos: number | null
+          qtd_fotos: number | null
+          sem_assinatura_motivo: Database["public"]["Enums"]["motivo_sem_assinatura"] | null
+          sem_avarias: boolean | null
+          status: Database["public"]["Enums"]["status_vistoria"] | null
+          tipo: Database["public"]["Enums"]["tipo_vistoria"] | null
+          veiculo_id: string | null
+        }
+        Relationships: []
+      }
+      vw_vistoria_fotos: {
+        // Inclui pendentes (enviada_em null). Galeria: filtrar enviada_em.
+        Row: {
+          altura: number | null
+          avaria_id: string | null
+          caminho: string | null
+          caminho_miniatura: string | null
+          complemento_id: string | null
+          criado_em: string | null
+          criado_por: string | null
+          criado_por_nome: string | null
+          enviada_em: string | null
+          id: string | null
+          largura: number | null
+          legenda: string | null
+          oficina_id: string | null
+          os_id: string | null
+          pode_apagar: boolean | null
+          tamanho_bytes: number | null
+          tipo: Database["public"]["Enums"]["tipo_foto_vistoria"] | null
+          vistoria_id: string | null
+        }
+        Relationships: []
+      }
+      vw_vistoria_complementos: {
+        // Complementos com a contagem de fotos enviadas.
+        Row: {
+          criado_em: string | null
+          criado_por: string | null
+          criado_por_nome: string | null
+          id: string | null
+          oficina_id: string | null
+          qtd_fotos: number | null
+          texto: string | null
+          vistoria_id: string | null
+        }
+        Relationships: []
+      }
       vw_catalogo_mais_usados: {
         Row: {
           catalogo_id: string | null
@@ -990,6 +1466,9 @@ export type Database = {
         // itens_apos_aprovacao e observacoes (Fase 3) vem NULL. qtd_fotos: todos.
         // Atendente: custo_total_centavos NULL.
         Row: {
+          // Fase 4: vistoria de entrada (NULL = "Sem vistoria")
+          vistoria_entrada_id: string | null
+          vistoria_entrada_status: Database["public"]["Enums"]["status_vistoria"] | null
           atualizado_em: string | null
           autorizacao_registrada_por_nome: string | null
           autorizado_em: string | null
@@ -1179,6 +1658,138 @@ export type Database = {
       }
     }
     Functions: {
+      anular_vistoria: {
+        Args: {
+          p_motivo: string
+          p_vistoria_id: string
+        }
+        Returns: undefined
+      }
+      apagar_foto_vistoria: {
+        Args: {
+          p_id: string
+        }
+        Returns: boolean
+      }
+      complementar_vistoria: {
+        Args: {
+          p_id: string
+          p_texto?: string | null
+          p_vistoria_id: string
+        }
+        Returns: undefined
+      }
+      concluir_vistoria: {
+        Args: {
+          p_sem_assinatura_motivo?: Database["public"]["Enums"]["motivo_sem_assinatura"] | null
+          p_vistoria_id: string
+        }
+        Returns: string
+      }
+      conferir_vistoria: {
+        Args: {
+          p_vistoria_id: string
+        }
+        Returns: boolean | null
+      }
+      confirmar_foto_vistoria: {
+        Args: {
+          p_id: string
+        }
+        Returns: undefined
+      }
+      iniciar_vistoria: {
+        Args: {
+          p_os_id: string
+          p_tipo?: Database["public"]["Enums"]["tipo_vistoria"]
+        }
+        Returns: {
+          ja_existia: boolean
+          status: Database["public"]["Enums"]["status_vistoria"]
+          vistoria_id: string
+        }[]
+      }
+      marcar_item_vistoria: {
+        Args: {
+          p_item_id: string
+          p_observacao?: string | null
+          p_situacao: Database["public"]["Enums"]["situacao_item_vistoria"]
+        }
+        Returns: undefined
+      }
+      marcar_itens_restantes_ok: {
+        Args: {
+          p_vistoria_id: string
+        }
+        Returns: number
+      }
+      mover_item_checklist: {
+        Args: {
+          p_direcao: "subir" | "descer"
+          p_item_id: string
+        }
+        Returns: undefined
+      }
+      registrar_assinatura_vistoria: {
+        Args: {
+          p_altura: number
+          p_assinatura_id: string
+          p_largura: number
+          p_nome: string
+          p_tamanho_bytes: number
+          p_vistoria_id: string
+        }
+        Returns: string
+      }
+      registrar_foto_vistoria: {
+        Args: {
+          p_altura: number
+          p_avaria_id?: string | null
+          p_complemento_id?: string | null
+          p_id: string
+          p_largura: number
+          p_legenda?: string | null
+          p_tamanho_bytes: number
+          p_tamanho_miniatura_bytes: number
+          p_tipo: Database["public"]["Enums"]["tipo_foto_vistoria"]
+          p_vistoria_id: string
+        }
+        Returns: {
+          caminho: string
+          caminho_miniatura: string
+          enviada: boolean
+          id: string
+          ja_existia: boolean
+        }[]
+      }
+      remover_avaria: {
+        Args: {
+          p_id: string
+        }
+        Returns: boolean
+      }
+      salvar_avaria: {
+        Args: {
+          p_descricao?: string | null
+          p_id: string
+          p_lado?: Database["public"]["Enums"]["lado_avaria"] | null
+          p_vistoria_id: string
+        }
+        Returns: undefined
+      }
+      salvar_vistoria: {
+        Args: {
+          p_combustivel?: Database["public"]["Enums"]["nivel_combustivel"] | null
+          p_horimetro?: number | null
+          p_km?: number | null
+          p_objetos?: string[] | null
+          p_assinado_por_nome?: string | null
+          p_observacoes?: string | null
+          p_sem_avarias?: boolean | null
+          p_vistoria_id: string
+        }
+        Returns: undefined
+      }
       abrir_os: {
         Args: {
           p_autorizado_por_nome?: string
@@ -1422,6 +2033,13 @@ export type Database = {
       }
     }
     Enums: {
+      lado_avaria: "frente" | "traseira" | "lateral_esquerda" | "lateral_direita" | "cabine" | "outro"
+      motivo_sem_assinatura: "motorista_ausente" | "recusou"
+      nivel_combustivel: "reserva" | "um_quarto" | "meio" | "tres_quartos" | "cheio"
+      situacao_item_vistoria: "ok" | "com_problema" | "nao_se_aplica"
+      status_vistoria: "rascunho" | "concluida" | "anulada"
+      tipo_foto_vistoria: "avaria" | "painel" | "outro"
+      tipo_vistoria: "entrada" | "saida"
       canal_resposta: "telefone" | "whatsapp" | "presencial" | "link"
       categoria_foto: "diagnostico" | "peca_defeituosa" | "peca_trocada" | "antes" | "depois" | "entrega" | "outro"
       forma_pagamento: "pix" | "dinheiro" | "cartao_debito" | "cartao_credito" | "boleto" | "faturado"
@@ -1548,6 +2166,13 @@ export type Enums<
 export const Constants = {
   public: {
     Enums: {
+      lado_avaria: ["frente", "traseira", "lateral_esquerda", "lateral_direita", "cabine", "outro"],
+      motivo_sem_assinatura: ["motorista_ausente", "recusou"],
+      nivel_combustivel: ["reserva", "um_quarto", "meio", "tres_quartos", "cheio"],
+      situacao_item_vistoria: ["ok", "com_problema", "nao_se_aplica"],
+      status_vistoria: ["rascunho", "concluida", "anulada"],
+      tipo_foto_vistoria: ["avaria", "painel", "outro"],
+      tipo_vistoria: ["entrada", "saida"],
       canal_resposta: ["telefone", "whatsapp", "presencial", "link"],
       categoria_foto: ["diagnostico", "peca_defeituosa", "peca_trocada", "antes", "depois", "entrega", "outro"],
       forma_pagamento: ["pix", "dinheiro", "cartao_debito", "cartao_credito", "boleto", "faturado"],
