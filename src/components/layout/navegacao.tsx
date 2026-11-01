@@ -10,6 +10,7 @@ import {
   Truck,
   User,
   Users,
+  Settings,
   Contact,
   LogOut,
 } from "lucide-react";
@@ -33,7 +34,7 @@ const BARRA: Record<Papel, Item[]> = {
       href: "/mais",
       rotulo: "Mais",
       icone: Ellipsis,
-      ativoEm: ["/mais", "/veiculos", "/catalogo", "/equipe", "/conta", "/placa"],
+      ativoEm: ["/mais", "/veiculos", "/catalogo", "/equipe", "/configuracoes", "/conta", "/placa"],
     },
   ],
   atendente: [
@@ -59,6 +60,7 @@ const LATERAL: Record<Papel, Item[]> = {
     { href: "/placa", rotulo: "Buscar placa", icone: Search },
     { href: "/catalogo", rotulo: "Catálogo", icone: BookOpen },
     { href: "/equipe", rotulo: "Equipe", icone: Users },
+    { href: "/configuracoes", rotulo: "Configurações", icone: Settings },
     { href: "/conta", rotulo: "Conta", icone: User },
   ],
   atendente: [

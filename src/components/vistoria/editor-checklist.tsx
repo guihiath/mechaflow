@@ -114,7 +114,9 @@ export function ListaEditorChecklist({
         ? mesmo
         : lista.current.querySelector<HTMLButtonElement>(`[data-mover="${focar.id}:${outra}"]`);
     alvo?.focus();
-  }, [focar, ativos]);
+    // So quando ha um movimento novo: `focar` muda no mesmo toque que a ordem otimista do pai.
+    // Depender da lista roubaria o foco de uma Folha aberta a cada render do pai.
+  }, [focar]);
 
   function mover(item: ItemEditorChecklist, direcao: Direcao) {
     const i = ativos.findIndex((x) => x.id === item.id);

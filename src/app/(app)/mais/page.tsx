@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
-import { BookOpen, ChevronRight, Search, Truck, User, Users } from "lucide-react";
+import { BookOpen, ChevronRight, Search, Settings, Truck, User, Users } from "lucide-react";
 import { Cabecalho } from "@/components/layout/cabecalho";
 import { Cartao, ListaCarregando, Pagina } from "@/components/ui/estados";
 import { exigirContexto } from "@/lib/dal";
@@ -18,6 +18,7 @@ const ITENS = {
     PLACA,
     { href: "/catalogo", titulo: "Catálogo", texto: "Serviços e peças, preços e custos", icone: BookOpen },
     { href: "/equipe", titulo: "Equipe", texto: "Convidar, desativar, mudar papel", icone: Users },
+    { href: "/configuracoes", titulo: "Configurações da oficina", texto: "Vistoria e checklist", icone: Settings },
     CONTA,
   ],
   atendente: [VEICULOS, PLACA, CONTA],
