@@ -16,7 +16,7 @@ import { fotos } from "@/components/os/categorias-foto";
 
 const ICONE = { size: 18, strokeWidth: 2.25, "aria-hidden": true } as const;
 
-function EtiquetaInfo({ children }: { children: ReactNode }) {
+export function EtiquetaInfo({ children }: { children: ReactNode }) {
   return (
     <span className="inline-flex h-8 items-center gap-1.5 rounded-sm border-2 border-info-texto px-2.5 text-sm font-bold text-info-texto">
       {children}
