@@ -16,6 +16,7 @@ import { ConfirmarComMotivo } from "@/components/ui/confirmar-acao";
 import { CaixaErro, Cartao, ChipPlaca, Pagina } from "@/components/ui/estados";
 import { CaixaMensagem } from "@/components/ui/formulario";
 import { LimparUrl } from "@/components/ui/limpar-url";
+import { CartaoVistoriaOS, type ResumoVistoriaOS } from "@/components/vistoria/cartao-vistoria-os";
 import { exigirContexto, type ContextoAtivo } from "@/lib/dal";
 import {
   formatarCentavos,
@@ -83,6 +84,30 @@ async function Conteudo({ params, searchParams }: { params: Promise<{ id: string
   return ctx.papel === "mecanico" ? <DetalheMecanico ctx={ctx} id={id} /> : <DetalheGerencia ctx={ctx} id={id} sp={sp} />;
 }
 
+const COLUNAS_VISTORIA =
+  "status, criado_em, criado_por_nome, concluida_em, concluida_por_nome, qtd_avarias, assinado_por_nome, sem_assinatura_motivo";
+
+type Cliente = Awaited<ReturnType<typeof createClient>>;
+
+/** Vistoria de entrada da OS (a anulada não conta: a OS volta a "Sem vistoria"). */
+function lerVistoriaEntrada(supabase: Cliente, osId: string) {
+  return supabase.from("vw_vistorias").select(COLUNAS_VISTORIA).eq("os_id", osId).eq("tipo", "entrada").neq("status", "anulada").maybeSingle();
+}
+
+function resumoVistoria(v: Awaited<ReturnType<typeof lerVistoriaEntrada>>["data"]): ResumoVistoriaOS {
+  if (!v?.status) return null;
+  return {
+    status: v.status,
+    criadoEm: v.criado_em,
+    criadoPorNome: v.criado_por_nome,
+    concluidaEm: v.concluida_em,
+    concluidaPorNome: v.concluida_por_nome,
+    qtdAvarias: v.qtd_avarias ?? 0,
+    assinadoPorNome: v.assinado_por_nome,
+    semAssinaturaMotivo: v.sem_assinatura_motivo,
+  };
+}
+
 function Erro({ id, voltar }: { id: string; voltar: string }) {
   return (
     <>
@@ -111,12 +136,13 @@ function Info({ rotulo, children }: { rotulo: string; children: React.ReactNode 
 async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string; sp: Params }) {
   const supabase = await createClient();
   const ehDono = ctx.papel === "dono";
-  const [{ data: os, error }, itensR, histR, equipeR, andamentoR] = await Promise.all([
+  const [{ data: os, error }, itensR, histR, equipeR, andamentoR, vistoriaR] = await Promise.all([
     supabase.from("vw_os").select("*").eq("id", id).maybeSingle(),
     supabase.from("vw_os_itens").select("*").eq("os_id", id).order("criado_em"),
     supabase.from("vw_os_historico").select("id, evento, de_status, para_status, observacao, por_nome, em").eq("os_id", id).order("em"),
     supabase.from("perfis").select("id, nome, papel").eq("ativo", true).order("nome"),
     supabase.from("vw_os").select("mecanico_id").eq("status", "em_andamento").not("mecanico_id", "is", null),
+    lerVistoriaEntrada(supabase, id),
   ]);
   if (error || itensR.error || histR.error) return <Erro id={id} voltar="/os" />;
   if (!os || !ehStatusOS(os.status)) notFound();
@@ -298,6 +324,9 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
               {status === "pronta" && <BotaoReabrir />}
             </div>
 
+            {/* Vistoria de entrada: alto na página, é o que se faz na chegada (DESIGN §12.2 b) */}
+            <CartaoVistoriaOS osId={id} vistoria={resumoVistoria(vistoriaR.data)} podeFazer={!encerrada} encerrada={encerrada} />
+
             {/* Celular: aviso dos itens do mecanico logo abaixo do topo (DESIGN §11.9) */}
             <div className="lg:hidden">
               <AvisoItensMecanico />
@@ -444,7 +473,7 @@ const RECADO: Partial<Record<StatusOS, { tipo: "alerta" | "info" | "sucesso"; te
 async function DetalheMecanico({ ctx, id }: { ctx: ContextoAtivo; id: string }) {
   const supabase = await createClient();
   // Colunas escolhidas uma a uma: nada de valor, telefone ou autorizacao (DESIGN §10.10).
-  const [{ data: os, error }, itensR, histR] = await Promise.all([
+  const [{ data: os, error }, itensR, histR, vistoriaR] = await Promise.all([
 supabase
   .from("vw_os")
   .select(
@@ -459,6 +488,7 @@ supabase
   .eq("os_id", id)
   .order("criado_em"),
 supabase.from("vw_os_historico").select("id, evento, de_status, para_status, observacao, por_nome, em").eq("os_id", id).order("em"),
+lerVistoriaEntrada(supabase, id),
   ]);
   if (error || itensR.error || histR.error) return <Erro id={id} voltar="/minhas-os" />;
   if (!os || !ehStatusOS(os.status)) notFound();
@@ -525,6 +555,9 @@ podeLancar,
         {recado.texto}
       </CaixaMensagem>
     )}
+
+    {/* Mecânico faz a vistoria só na OS dele e aberta (ARQUITETURA 12.6) */}
+    <CartaoVistoriaOS osId={id} vistoria={resumoVistoria(vistoriaR.data)} podeFazer={minha && !osEncerrada(status)} encerrada={osEncerrada(status)} />
 
     <Cartao>
       <dl className="flex flex-col gap-3">
