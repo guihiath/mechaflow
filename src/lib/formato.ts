@@ -1,3 +1,5 @@
+import type { Database } from "@/lib/supabase/database.types";
+
 /**
  * Formatacao para a TELA. No banco e no codigo: centavos (inteiro) e UTC.
  */
@@ -254,3 +256,111 @@ export function formatarBytes(bytes: number | null | undefined): string {
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${(bytes / (1024 * 1024)).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} MB`;
 }
+
+// ---------------------------------------------------------------- Fase 4 (vistoria)
+// Valores = enums do banco (ARQUITETURA 12.2), com os tipos do database.types.ts: valor a mais
+// na lista nao compila (satisfies) e rotulo faltando tambem nao (Record).
+type Enums = Database["public"]["Enums"];
+
+/** `status_vistoria`. */
+export type StatusVistoria = Enums["status_vistoria"];
+export const STATUS_VISTORIA = ["rascunho", "concluida", "anulada"] as const satisfies readonly StatusVistoria[];
+export const ROTULO_STATUS_VISTORIA: Record<StatusVistoria, string> = {
+  rascunho: "Vistoria em andamento",
+  concluida: "Vistoria feita",
+  anulada: "Vistoria anulada",
+};
+
+/** `tipo_vistoria`. */
+export type TipoVistoria = Enums["tipo_vistoria"];
+export const TIPOS_VISTORIA = ["entrada", "saida"] as const satisfies readonly TipoVistoria[];
+export const ROTULO_TIPO_VISTORIA: Record<TipoVistoria, string> = {
+  entrada: "Vistoria de entrada",
+  saida: "Vistoria de saída",
+};
+
+/** `nivel_combustivel`, do menor para o maior (DESIGN §12.4). */
+export type NivelCombustivel = Enums["nivel_combustivel"];
+export const NIVEIS_COMBUSTIVEL = ["reserva", "um_quarto", "meio", "tres_quartos", "cheio"] as const satisfies readonly NivelCombustivel[];
+/** Rotulo curto do botao ("Reserva", "1/4"...). */
+export const ROTULO_COMBUSTIVEL: Record<NivelCombustivel, string> = {
+  reserva: "Reserva",
+  um_quarto: "1/4",
+  meio: "1/2",
+  tres_quartos: "3/4",
+  cheio: "Cheio",
+};
+/** Texto para leitor de tela e resumo ("1/4 do tanque"). */
+export const ROTULO_COMBUSTIVEL_LONGO: Record<NivelCombustivel, string> = {
+  reserva: "na reserva",
+  um_quarto: "1/4 do tanque",
+  meio: "1/2 tanque",
+  tres_quartos: "3/4 do tanque",
+  cheio: "tanque cheio",
+};
+/** Fracao do medidor (reserva = 1/8). */
+export const FRACAO_COMBUSTIVEL: Record<NivelCombustivel, number> = {
+  reserva: 0.125,
+  um_quarto: 0.25,
+  meio: 0.5,
+  tres_quartos: 0.75,
+  cheio: 1,
+};
+
+/** `situacao_item_vistoria` (NULL no banco = item ainda sem marcar). */
+export type SituacaoItemVistoria = Enums["situacao_item_vistoria"];
+export const SITUACOES_ITEM_VISTORIA = ["ok", "com_problema", "nao_se_aplica"] as const satisfies readonly SituacaoItemVistoria[];
+/** Rotulo do botao do checklist (DESIGN §12.5: nao abreviar "Não se aplica"). */
+export const ROTULO_SITUACAO_ITEM: Record<SituacaoItemVistoria, string> = {
+  ok: "Ok",
+  com_problema: "Problema",
+  nao_se_aplica: "Não se aplica",
+};
+/** Rotulo na leitura/resumo ("13 ok · 2 com problema · 1 não se aplica"). */
+export const ROTULO_SITUACAO_ITEM_LEITURA: Record<SituacaoItemVistoria, string> = {
+  ok: "Ok",
+  com_problema: "Com problema",
+  nao_se_aplica: "Não se aplica",
+};
+
+/** `lado_avaria`, na ordem da grade (DESIGN §12.6). */
+export type LadoAvaria = Enums["lado_avaria"];
+export const LADOS_AVARIA = ["frente", "traseira", "lateral_esquerda", "lateral_direita", "cabine", "outro"] as const satisfies readonly LadoAvaria[];
+export const ROTULO_LADO_AVARIA: Record<LadoAvaria, string> = {
+  frente: "Frente",
+  traseira: "Traseira",
+  lateral_esquerda: "Lateral esquerda",
+  lateral_direita: "Lateral direita",
+  cabine: "Cabine",
+  outro: "Outro",
+};
+
+/** `tipo_foto_vistoria` (complemento = foto com complemento_id, tipo "outro"; ARQUITETURA V19). */
+export type TipoFotoVistoria = Enums["tipo_foto_vistoria"];
+export const TIPOS_FOTO_VISTORIA = ["avaria", "painel", "outro"] as const satisfies readonly TipoFotoVistoria[];
+export const ROTULO_TIPO_FOTO_VISTORIA: Record<TipoFotoVistoria, string> = {
+  avaria: "Avaria",
+  painel: "Painel",
+  outro: "Outro",
+};
+export const ROTULO_FOTO_COMPLEMENTO = "Complemento";
+
+/** `motivo_sem_assinatura`. */
+export type MotivoSemAssinatura = Enums["motivo_sem_assinatura"];
+export const MOTIVOS_SEM_ASSINATURA = ["motorista_ausente", "recusou"] as const satisfies readonly MotivoSemAssinatura[];
+/** Opcao da pergunta "Por quê?" (DESIGN §12.8). */
+export const ROTULO_MOTIVO_SEM_ASSINATURA: Record<MotivoSemAssinatura, string> = {
+  motorista_ausente: "Motorista não está aqui",
+  recusou: "Recusou assinar",
+};
+/** Texto da etiqueta (DESIGN §12.1). */
+export const ETIQUETA_SEM_ASSINATURA: Record<MotivoSemAssinatura, string> = {
+  motorista_ausente: "Sem assinatura: motorista ausente",
+  recusou: "Sem assinatura: recusou assinar",
+};
+
+/** Limites da vistoria (ARQUITETURA 12.2/12.3). */
+export const LIMITE_FOTOS_VISTORIA = 30;
+export const LIMITE_FOTOS_AVARIA = 3;
+/** Assinatura PNG: no maximo 512 KB (CHECK em `vistorias.assinatura_tamanho_bytes`). */
+export const LIMITE_BYTES_ASSINATURA = 512 * 1024;

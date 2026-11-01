@@ -6,6 +6,8 @@
  * Constantes usadas fora do CSS (manifest, metadata, icones): src/lib/brand.ts.
  */
 @custom-variant dark (&:where([data-tema="escuro"], [data-tema="escuro"] *));
+/* Celular deitado (altura curta): assinatura em tela cheia (DESIGN §12.9). */
+@custom-variant deitado (@media (orientation: landscape) and (max-height: 540px));
 
 :root {
   /* Superficies e texto: modo claro (padrao) */
