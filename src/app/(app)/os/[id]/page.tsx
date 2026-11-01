@@ -17,6 +17,7 @@ import { CaixaErro, Cartao, ChipPlaca, Pagina } from "@/components/ui/estados";
 import { CaixaMensagem } from "@/components/ui/formulario";
 import { LimparUrl } from "@/components/ui/limpar-url";
 import { CartaoVistoriaOS, type ResumoVistoriaOS } from "@/components/vistoria/cartao-vistoria-os";
+import { ConviteVistoria } from "@/components/vistoria/convite-vistoria";
 import { exigirContexto, type ContextoAtivo } from "@/lib/dal";
 import {
   formatarCentavos,
@@ -94,6 +95,11 @@ function lerVistoriaEntrada(supabase: Cliente, osId: string) {
   return supabase.from("vw_vistorias").select(COLUNAS_VISTORIA).eq("os_id", osId).eq("tipo", "entrada").neq("status", "anulada").maybeSingle();
 }
 
+/** Chave "vistoria obrigatória" da oficina (todos os papéis leem; ARQUITETURA 12.6). */
+function lerObrigatoria(supabase: Cliente, oficinaId: string) {
+  return supabase.from("oficinas").select("vistoria_obrigatoria").eq("id", oficinaId).maybeSingle();
+}
+
 function resumoVistoria(v: Awaited<ReturnType<typeof lerVistoriaEntrada>>["data"]): ResumoVistoriaOS {
   if (!v?.status) return null;
   return {
@@ -136,13 +142,14 @@ function Info({ rotulo, children }: { rotulo: string; children: React.ReactNode 
 async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string; sp: Params }) {
   const supabase = await createClient();
   const ehDono = ctx.papel === "dono";
-  const [{ data: os, error }, itensR, histR, equipeR, andamentoR, vistoriaR] = await Promise.all([
+  const [{ data: os, error }, itensR, histR, equipeR, andamentoR, vistoriaR, oficinaR] = await Promise.all([
     supabase.from("vw_os").select("*").eq("id", id).maybeSingle(),
     supabase.from("vw_os_itens").select("*").eq("os_id", id).order("criado_em"),
     supabase.from("vw_os_historico").select("id, evento, de_status, para_status, observacao, por_nome, em").eq("os_id", id).order("em"),
     supabase.from("perfis").select("id, nome, papel").eq("ativo", true).order("nome"),
     supabase.from("vw_os").select("mecanico_id").eq("status", "em_andamento").not("mecanico_id", "is", null),
     lerVistoriaEntrada(supabase, id),
+    lerObrigatoria(supabase, ctx.oficina_id),
   ]);
   if (error || itensR.error || histR.error) return <Erro id={id} voltar="/os" />;
   if (!os || !ehStatusOS(os.status)) notFound();
@@ -297,6 +304,10 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
       <Cabecalho titulo={`OS #${os.numero}`} voltar="/os" />
       <Pagina larga>
         {aberta && <CaixaMensagem tipo="sucesso">OS #{aberta} aberta.</CaixaMensagem>}
+        {/* Convite no fim do "Abrir OS" (DESIGN §12.2 a), só na chegada */}
+        {param(sp.vistoria) === "oferecer" && !vistoriaR.data && !encerrada && (
+          <ConviteVistoria osId={id} obrigatoria={Boolean(oficinaR.data?.vistoria_obrigatoria)} />
+        )}
         {entregue && <CaixaMensagem tipo="sucesso">OS #{os.numero} entregue. Veículo liberado.</CaixaMensagem>}
         {(aberta || entregue || dados.precificarAoAbrir) && <LimparUrl />}
         {status === "cancelada" && (
@@ -473,7 +484,7 @@ const RECADO: Partial<Record<StatusOS, { tipo: "alerta" | "info" | "sucesso"; te
 async function DetalheMecanico({ ctx, id }: { ctx: ContextoAtivo; id: string }) {
   const supabase = await createClient();
   // Colunas escolhidas uma a uma: nada de valor, telefone ou autorizacao (DESIGN §10.10).
-  const [{ data: os, error }, itensR, histR, vistoriaR] = await Promise.all([
+  const [{ data: os, error }, itensR, histR, vistoriaR, oficinaR] = await Promise.all([
 supabase
   .from("vw_os")
   .select(
@@ -489,6 +500,7 @@ supabase
   .order("criado_em"),
 supabase.from("vw_os_historico").select("id, evento, de_status, para_status, observacao, por_nome, em").eq("os_id", id).order("em"),
 lerVistoriaEntrada(supabase, id),
+lerObrigatoria(supabase, ctx.oficina_id),
   ]);
   if (error || itensR.error || histR.error) return <Erro id={id} voltar="/minhas-os" />;
   if (!os || !ehStatusOS(os.status)) notFound();
@@ -534,6 +546,11 @@ equipe: [],
 itens: [],
 itensMecanico: itens,
 podeLancar,
+// Vistoria na barra (DESIGN §12.2 c): OS dele, aberta, vistoria ainda não concluída.
+vistoriaBarra:
+  minha && !osEncerrada(status) && vistoriaR.data?.status !== "concluida"
+    ? { emAndamento: vistoriaR.data?.status === "rascunho", obrigatoria: Boolean(oficinaR.data?.vistoria_obrigatoria) }
+    : null,
   };
 
   return (

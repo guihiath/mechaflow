@@ -15,7 +15,9 @@ import {
   type FormEvent,
   type ReactNode,
 } from "react";
-import { Camera, Check, CircleAlert, CircleCheckBig, Images, Play, Plus, Search, ThumbsDown, ThumbsUp, TriangleAlert } from "lucide-react";
+import { Camera, Check, CircleAlert, CircleCheckBig, ClipboardCheck, Images, Play, Plus, Search, ThumbsDown, ThumbsUp, TriangleAlert } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { iniciarVistoria } from "@/acoes/vistoria";
 import {
   adicionarItemOS,
   alterarItemMecanicoOS,
@@ -149,6 +151,8 @@ export type DadosPainel = {
   podeLancar?: boolean;
   /** `?precificar=1` (vindo do fechamento): abre "Definir preços" ao carregar. */
   precificarAoAbrir?: boolean;
+  /** Só na versão do mecânico, na OS dele aberta e sem vistoria concluída (DESIGN §12.2 c). */
+  vistoriaBarra?: { emAndamento: boolean; obrigatoria: boolean } | null;
 };
 
 type FolhaAberta =
@@ -560,6 +564,39 @@ const REGISTRAR_RESPOSTA = (
 
 const ICONE_BARRA = { size: 26, strokeWidth: 2.25, "aria-hidden": true } as const;
 
+/** "Vistoria" na barra do mecânico: continua o rascunho ou cria (iniciar_vistoria é idempotente). */
+function BotaoVistoriaBarra({ osId, emAndamento }: { osId: string; emAndamento: boolean }) {
+  const router = useRouter();
+  const [abrindo, iniciar] = useTransition();
+  if (emAndamento) {
+    return (
+      <Link href={`/os/${osId}/vistoria`} aria-label="Continuar a vistoria do veículo" className={classesBotaoBarra("secundario", true)}>
+        <ClipboardCheck {...ICONE_BARRA} />
+        Vistoria
+      </Link>
+    );
+  }
+  return (
+    <button
+      type="button"
+      disabled={abrindo}
+      aria-label={abrindo ? undefined : "Vistoria do veículo"}
+      onClick={() =>
+        iniciar(async () => {
+          const r = await iniciarVistoria(osId);
+          // Falhou: a tela da vistoria mostra o cartão com "Fazer vistoria" e o motivo.
+          if (r?.erro) router.push(`/os/${osId}/vistoria`);
+        })
+      }
+      className={classesBotaoBarra("secundario", true)}
+      data-teste="barra-vistoria"
+    >
+      <ClipboardCheck {...ICONE_BARRA} />
+      {abrindo ? "Abrindo…" : "Vistoria"}
+    </button>
+  );
+}
+
 /**
  * Barra do mecanico (DESIGN §11.2, F3-B6): status · item · foto, com "Tirar foto" como
  * primario a direita (a acao que ele mais repete). So na OS dele e com a OS aberta;
@@ -598,9 +635,20 @@ function BarraMecanico({ proximoPasso }: { proximoPasso?: string }) {
   if (!os.mecanicoDaOS || !aberta) return acima ? <AcimaSemBarra>{acima}</AcimaSemBarra> : null;
 
   const botoes: ReactNode[] = [];
-  const empilhado = os.status === "aguardando_orcamento" || os.status === "aprovada" || os.status === "em_andamento";
+  // Vistoria ocupa a casa da esquerda quando ela está vazia (ou no lugar do "Marcar pronta"
+  // bloqueado pela vistoria obrigatória), sem tirar o "Tirar foto" do lugar (DESIGN §12.2 c).
+  const vb = os.vistoriaBarra;
+  const vistoriaNaBarra =
+    vb != null &&
+    (os.status === "aguardando_orcamento" ||
+      os.status === "orcamento_enviado" ||
+      os.status === "pronta" ||
+      (os.status === "em_andamento" && vb.obrigatoria));
+  const empilhado = vistoriaNaBarra || os.status === "aguardando_orcamento" || os.status === "aprovada" || os.status === "em_andamento";
 
-  if (os.status === "aprovada") {
+  if (vistoriaNaBarra && vb) {
+    botoes.push(<BotaoVistoriaBarra key="status" osId={os.id} emAndamento={vb.emAndamento} />);
+  } else if (os.status === "aprovada") {
     botoes.push(
       <button
         key="status"

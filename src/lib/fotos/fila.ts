@@ -327,8 +327,61 @@ export function tentarDeNovo(ids?: string[]) {
 let rodando = false;
 const espera = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+// ------------------------------------------------------------ avarias ainda não salvas (F4-B4)
+
+/**
+ * Foto de avaria só pode registrar depois que a avaria existe no banco (`salvar_avaria`).
+ * Sem internet, a avaria fica no rascunho do aparelho e as fotos dela ficam guardadas na fila,
+ * mas SEGURADAS por esta lista até a avaria subir. Guardada no `localStorage` para valer
+ * também depois de recarregar (a fila retoma antes de a tela da vistoria abrir).
+ */
+const CHAVE_AVARIAS_ESPERANDO = "mf-avarias-esperando";
+
+function lerEsperando(): Set<string> {
+  try {
+    const v: unknown = JSON.parse(window.localStorage.getItem(CHAVE_AVARIAS_ESPERANDO) ?? "[]");
+    return new Set(Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function gravarEsperando(s: Set<string>) {
+  try {
+    if (s.size) window.localStorage.setItem(CHAVE_AVARIAS_ESPERANDO, JSON.stringify([...s].slice(-200)));
+    else window.localStorage.removeItem(CHAVE_AVARIAS_ESPERANDO);
+  } catch {
+    /* sem localStorage: segura só nesta aba */
+  }
+}
+
+/** Segura as fotos desta avaria até `liberarAvaria` (a avaria ainda não está no banco). */
+export function aguardarAvaria(avariaId: string) {
+  if (typeof window === "undefined") return;
+  const s = lerEsperando();
+  s.add(avariaId);
+  gravarEsperando(s);
+}
+
+/** A avaria foi salva no banco (ou descartada): as fotos dela podem sair. */
+export function liberarAvaria(avariaId: string) {
+  if (typeof window === "undefined") return;
+  const s = lerEsperando();
+  if (s.delete(avariaId)) gravarEsperando(s);
+  trabalhar();
+}
+
 function proxima(): ItemFila | undefined {
-  return estado.itens.find((i) => i.estado === "na_fila" && i.categoria && i.foto && i.mini && i.usuarioId === estado.usuarioId);
+  const esperando = lerEsperando();
+  return estado.itens.find(
+    (i) =>
+      i.estado === "na_fila" &&
+      i.categoria &&
+      i.foto &&
+      i.mini &&
+      i.usuarioId === estado.usuarioId &&
+      !(i.vistoria?.avariaId && esperando.has(i.vistoria.avariaId)),
+  );
 }
 
 export function trabalhar() {

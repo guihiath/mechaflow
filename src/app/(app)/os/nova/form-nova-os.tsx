@@ -257,7 +257,7 @@ export function FormNovaOS({
         const resposta = await abrirOS(null, fd);
         if (resposta?.ok && resposta.dados?.os_id) {
           sessionStorage.removeItem(CHAVE_RASCUNHO);
-          router.replace(`/os/${resposta.dados.os_id}?aberta=${resposta.dados.numero}`);
+          router.replace(`/os/${resposta.dados.os_id}?aberta=${resposta.dados.numero}&vistoria=oferecer`);
           return;
         }
         setEstado(resposta);

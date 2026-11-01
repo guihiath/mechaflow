@@ -22,6 +22,7 @@ import {
 import type { EtapaTempo } from "@/lib/fotos/preparar";
 import { BUCKET_VISTORIAS } from "@/lib/fotos/regras";
 import type { DadosAssinatura } from "@/lib/assinatura";
+import type { MotivoSemAssinatura } from "@/lib/formato";
 import { createClient } from "@/lib/supabase/client";
 
 export type AssinaturaParaEnviar = {
@@ -83,9 +84,12 @@ export async function enviarAssinatura(a: AssinaturaParaEnviar): Promise<Resulta
 }
 
 /** concluir_vistoria. Devolve o hash ou o código de erro do banco (para a lista do que falta). */
-export async function concluirVistoria(vistoriaId: string): Promise<{ hash: string } | { codigo: string; mensagem: string }> {
+export async function concluirVistoria(
+  vistoriaId: string,
+  semAssinaturaMotivo: MotivoSemAssinatura | null = null,
+): Promise<{ hash: string } | { codigo: string; mensagem: string }> {
   const supabase = createClient();
-  const r = await supabase.rpc("concluir_vistoria", { p_vistoria_id: vistoriaId }).then(
+  const r = await supabase.rpc("concluir_vistoria", { p_vistoria_id: vistoriaId, ...(semAssinaturaMotivo ? { p_sem_assinatura_motivo: semAssinaturaMotivo } : {}) }).then(
     (x) => x,
     (e) => ({ data: null, error: { message: String((e as Error)?.message ?? e), code: "" } }),
   );
