@@ -1,10 +1,11 @@
 "use client";
 
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { FaixaEnvioFotos } from "@/components/os/faixa-envio-fotos";
 import { emAndamento, iniciarFila, tentarDeNovo } from "@/lib/fotos/fila";
 import { useFila, useSituacaoEnvio } from "./usar-fila";
+import { useCaminhoHidratado } from "@/components/layout/usar-caminho";
 
 /**
  * Fila de fotos em qualquer tela do app (DESIGN §11.7): ao abrir o app com fotos guardadas
@@ -12,9 +13,9 @@ import { useFila, useSituacaoEnvio } from "./usar-fila";
  * "Enviando 2 fotos guardadas (OS #1042)…". Avisa ao fechar a aba com envio pendente
  * (o iPhone pode não mostrar o aviso; por isso a fila fica guardada no aparelho).
  */
-export function FilaFotosGlobal({ usuarioId }: { usuarioId: string }) {
+export function FilaFotosGlobal({ usuarioId, caminhoServidor = null }: { usuarioId: string; caminhoServidor?: string | null }) {
   const fila = useFila();
-  const pathname = usePathname();
+  const pathname = useCaminhoHidratado(caminhoServidor);
   const router = useRouter();
 
   useEffect(() => {

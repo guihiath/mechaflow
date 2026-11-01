@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
 import {
   BookOpen,
   ClipboardList,
@@ -17,6 +16,7 @@ import {
 import type { Papel } from "@/lib/contexto";
 import { FormSair } from "@/components/fotos/form-sair";
 import { APP_NAME } from "@/lib/brand";
+import { useCaminhoHidratado } from "./usar-caminho";
 
 type Item = { href: string; rotulo: string; icone: typeof House; ativoEm?: string[] };
 
@@ -82,8 +82,17 @@ function estaAtivo(caminho: string, item: Item) {
   return bases.some((b) => caminho === b || caminho.startsWith(`${b}/`));
 }
 
-export function Navegacao({ papel, oficina }: { papel: Papel; oficina: string | null }) {
-  const caminho = usePathname();
+export function Navegacao({
+  papel,
+  oficina,
+  caminhoServidor = null,
+}: {
+  papel: Papel;
+  oficina: string | null;
+  /** Caminho com que o servidor renderizou (ver useCaminhoHidratado). */
+  caminhoServidor?: string | null;
+}) {
+  const caminho = useCaminhoHidratado(caminhoServidor);
 
   return (
     <>

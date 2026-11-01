@@ -2,6 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import type { Database } from "./database.types";
 import { getSupabaseEnv } from "./env";
+import { CABECALHO_CAMINHO } from "@/lib/caminho";
 
 /**
  * Prefixos publicos (sem login). Todo o resto exige sessao.
@@ -24,6 +25,8 @@ export function rotaPublica(pathname: string) {
  */
 export async function atualizarSessao(request: NextRequest) {
   const { url, publishableKey } = getSupabaseEnv();
+  // Caminho pedido, para a barra de navegação hidratar igual ao HTML do servidor (F4-P1).
+  request.headers.set(CABECALHO_CAMINHO, request.nextUrl.pathname);
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient<Database>(url, publishableKey, {

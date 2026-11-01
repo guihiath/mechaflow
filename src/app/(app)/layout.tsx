@@ -1,7 +1,9 @@
 import { Suspense } from "react";
+import { headers } from "next/headers";
 import { Navegacao, NavegacaoEsqueleto } from "@/components/layout/navegacao";
 import { FilaFotosGlobal } from "@/components/fotos/fila-fotos-global";
 import { lerContexto } from "@/lib/dal";
+import { CABECALHO_CAMINHO } from "@/lib/caminho";
 
 /**
  * Casca do app logado: menu lateral (desktop) ou barra inferior (celular).
@@ -20,12 +22,14 @@ export default function AppLayout({ children }: LayoutProps<"/">) {
 }
 
 async function NavegacaoDoUsuario() {
-  const ctx = await lerContexto();
+  const [ctx, cab] = await Promise.all([lerContexto(), headers()]);
   if (!ctx?.papel || ctx.ativo !== true) return <NavegacaoEsqueleto />;
+  // Caminho com que este pedaço foi renderizado: a hidratação usa o mesmo (F4-P1, #418).
+  const caminho = cab.get(CABECALHO_CAMINHO);
   return (
     <>
-      <Navegacao papel={ctx.papel} oficina={ctx.oficina_nome} />
-      {ctx.usuario_id && <FilaFotosGlobal usuarioId={ctx.usuario_id} />}
+      <Navegacao papel={ctx.papel} oficina={ctx.oficina_nome} caminhoServidor={caminho} />
+      {ctx.usuario_id && <FilaFotosGlobal usuarioId={ctx.usuario_id} caminhoServidor={caminho} />}
     </>
   );
 }
