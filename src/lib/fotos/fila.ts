@@ -16,6 +16,7 @@ import type { CategoriaFoto } from "@/lib/formato";
 import { enviarFoto, ErroEnvio, guardarDiagnostico, novoIdFoto, segundosDesdeAquecimento } from "./enviar";
 import { apagarGuardado, atualizarGuardado, guardar, listarGuardados, type RegistroGuardado } from "./fila-db";
 import { ErroFoto, prepararFoto, type DiagnosticoPreparo } from "./preparar";
+import type { DestinoVistoria } from "./regras";
 
 export type EstadoItemFila = "preparando" | "na_fila" | "sem_internet" | "enviando" | "falhou" | "nao_enviavel" | "confirmada";
 
@@ -26,6 +27,11 @@ export type ItemFila = {
   numeroOS: number | null;
   /** null = a pessoa ainda não escolheu o tipo (folha aberta). */
   categoria: CategoriaFoto | null;
+  /**
+   * Foto da vistoria (F4-B2): vai para o bucket `vistorias` pelas RPCs da vistoria e não
+   * aparece na grade da OS. Aqui a `categoria` só marca "liberada para enviar".
+   */
+  vistoria?: DestinoVistoria | null;
   legenda: string | null;
   estado: EstadoItemFila;
   progresso: number;
@@ -159,6 +165,7 @@ export async function iniciarFila(usuarioId: string) {
         osId: g.osId,
         numeroOS: g.numeroOS,
         categoria: g.categoria,
+        vistoria: g.vistoria ?? null,
         legenda: g.legenda,
         estado: g.estado === "nao_enviavel" ? "nao_enviavel" : navigator.onLine ? "na_fila" : "sem_internet",
         progresso: 0,
@@ -186,7 +193,10 @@ export async function iniciarFila(usuarioId: string) {
  * Começa a preparar as fotos escolhidas (uma por vez, para não estourar a memória do
  * iPhone) e devolve os ids. Elas ficam sem tipo até `definirTipo`.
  */
-export function adicionarArquivos(arquivos: File[], dados: { osId: string; numeroOS: number | null }): string[] {
+export function adicionarArquivos(
+  arquivos: File[],
+  dados: { osId: string; numeroOS: number | null; vistoria?: DestinoVistoria | null },
+): string[] {
   const usuarioId = estado.usuarioId;
   if (!usuarioId || !arquivos.length) return [];
   const agora = Date.now();
@@ -196,6 +206,7 @@ export function adicionarArquivos(arquivos: File[], dados: { osId: string; numer
     osId: dados.osId,
     numeroOS: dados.numeroOS,
     categoria: null,
+    vistoria: dados.vistoria ?? null,
     legenda: null,
     estado: "preparando",
     progresso: 0,
@@ -261,6 +272,7 @@ async function guardarSePronta(id: string) {
       osId: i.osId,
       numeroOS: i.numeroOS,
       categoria: i.categoria,
+      vistoria: i.vistoria ?? null,
       legenda: i.legenda,
       largura: i.largura ?? 0,
       altura: i.altura ?? 0,
@@ -350,6 +362,7 @@ async function enviarUma(i: ItemFila) {
       preparada: { foto: i.foto!, mini: i.mini!, largura: i.largura ?? 1, altura: i.altura ?? 1 },
       categoria: i.categoria!,
       legenda: i.legenda,
+      vistoria: i.vistoria ?? null,
       aoProgresso: (pct) => {
         if (pct - ultimo >= 2 || pct >= 100) {
           ultimo = pct;

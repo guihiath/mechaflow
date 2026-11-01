@@ -6,6 +6,7 @@
  * só na memória (quem chama mostra o aviso).
  */
 import type { CategoriaFoto } from "@/lib/formato";
+import type { DestinoVistoria } from "./regras";
 
 const BANCO = "mechaflow-fotos";
 const LOJA = "fila";
@@ -22,6 +23,8 @@ export type RegistroGuardado = {
   foto: ArrayBuffer;
   mini: ArrayBuffer;
   criadoEm: number;
+  /** Foto da vistoria (F4-B2); ausente = foto da OS (Fase 3). */
+  vistoria?: DestinoVistoria | null;
   /** "nao_enviavel" fica guardado com o motivo; o resto volta para a fila ao reabrir. */
   estado: "na_fila" | "nao_enviavel";
   motivo: string | null;

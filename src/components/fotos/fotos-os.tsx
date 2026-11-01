@@ -124,9 +124,9 @@ export function FotosOS({
   }
 
   const fila = useFila();
-  const daOS = useMemo(() => fila.itens.filter((i) => i.osId === osId && i.usuarioId === usuarioId), [fila.itens, osId, usuarioId]);
+  const daOS = useMemo(() => fila.itens.filter((i) => i.osId === osId && i.usuarioId === usuarioId && !i.vistoria), [fila.itens, osId, usuarioId]);
   const naGrade = daOS.filter((i) => i.categoria !== null);
-  const { situacao, zerar } = useSituacaoEnvio(fila.itens, (i) => i.osId === osId);
+  const { situacao, zerar } = useSituacaoEnvio(fila.itens, (i) => i.osId === osId && !i.vistoria);
 
   const [lote, setLote] = useState<{ ids: string[]; cortadas: number; chave: number } | null>(null);
   const loteItens = lote ? daOS.filter((i) => lote.ids.includes(i.id)) : [];

@@ -19,3 +19,17 @@ export function podeEnviarFoto(papel: Papel, status: StatusOS, osEhDele: boolean
 
 /** Bucket privado das fotos da OS (ARQUITETURA F3.1-P3). */
 export const BUCKET_FOTOS = "os-fotos";
+
+/** Bucket privado da vistoria: fotos JPEG + assinatura PNG (ARQUITETURA 12.3). */
+export const BUCKET_VISTORIAS = "vistorias";
+
+/**
+ * Foto da vistoria na fila (ARQUITETURA 12.3): mesma fila da Fase 3, mas registra com
+ * `registrar_foto_vistoria`/`confirmar_foto_vistoria` e sobe no bucket `vistorias`.
+ * `avariaId` obrigatório quando `tipo = "avaria"` (a avaria já precisa existir no banco).
+ */
+export type DestinoVistoria = {
+  vistoriaId: string;
+  avariaId: string | null;
+  tipo: "avaria" | "painel" | "outro";
+};

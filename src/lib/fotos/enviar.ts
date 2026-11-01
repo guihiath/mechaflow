@@ -16,7 +16,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getSupabaseEnv } from "@/lib/supabase/env";
 import type { DiagnosticoPreparo, EtapaTempo, FotoPreparada } from "./preparar";
 
-import { BUCKET_FOTOS } from "./regras";
+import { BUCKET_FOTOS, BUCKET_VISTORIAS, type DestinoVistoria } from "./regras";
 
 export type EtapaEnvio = "sessao" | "registrando" | "enviando_miniatura" | "enviando_foto" | "confirmando";
 
@@ -52,15 +52,15 @@ export function novoIdFoto(): string {
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
 
-type ErroStorage = { message?: string; statusCode?: string | number; status?: number; error?: string } | null;
+export type ErroStorage = { message?: string; statusCode?: string | number; status?: number; error?: string } | null;
 
-function textoErroStorage(e: ErroStorage): string {
+export function textoErroStorage(e: ErroStorage): string {
   if (!e) return "";
   return [e.status, e.statusCode, e.error, e.message].filter((x) => x != null && x !== "").join(" ");
 }
 
 /** "Já existe" no Storage = o arquivo já tinha subido num envio anterior: segue. */
-function jaExiste(e: ErroStorage): boolean {
+export function jaExiste(e: ErroStorage): boolean {
   return (
     String(e?.statusCode) === "409" || e?.status === 409 || /already exists|duplicate/i.test(`${e?.message ?? ""} ${e?.error ?? ""}`)
   );
@@ -80,7 +80,7 @@ export function traduzirErroStorage(e: ErroStorage): string {
   return "Não deu para enviar a foto. Toque em “Tentar de novo”.";
 }
 
-function tipoErroStorage(e: ErroStorage, httpStatus: number): TipoErroEnvio {
+export function tipoErroStorage(e: ErroStorage, httpStatus: number): TipoErroEnvio {
   const t = textoErroStorage(e);
   if (httpStatus === 0 || /failed to fetch|load failed|network|timeout|aborted/i.test(t)) return "rede";
   if (/jwt|token|invalid.*signature/i.test(t) || httpStatus === 401) return "sessao";
@@ -97,9 +97,16 @@ const DEFINITIVOS_RPC = new Set([
   "foto_invalida",
   "foto_grande_demais",
   "sem_oficina",
+  // Fase 4 (vistoria): concluída/anulada, avaria removida, limites
+  "vistoria_concluida",
+  "vistoria_anulada",
+  "vistoria_nao_encontrada",
+  "avaria_nao_encontrada",
+  "limite_fotos_avaria",
+  "limite_fotos_vistoria",
 ]);
 
-function erroRpc(etapa: EtapaEnvio, e: { message?: string; code?: string } | null): ErroEnvio {
+export function erroRpc(etapa: EtapaEnvio, e: { message?: string; code?: string } | null): ErroEnvio {
   const msg = (e?.message ?? "").trim();
   if (/failed to fetch|load failed|network|fetch failed/i.test(msg)) return new ErroEnvio(etapa, MSG_REDE, msg, "rede");
   if (msg === "nao_autenticado" || /jwt|token/i.test(msg) || e?.code === "PGRST301" || e?.code === "28000")
@@ -136,7 +143,7 @@ function pedidosAuthDesde(inicio: number): number {
   }
 }
 
-async function obterToken(etapa: EtapaEnvio = "sessao"): Promise<{ token: string; medida: MedidaSessao }> {
+export async function obterToken(etapa: EtapaEnvio = "sessao"): Promise<{ token: string; medida: MedidaSessao }> {
   const supabase = createClient();
   const t0 = performance.now();
   let r;
@@ -194,19 +201,20 @@ function caminhoUrl(caminho: string) {
  * Sobe um arquivo no bucket por XHR (o fetch não informa o progresso do envio).
  * Mesmo pedido que o `storage.upload` faz (POST, sem sobrescrever). Resolve com o status HTTP.
  */
-function subirArquivo(
+export function subirArquivo(
   caminho: string,
   arquivo: Blob,
   token: string,
   aoProgresso?: (fracao: number) => void,
+  { bucket = BUCKET_FOTOS, tipo = "image/jpeg" }: { bucket?: string; tipo?: string } = {},
 ): Promise<{ status: number; erro: ErroStorage }> {
   const { url, publishableKey } = getSupabaseEnv();
   return new Promise((resolve) => {
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", `${url}/storage/v1/object/${BUCKET_FOTOS}/${caminhoUrl(caminho)}`);
+    xhr.open("POST", `${url}/storage/v1/object/${bucket}/${caminhoUrl(caminho)}`);
     xhr.setRequestHeader("authorization", `Bearer ${token}`);
     xhr.setRequestHeader("apikey", publishableKey);
-    xhr.setRequestHeader("content-type", "image/jpeg");
+    xhr.setRequestHeader("content-type", tipo);
     xhr.setRequestHeader("cache-control", "max-age=3600");
     xhr.setRequestHeader("x-upsert", "false");
     xhr.timeout = 120_000;
@@ -264,6 +272,7 @@ export async function enviarFoto({
   preparada,
   categoria = "outro",
   legenda,
+  vistoria = null,
   aoMudarEtapa,
   aoProgresso,
 }: {
@@ -272,6 +281,8 @@ export async function enviarFoto({
   preparada: Pick<FotoPreparada, "foto" | "mini" | "largura" | "altura">;
   categoria?: CategoriaFoto;
   legenda?: string | null;
+  /** Foto da vistoria (F4-B2): RPCs `registrar_foto_vistoria`/`confirmar_foto_vistoria`, bucket `vistorias`. */
+  vistoria?: DestinoVistoria | null;
   aoMudarEtapa?: (etapa: EtapaEnvio) => void;
   /** 0 a 100 do envio desta foto. */
   aoProgresso?: (pct: number) => void;
@@ -295,17 +306,29 @@ export async function enviarFoto({
   // 1) registrar (idempotente: mesmo id devolve o mesmo registro)
   aoMudarEtapa?.("registrando");
   const inicioRegistrar = performance.now();
-  const reg = await supabase
-    .rpc("registrar_foto", {
-      p_id: id,
-      p_os_id: osId,
-      p_largura: preparada.largura,
-      p_altura: preparada.altura,
-      p_tamanho_bytes: preparada.foto.size,
-      p_tamanho_miniatura_bytes: preparada.mini.size,
-      p_categoria: categoria,
-      ...(legenda ? { p_legenda: legenda } : {}),
-    })
+  const pedido = vistoria
+    ? supabase.rpc("registrar_foto_vistoria", {
+        p_id: id,
+        p_vistoria_id: vistoria.vistoriaId,
+        p_tipo: vistoria.tipo,
+        ...(vistoria.avariaId ? { p_avaria_id: vistoria.avariaId } : {}),
+        p_largura: preparada.largura,
+        p_altura: preparada.altura,
+        p_tamanho_bytes: preparada.foto.size,
+        p_tamanho_miniatura_bytes: preparada.mini.size,
+        ...(legenda ? { p_legenda: legenda } : {}),
+      })
+    : supabase.rpc("registrar_foto", {
+        p_id: id,
+        p_os_id: osId,
+        p_largura: preparada.largura,
+        p_altura: preparada.altura,
+        p_tamanho_bytes: preparada.foto.size,
+        p_tamanho_miniatura_bytes: preparada.mini.size,
+        p_categoria: categoria,
+        ...(legenda ? { p_legenda: legenda } : {}),
+      });
+  const reg = await pedido
     .single()
     .then(
       (r) => r,
@@ -322,8 +345,12 @@ export async function enviarFoto({
   const totalBytes = preparada.mini.size + preparada.foto.size;
   const subir = async (etapa: EtapaEnvio, caminhoArquivo: string, arquivo: Blob, antes: number) => {
     aoMudarEtapa?.(etapa);
-    const r = await subirArquivo(caminhoArquivo, arquivo, token, (f) =>
-      aoProgresso?.(8 + ((antes + f * arquivo.size) / totalBytes) * 87),
+    const r = await subirArquivo(
+      caminhoArquivo,
+      arquivo,
+      token,
+      (f) => aoProgresso?.(8 + ((antes + f * arquivo.size) / totalBytes) * 87),
+      { bucket: vistoria ? BUCKET_VISTORIAS : BUCKET_FOTOS },
     );
     if (r.erro && !jaExiste(r.erro)) {
       throw new ErroEnvio(etapa, traduzirErroStorage(r.erro), textoErroStorage(r.erro), tipoErroStorage(r.erro, r.status));
@@ -339,12 +366,13 @@ export async function enviarFoto({
 
     // 3) confirmar (foto_nao_enviada = falta arquivo: sobe de novo uma vez)
     aoMudarEtapa?.("confirmando");
-    let conf = await supabase.rpc("confirmar_foto", { p_id: id });
+    const confirmar = () => supabase.rpc(vistoria ? "confirmar_foto_vistoria" : "confirmar_foto", { p_id: id });
+    let conf = await confirmar();
     if (conf.error?.message === "foto_nao_enviada") {
       await subir("enviando_miniatura", caminhoMiniatura, preparada.mini, 0);
       await subir("enviando_foto", caminho, preparada.foto, preparada.mini.size);
       aoMudarEtapa?.("confirmando");
-      conf = await supabase.rpc("confirmar_foto", { p_id: id });
+      conf = await confirmar();
     }
     marcar("confirmar");
     if (conf.error) throw erroRpc("confirmando", conf.error);
