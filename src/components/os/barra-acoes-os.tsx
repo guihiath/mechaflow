@@ -8,7 +8,8 @@ import type { ReactNode } from "react";
  * com a frase `proximoPasso` e os botoes empilhados (primario embaixo).
  *
  * Os botoes vem prontos do pai (`Botao`, `BotaoEnviar`, botao que abre `Folha`...).
- * No celular os botoes de 56px (`h-toque-principal`) descem para 48px dentro da barra.
+ * No celular os botoes de 56px (`h-toque-principal`) descem para 48px dentro da barra, com texto
+ * de 16px e px-2 para o rotulo caber numa linha a 360px (M6 do F3-R1).
  * O espaco no fim da pagina vem do layout do app (mesma altura da barra de navegacao).
  */
 export function BarraAcoesOS({
@@ -38,7 +39,9 @@ export function BarraAcoesOS({
             <p className="text-base text-texto-suave">{proximoPasso}</p>
           </div>
         )}
-        <div className="flex min-h-12 items-stretch gap-2 max-lg:[&_.h-toque-principal]:h-toque lg:flex-col lg:gap-3">
+        {/* M6 (F3-R1): no celular os rótulos cabem numa linha a 360 px com 16 px, px-2, ícone de 20 px e
+            espaço de 6 px (medido: "Adicionar item" 104 px de 111; "Marcar como pronta" + ícone 169 de 172). */}
+        <div className="flex min-h-12 items-stretch gap-2 max-lg:[&_.h-toque-principal]:h-toque max-lg:[&_.h-toque-principal]:gap-1.5 max-lg:[&_.h-toque-principal]:px-2 max-lg:[&_.h-toque-principal]:text-base max-lg:[&_.h-toque-principal]:leading-tight max-lg:[&_.h-toque-principal_svg]:size-5 lg:flex-col lg:gap-3">
           {secundario && <div className="flex w-2/5 shrink-0 *:w-full lg:w-full">{secundario}</div>}
           {primario && <div className="flex min-w-0 flex-1 *:w-full">{primario}</div>}
         </div>

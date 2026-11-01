@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { fecharOS } from "@/acoes/os";
-import { Botao } from "@/components/ui/botao";
+import { Botao, BotaoLink } from "@/components/ui/botao";
 import { AreaTexto, Campo } from "@/components/ui/campo";
 import { Escolha } from "@/components/ui/escolha";
 import { BotaoEnviar, CaixaMensagem, focarPrimeiroErro } from "@/components/ui/formulario";
@@ -18,7 +18,7 @@ export function FormFechar({
   osId,
   numero,
   placa,
-  bloqueado,
+  semPreco,
   acimaDoAprovadoCentavos = 0,
   causa: causaInicial,
   solucao: solucaoInicial,
@@ -27,7 +27,8 @@ export function FormFechar({
   osId: string;
   numero: number;
   placa: string;
-  bloqueado: boolean;
+  /** Itens sem preço: com algum, a entrega fica bloqueada e o primário vira "Definir preços (N)" (M3 do F3-R1). */
+  semPreco: number;
   /** Total atual acima do aprovado (so avisa na confirmacao, DESIGN §11.9). */
   acimaDoAprovadoCentavos?: number;
   causa: string;
@@ -45,6 +46,7 @@ export function FormFechar({
   const [qual, setQual] = useState<"salvar" | "entregar" | null>(null);
   const travado = useRef(false);
   const campos = estado?.campos ?? {};
+  const bloqueado = semPreco > 0;
 
   useEffect(() => {
     if (confirmando) caixa.current?.focus();
@@ -181,7 +183,6 @@ export function FormFechar({
         <>
           <div aria-hidden className="h-28 lg:hidden" />
           <div className="fixed inset-x-0 bottom-0 z-50 flex flex-col gap-2 border-t-2 border-borda-sutil bg-superficie px-4 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] shadow-barra lg:static lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none">
-            {bloqueado && <p className="text-sm text-texto-suave">Defina o preço dos itens antes de entregar.</p>}
             <BotaoEnviar
               type="button"
               variante="secundario"
@@ -191,9 +192,14 @@ export function FormFechar({
               rotuloEnviando="Salvando…"
               onClick={() => enviar("salvar")}
             />
-            <Botao type="submit" disabled={bloqueado || enviando}>
-              Entregar veículo
-            </Botao>
+            {bloqueado ? (
+              // Mesma regra do detalhe em "pronta": o primário leva ao que destrava a entrega.
+              <BotaoLink href={`/os/${osId}?precificar=1`}>Definir preços ({semPreco})</BotaoLink>
+            ) : (
+              <Botao type="submit" disabled={enviando}>
+                Entregar veículo
+              </Botao>
+            )}
           </div>
         </>
       )}

@@ -491,12 +491,12 @@ export function BarraOS({ proximoPasso }: { proximoPasso?: string }) {
             </Botao>
           );
         } else {
-          primario = <Botao onClick={() => abrir({ tipo: "resposta" })}>Registrar resposta do cliente</Botao>;
+          primario = <Botao onClick={() => abrir({ tipo: "resposta" })}>{REGISTRAR_RESPOSTA}</Botao>;
           secundario = add;
         }
         break;
       case "orcamento_enviado":
-        primario = <Botao onClick={() => abrir({ tipo: "resposta" })}>Registrar resposta do cliente</Botao>;
+        primario = <Botao onClick={() => abrir({ tipo: "resposta" })}>{REGISTRAR_RESPOSTA}</Botao>;
         secundario = add;
         break;
       case "aprovada":
@@ -546,6 +546,17 @@ export function BarraOS({ proximoPasso }: { proximoPasso?: string }) {
 function AcimaSemBarra({ children }: { children: ReactNode }) {
   return <div className="fixed inset-x-4 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-50 lg:static">{children}</div>;
 }
+
+/**
+ * "Registrar resposta do cliente" não cabe numa linha na barra do celular (206 px a 16 px; M6 do F3-R1):
+ * lá o texto é "Registrar resposta". O " do cliente" some com display:none, então o nome acessível é
+ * sempre igual ao texto visível (SC 2.5.3).
+ */
+const REGISTRAR_RESPOSTA = (
+  <>
+    Registrar resposta<span className="max-lg:hidden"> do cliente</span>
+  </>
+);
 
 const ICONE_BARRA = { size: 26, strokeWidth: 2.25, "aria-hidden": true } as const;
 

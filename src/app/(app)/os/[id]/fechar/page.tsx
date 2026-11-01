@@ -85,12 +85,13 @@ async function Conteudo({ params }: { params: Promise<{ id: string }> }) {
 
         {semPreco > 0 && (
           <div className="flex flex-col gap-1">
+            {/* No celular o caminho é o primário "Definir preços (N)" da barra (M3 do F3-R1); no desktop a barra fica no fim do formulário. */}
             <CaixaMensagem tipo="erro">
               {semPreco === 1 ? "1 item está sem preço." : `${semPreco} itens estão sem preço.`} Defina o preço antes de fechar.
             </CaixaMensagem>
             <Link
               href={`/os/${id}?precificar=1`}
-              className="inline-flex min-h-toque items-center self-start font-bold text-info-texto underline"
+              className="inline-flex min-h-toque items-center self-start font-bold text-info-texto underline max-lg:hidden"
             >
               Definir preços
             </Link>
@@ -126,7 +127,7 @@ async function Conteudo({ params }: { params: Promise<{ id: string }> }) {
           osId={id}
           numero={os.numero ?? 0}
           placa={placa}
-          bloqueado={semPreco > 0}
+          semPreco={semPreco}
           acimaDoAprovadoCentavos={comAprovacao && diferenca > 0 ? diferenca : 0}
           causa={os.causa_encontrada ?? ""}
           solucao={os.solucao_aplicada ?? ""}
