@@ -9,7 +9,7 @@ import { useFila, useSemInternet } from "@/components/fotos/usar-fila";
 import { Cabecalho } from "@/components/layout/cabecalho";
 import { BarraAcoesOS } from "@/components/os/barra-acoes-os";
 import { AvisoDesfazer } from "@/components/ui/aviso-desfazer";
-import { Botao, classesBotao } from "@/components/ui/botao";
+import { Botao, classesBotaoArquivo } from "@/components/ui/botao";
 import { Campo } from "@/components/ui/campo";
 import { Escolha } from "@/components/ui/escolha";
 import { Cartao, Pagina } from "@/components/ui/estados";
@@ -51,7 +51,7 @@ import {
 import { BUCKET_VISTORIAS } from "@/lib/fotos/regras";
 import { createClient } from "@/lib/supabase/client";
 import { concluirVistoria, enviarAssinatura, guardarDiagVistoria } from "@/lib/vistoria/envio";
-import { apagarRascunho, gravarRascunho, lerRascunho, type Parte, type RascunhoVistoria } from "@/lib/vistoria/rascunho";
+import { apagarRascunho, expirarRascunhos, gravarRascunho, lerRascunho, type Parte, type RascunhoVistoria } from "@/lib/vistoria/rascunho";
 import {
   erroHorimetro,
   erroKm,
@@ -242,6 +242,8 @@ export function VistoriaRascunho({
   const idGaleria = useId();
   const idCameraFolha = useId();
   const idGaleriaFolha = useId();
+  // O input da câmera fica no passo ③ e o botão na barra de baixo: o anel de foco vai no botão.
+  const [focoCamera, setFocoCamera] = useState(false);
 
   // ------------------------------------------------ rascunho (aparelho) e salvamento (banco)
   const [r, setR] = useState<RascunhoVistoria>(() => doServidor(v, itensServidor, passoInicial));
@@ -383,6 +385,7 @@ export function VistoriaRascunho({
     void aquecerConexao();
     // Avaria que já está no banco não segura mais foto (o app pode ter fechado entre salvar e liberar).
     for (const a of avarias) liberarAvaria(a.id);
+    expirarRascunhos(usuarioId); // rascunhos deste usuário com mais de 30 dias ou inválidos somem
     const local = lerRascunho(usuarioId, v.id);
     let base = rRef.current;
     if (local) {
@@ -714,11 +717,13 @@ export function VistoriaRascunho({
   }, [assin?.url]);
 
   // Retomada: o PNG some quando o app fecha; refaz a partir dos traços guardados.
+  // Já enviada: os traços não ficam no aparelho; a prévia usa a URL assinada do banco (v.assinaturaUrl).
   useEffect(() => {
     const a = r.assinatura;
-    if (!a || assinRef.current?.id === a.id || !temTraco(a.dados)) return;
+    const dados = a?.dados;
+    if (!a || !dados || assinRef.current?.id === a.id || !temTraco(dados)) return;
     let cancelado = false;
-    void exportarAssinatura(a.dados).then(
+    void exportarAssinatura(dados).then(
       (png) => {
         if (cancelado || assinRef.current?.id === a.id) return;
         const nova: AssinaturaLocal = {
@@ -727,7 +732,7 @@ export function VistoriaRascunho({
           url: URL.createObjectURL(png.blob),
           largura: png.largura,
           altura: png.altura,
-          dados: a.dados,
+          dados,
           envio: a.enviada ? "enviada" : "pendente",
           nomeEnviado: a.nomeEnviado,
         };
@@ -781,7 +786,10 @@ export function VistoriaRascunho({
   }
 
   const motivoSem = r.semAssinaturaMotivo;
-  const temAssinatura = Boolean(assin) || (Boolean(v.assinaturaUrl) && !r.assinatura);
+  // Assinatura do banco vale quando não há uma do aparelho ou quando a do aparelho já subiu
+  // (depois do envio os traços saem do aparelho e só a URL do banco mostra a imagem).
+  const usarAssinaturaDoBanco = !r.assinatura || r.assinatura.enviada;
+  const temAssinatura = Boolean(assin) || (Boolean(v.assinaturaUrl) && usarAssinaturaDoBanco) || Boolean(r.assinatura?.enviada);
 
   // ------------------------------------------------ o que falta (§12.8)
   type Falta = { texto: string; passo?: NumeroPasso; acao?: { rotulo: string; fazer: () => void } };
@@ -904,7 +912,8 @@ export function VistoriaRascunho({
         mostrarFalta();
         return;
       }
-    } else if (!motivo && a && a.nomeEnviado !== nomeAtual) {
+    } else if (!motivo && (a ? a.nomeEnviado : rRef.current.assinatura?.enviada ? rRef.current.assinatura.nomeEnviado : nomeAtual) !== nomeAtual) {
+      // (sem `a` na memória: assinatura já enviada antes de o app fechar; o nome vem do rascunho)
       await supabase.rpc("salvar_vistoria", { p_vistoria_id: v.id, p_assinado_por_nome: nomeAtual }).then((x) => x, () => null);
     }
 
@@ -1007,7 +1016,7 @@ export function VistoriaRascunho({
           Fotografar avaria
         </Botao>
       ) : (
-        <label htmlFor={idCamera} className={classesBotao("primario", "cursor-pointer")}>
+        <label htmlFor={idCamera} data-foco={focoCamera || undefined} className={classesBotaoArquivo("primario")}>
           <Camera size={22} strokeWidth={2.25} aria-hidden />
           Fotografar avaria
         </label>
@@ -1134,7 +1143,17 @@ export function VistoriaRascunho({
                     Fotos da vistoria: {totalFotos} de {LIMITE_FOTOS_VISTORIA}.
                   </p>
                 )}
-                <input id={idCamera} type="file" accept="image/*" capture="environment" className="sr-only" onChange={aoFotografarAvaria} data-teste="camera-avaria" />
+                <input
+                  id={idCamera}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="sr-only"
+                  onChange={aoFotografarAvaria}
+                  onFocus={(e) => setFocoCamera(e.currentTarget.matches(":focus-visible"))}
+                  onBlur={() => setFocoCamera(false)}
+                  data-teste="camera-avaria"
+                />
                 <AjudaCamera idCamera={idCamera} />
                 {r.semAvarias && lista.length === 0 && (
                   <CaixaMensagem tipo="info">Marcado: sem avarias. Se achar alguma, é só fotografar.</CaixaMensagem>
@@ -1145,7 +1164,7 @@ export function VistoriaRascunho({
                   aoTentarDeNovo={(a) => tentarDeNovo(a.fotos.map((f) => f.id))}
                 />
                 {!limiteAtingido && (
-                  <label htmlFor={idGaleria} className={classesBotao("secundario", "h-toque! cursor-pointer")}>
+                  <label htmlFor={idGaleria} className={classesBotaoArquivo("secundario", "h-toque!")}>
                     <Images size={22} strokeWidth={2.25} aria-hidden />
                     Foto da avaria pela galeria
                     <input id={idGaleria} type="file" accept="image/*" className="sr-only" onChange={aoFotografarAvaria} data-teste="galeria-avaria" />
@@ -1277,7 +1296,7 @@ export function VistoriaRascunho({
                     <>
                       <PreviaAssinatura
                         ref={previa}
-                        src={assin?.url ?? (r.assinatura ? null : v.assinaturaUrl)}
+                        src={assin?.url ?? (usarAssinaturaDoBanco ? v.assinaturaUrl : null)}
                         nome={r.nome}
                         aoAssinar={() => {
                           (document.activeElement as HTMLElement | null)?.blur();
@@ -1433,12 +1452,12 @@ export function VistoriaRascunho({
               )}
               {fotosFolha.length < LIMITE_FOTOS_AVARIA && !limiteAtingido ? (
                 <div className="grid grid-cols-2 gap-2">
-                  <label htmlFor={idCameraFolha} className={classesBotao("secundario", "h-toque! cursor-pointer px-2")}>
+                  <label htmlFor={idCameraFolha} className={classesBotaoArquivo("secundario", "h-toque! px-2")}>
                     <Camera size={20} strokeWidth={2.25} aria-hidden />
                     {fotosFolha.length ? "Outra foto" : "Tirar foto"}
                     <input id={idCameraFolha} type="file" accept="image/*" capture="environment" className="sr-only" onChange={aoOutraFotoFolha} />
                   </label>
-                  <label htmlFor={idGaleriaFolha} className={classesBotao("secundario", "h-toque! cursor-pointer px-2")}>
+                  <label htmlFor={idGaleriaFolha} className={classesBotaoArquivo("secundario", "h-toque! px-2")}>
                     <Images size={20} strokeWidth={2.25} aria-hidden />
                     Da galeria
                     <input id={idGaleriaFolha} type="file" accept="image/*" multiple className="sr-only" onChange={aoOutraFotoFolha} />

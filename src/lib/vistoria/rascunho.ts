@@ -5,7 +5,11 @@
  * (as "partes sujas") volta do aparelho e é enviado; o resto vem do banco.
  *
  * Chave por usuário e por vistoria (outra pessoa no mesmo celular não vê nem envia).
- * Apagado quando o banco confirma a conclusão (ou ao abrir a vistoria já concluída/anulada).
+ * Apagado quando o banco confirma a conclusão (ou ao abrir a vistoria já concluída/anulada),
+ * ao sair da conta (§12.14: o que já subiu some sem perguntar; o pendente, só se a pessoa
+ * confirmar "Sair e apagar") e depois de 30 dias sem mexer. Depois que o PNG da assinatura
+ * sobe, os traços (dado pessoal) não ficam mais guardados no aparelho: a tela usa a URL do banco.
+ * Rascunho com formato inesperado é apagado (não quebra a tela).
  * Só no navegador: nunca ler isto durante o render do servidor (hidratação).
  */
 import type { DadosAssinatura } from "@/lib/assinatura";
@@ -38,7 +42,8 @@ export type FolhaRascunho = {
 export type AssinaturaRascunho = {
   /** Id do navegador (assinar de novo = id novo; nada é sobrescrito no Storage). */
   id: string;
-  dados: DadosAssinatura;
+  /** Traços da assinatura; `null` no aparelho depois que o PNG subiu (`enviada`). */
+  dados: DadosAssinatura | null;
   /** O PNG deste id já está no Storage (registrado com `nomeEnviado`). */
   enviada: boolean;
   nomeEnviado: string | null;
@@ -72,22 +77,124 @@ export type RascunhoVistoria = {
 const prefixo = "mf-vistoria:";
 const chave = (usuarioId: string, vistoriaId: string) => `${prefixo}${usuarioId}:${vistoriaId}`;
 
-export function lerRascunho(usuarioId: string, vistoriaId: string): RascunhoVistoria | null {
+/** Rascunho parado há mais que isto é apagado ao ler (dados do cliente não ficam para sempre). */
+export const VALIDADE_RASCUNHO_MS = 30 * 24 * 60 * 60 * 1000;
+
+// ------------------------------------------------ validação (sem zod: não está nas dependências)
+type Obj = Record<string, unknown>;
+const ehObj = (x: unknown): x is Obj => typeof x === "object" && x !== null && !Array.isArray(x);
+const ehTexto = (x: unknown): x is string => typeof x === "string";
+const ehNum = (x: unknown): x is number => typeof x === "number" && Number.isFinite(x);
+const textoOuNulo = (x: unknown) => x === null || ehTexto(x);
+const ehPasso = (x: unknown) => Number.isInteger(x) && (x as number) >= 1 && (x as number) <= 5;
+const listaDe = (x: unknown, f: (y: unknown) => boolean) => Array.isArray(x) && x.every(f);
+
+function dadosValidos(x: unknown): x is DadosAssinatura {
+  return (
+    ehObj(x) &&
+    ehNum(x.largura) &&
+    ehNum(x.altura) &&
+    listaDe(x.tracos, (t) => listaDe(t, (p) => ehObj(p) && ehNum(p.x) && ehNum(p.y) && ehNum(p.l)))
+  );
+}
+
+function rascunhoValido(x: unknown, vistoriaId: string): x is RascunhoVistoria {
+  if (!ehObj(x) || x.versao !== 1 || x.vistoriaId !== vistoriaId) return false;
+  if (!ehPasso(x.passo) || !listaDe(x.visitados, ehPasso)) return false;
+  if (![x.km, x.horimetro, x.outrosObjetos, x.observacoes, x.nome].every(ehTexto)) return false;
+  if (!textoOuNulo(x.combustivel) || !textoOuNulo(x.semAssinaturaMotivo)) return false;
+  if (!(x.objetos === null || listaDe(x.objetos, ehTexto))) return false;
+  if (typeof x.semAvarias !== "boolean" || !ehNum(x.atualizadoEm) || !listaDe(x.sujas, ehTexto)) return false;
+  if (!ehObj(x.itens) || !Object.values(x.itens).every((i) => ehObj(i) && textoOuNulo(i.situacao) && ehTexto(i.observacao))) return false;
+  if (!ehObj(x.avarias) || !Object.values(x.avarias).every((a) => ehObj(a) && ehTexto(a.lado) && ehTexto(a.descricao))) return false;
+  const f = x.folha;
+  if (
+    f !== null &&
+    !(ehObj(f) && ehTexto(f.avariaId) && typeof f.nova === "boolean" && listaDe(f.fotoIds, ehTexto) && textoOuNulo(f.lado) && ehTexto(f.descricao))
+  )
+    return false;
+  const a = x.assinatura;
+  if (
+    a !== null &&
+    !(ehObj(a) && ehTexto(a.id) && (a.dados === null || dadosValidos(a.dados)) && typeof a.enviada === "boolean" && textoOuNulo(a.nomeEnviado))
+  )
+    return false;
+  return x.tracos === null || dadosValidos(x.tracos);
+}
+
+/**
+ * Ainda tem algo só no aparelho: parte não enviada ao banco, assinatura cujo PNG não subiu ou
+ * a folha "Nova avaria" aberta (foto tirada, lado/descrição ainda não salvos).
+ */
+function temPendencia(r: RascunhoVistoria): boolean {
+  return r.sujas.length > 0 || Boolean(r.assinatura && !r.assinatura.enviada) || r.folha !== null;
+}
+
+function remover(k: string) {
   try {
-    const t = window.localStorage.getItem(chave(usuarioId, vistoriaId));
-    if (!t) return null;
-    const r = JSON.parse(t) as RascunhoVistoria;
-    if (r?.versao !== 1 || r.vistoriaId !== vistoriaId) return null;
-    return r;
+    window.localStorage.removeItem(k);
+  } catch {
+    /* nada */
+  }
+}
+
+/**
+ * Lê e confere um rascunho pela chave. Inválido (formato inesperado) ou vencido (30 dias):
+ * apaga a chave e devolve null.
+ */
+function lerChave(k: string, vistoriaId: string): RascunhoVistoria | null {
+  let t: string | null;
+  try {
+    t = window.localStorage.getItem(k);
   } catch {
     return null;
   }
+  if (!t) return null;
+  let r: unknown = null;
+  try {
+    r = JSON.parse(t);
+  } catch {
+    /* inválido: cai no apagar abaixo */
+  }
+  if (!rascunhoValido(r, vistoriaId) || Date.now() - r.atualizadoEm > VALIDADE_RASCUNHO_MS) {
+    remover(k);
+    return null;
+  }
+  return r;
+}
+
+/** Chaves `mf-vistoria:<usuario>:*` deste usuário, com o id da vistoria de cada uma. */
+function chavesDoUsuario(usuarioId: string): { k: string; vistoriaId: string }[] {
+  const inicio = `${prefixo}${usuarioId}:`;
+  const out: { k: string; vistoriaId: string }[] = [];
+  try {
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const k = window.localStorage.key(i);
+      if (k?.startsWith(inicio)) out.push({ k, vistoriaId: k.slice(inicio.length) });
+    }
+  } catch {
+    /* nada */
+  }
+  return out;
+}
+
+export function lerRascunho(usuarioId: string, vistoriaId: string): RascunhoVistoria | null {
+  return lerChave(chave(usuarioId, vistoriaId), vistoriaId);
+}
+
+/** O que vai para o aparelho: com o PNG da assinatura já no banco, os traços não ficam guardados. */
+function paraGuardar(r: RascunhoVistoria): RascunhoVistoria {
+  const a = r.assinatura;
+  if (!a?.enviada) return r;
+  // `tracos` iguais aos da assinatura enviada saem junto; traços de uma assinatura nova (em andamento) ficam.
+  const mesmos = r.tracos === null || r.tracos === a.dados || JSON.stringify(r.tracos) === JSON.stringify(a.dados);
+  return { ...r, assinatura: { ...a, dados: null }, tracos: mesmos ? null : r.tracos };
 }
 
 /** Devolve false se o aparelho não deixou guardar (sem espaço / modo privado antigo). */
 export function gravarRascunho(usuarioId: string, r: RascunhoVistoria): boolean {
   try {
-    window.localStorage.setItem(chave(usuarioId, r.vistoriaId), JSON.stringify({ ...r, atualizadoEm: Date.now() }));
+    window.localStorage.setItem(chave(usuarioId, r.vistoriaId), JSON.stringify({ ...paraGuardar(r), atualizadoEm: Date.now() }));
     return true;
   } catch {
     return false;
@@ -102,17 +209,29 @@ export function apagarRascunho(usuarioId: string, vistoriaId: string) {
   }
 }
 
-/** Há algo deste usuário ainda não enviado ao banco (aviso ao sair da conta, §12.14). */
-export function temRascunhoPendente(usuarioId: string): boolean {
-  try {
-    for (let i = 0; i < window.localStorage.length; i++) {
-      const k = window.localStorage.key(i);
-      if (!k?.startsWith(`${prefixo}${usuarioId}:`)) continue;
-      const r = JSON.parse(window.localStorage.getItem(k) ?? "null") as RascunhoVistoria | null;
-      if (r?.sujas?.length || (r?.assinatura && !r.assinatura.enviada)) return true;
-    }
-  } catch {
-    /* nada */
+/** Varredura ao abrir a vistoria: apaga os rascunhos deste usuário vencidos (30 dias) ou inválidos. */
+export function expirarRascunhos(usuarioId: string) {
+  for (const { k, vistoriaId } of chavesDoUsuario(usuarioId)) lerChave(k, vistoriaId);
+}
+
+/** Quantas vistorias deste usuário têm algo ainda não enviado ao banco (aviso ao sair da conta, §12.14). */
+export function contarRascunhosPendentes(usuarioId: string): number {
+  let n = 0;
+  for (const { k, vistoriaId } of chavesDoUsuario(usuarioId)) {
+    const r = lerChave(k, vistoriaId);
+    if (r && temPendencia(r)) n++;
   }
-  return false;
+  return n;
+}
+
+/**
+ * Ao sair da conta (§12.14): apaga os rascunhos deste usuário sem nada pendente (já está tudo
+ * no banco), sem perguntar. Com `tambemPendentes` ("Sair e apagar"), apaga todos.
+ * Vencidos e inválidos também somem (pela leitura).
+ */
+export function apagarRascunhosAoSair(usuarioId: string, tambemPendentes = false) {
+  for (const { k, vistoriaId } of chavesDoUsuario(usuarioId)) {
+    const r = lerChave(k, vistoriaId);
+    if (r && (tambemPendentes || !temPendencia(r))) remover(k);
+  }
 }

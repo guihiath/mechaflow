@@ -22,7 +22,20 @@ export function classesBotao(variante: VarianteBotao = "primario", extra?: strin
   return [base, variantes[variante], extra].filter(Boolean).join(" ");
 }
 
-type BotaoProps = ComponentProps<"button"> & { variante?: VarianteBotao };
+/**
+ * Botão de foto feito com `<label htmlFor>` + `<input type="file" className="sr-only">`:
+ * o input invisível recebe o foco, então o anel (mesmo do `:focus-visible` do globals.css)
+ * aparece no rótulo. Input dentro do label: `has-[:focus-visible]`. Input fora (em outro
+ * lugar da tela): marcar o label com `data-foco` enquanto o input estiver com foco visível.
+ */
+const focoArquivo =
+  "cursor-pointer has-[:focus-visible]:outline-3 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-foco data-foco:outline-3 data-foco:outline-offset-2 data-foco:outline-foco";
+
+export function classesBotaoArquivo(variante: VarianteBotao = "secundario", extra?: string) {
+  return classesBotao(variante, extra ? `${focoArquivo} ${extra}` : focoArquivo);
+}
+
+type BotaoProps =ComponentProps<"button"> & { variante?: VarianteBotao };
 
 export function Botao({ variante = "primario", className, type = "button", ...props }: BotaoProps) {
   return <button type={type} className={classesBotao(variante, className)} {...props} />;

@@ -4,7 +4,7 @@ import { useId, type ChangeEvent, type ReactNode } from "react";
 import { Camera, Check, CircleAlert, Images, Loader, PenLine, RotateCw, TriangleAlert, WifiOff, X } from "lucide-react";
 import { AjudaCamera } from "@/components/fotos/ajuda-camera";
 import type { EstadoFoto } from "@/components/os/grade-fotos";
-import { classesBotao } from "@/components/ui/botao";
+import { classesBotaoArquivo } from "@/components/ui/botao";
 import { AreaTexto, Campo } from "@/components/ui/campo";
 import { Cartao } from "@/components/ui/estados";
 import { BotaoMarcarRestoOk, ContagemChecklist, LinhaChecklist } from "@/components/vistoria/linha-checklist";
@@ -321,12 +321,12 @@ export function PassoPainelObjetos({
           </p>
         ) : (
           <div className="grid grid-cols-2 gap-2">
-            <label htmlFor={idCamera} className={classesBotao("secundario", "cursor-pointer px-2")}>
+            <label htmlFor={idCamera} className={classesBotaoArquivo("secundario", "px-2")}>
               <Camera size={22} strokeWidth={2.25} aria-hidden />
               Fotografar painel
               <input id={idCamera} type="file" accept="image/*" capture="environment" className="sr-only" onChange={aoEscolherPainel} data-teste="camera-painel" />
             </label>
-            <label htmlFor={idGaleria} className={classesBotao("secundario", "cursor-pointer px-2")}>
+            <label htmlFor={idGaleria} className={classesBotaoArquivo("secundario", "px-2")}>
               <Images size={22} strokeWidth={2.25} aria-hidden />
               Da galeria
               <input id={idGaleria} type="file" accept="image/*" multiple className="sr-only" onChange={aoEscolherPainel} data-teste="galeria-painel" />
