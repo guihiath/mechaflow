@@ -106,12 +106,15 @@ type AssinaturaLocal = {
   envio: "pendente" | "enviando" | "enviada" | "falhou";
   nomeEnviado: string | null;
   erro?: string;
+  /** A falha foi de rede ou temporária: tenta de novo sozinho (F5-E-6). */
+  tentarSozinho?: boolean;
 };
 
 const ANDANDO = new Set<ItemFila["estado"]>(["preparando", "na_fila", "enviando"]);
 const PENDENTE_SAIR = new Set<ItemFila["estado"]>(["preparando", "na_fila", "enviando", "sem_internet"]);
 const espera = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const MSG_REDE = "Sem conexão com o servidor. Confira a internet e tente de novo.";
+const REENVIO_ASSINATURA_MS = 15_000;
 const ehRede = (m: string) => m === "rede" || /failed to fetch|load failed|network|fetch failed/i.test(m);
 
 /** Erros em que tentar de novo não adianta: a vistoria ou a OS mudou por fora (DESIGN §12.14). */
@@ -707,6 +710,8 @@ export function VistoriaRascunho({
   const [assinando, setAssinando] = useState(false);
   const [assin, setAssin] = useState<AssinaturaLocal | null>(null);
   const assinRef = useRef<AssinaturaLocal | null>(null);
+  const envioAssinatura = useRef<{ id: string; nome: string; promessa: Promise<boolean> } | null>(null);
+  const reenviarAssinaturaRef = useRef<(() => void) | null>(null);
   const [erroNome, setErroNome] = useState<string>();
   const [perguntaSem, setPerguntaSem] = useState(false);
   const previa = useRef<HTMLButtonElement>(null);
@@ -744,6 +749,8 @@ export function VistoriaRascunho({
           nomeEnviado: a.nomeEnviado,
         };
         trocarAssin(nova);
+        // Retomada: a assinatura que ficou no aparelho sobe sem esperar ninguém tocar em nada.
+        reenviarAssinaturaRef.current?.();
       },
       () => undefined,
     );
@@ -752,12 +759,23 @@ export function VistoriaRascunho({
     };
   }, [r.assinatura]);
 
-  async function subirAssinatura(a: AssinaturaLocal, nome: string): Promise<boolean> {
+  /** Um envio por vez: voltar a internet, sair do nome e Concluir podem pedir ao mesmo tempo. */
+  function subirAssinatura(a: AssinaturaLocal, nome: string): Promise<boolean> {
+    const atual = envioAssinatura.current;
+    if (atual?.id === a.id && atual.nome === nome) return atual.promessa;
+    const promessa: Promise<boolean> = (atual?.promessa ?? Promise.resolve(false)).then(() => enviarAgora(a, nome)).finally(() => {
+      if (envioAssinatura.current?.promessa === promessa) envioAssinatura.current = null;
+    });
+    envioAssinatura.current = { id: a.id, nome, promessa };
+    return promessa;
+  }
+
+  async function enviarAgora(a: AssinaturaLocal, nome: string): Promise<boolean> {
     const atualizar = (patch: Partial<AssinaturaLocal>) => {
       if (assinRef.current?.id !== a.id) return;
       trocarAssin({ ...assinRef.current, ...patch });
     };
-    atualizar({ envio: "enviando", erro: undefined });
+    atualizar({ envio: "enviando", erro: undefined, tentarSozinho: false });
     try {
       const res = await enviarAssinatura({ vistoriaId: v.id, assinaturaId: a.id, nome, png: a.blob, largura: a.largura, altura: a.altura });
       atualizar({ envio: "enviada", nomeEnviado: nome });
@@ -766,11 +784,35 @@ export function VistoriaRascunho({
       return true;
     } catch (e) {
       const msg = e instanceof ErroEnvio ? e.message : MSG_REDE;
-      atualizar({ envio: "falhou", erro: msg });
+      atualizar({ envio: "falhou", erro: msg, tentarSozinho: !(e instanceof ErroEnvio) || e.tipo === "rede" || e.tipo === "temporario" });
       void guardarDiagVistoria({ resultado: "erro", erro: `${msg} (${e instanceof ErroEnvio ? e.detalhe : String(e)})`, vistoriaId: v.id, largura: a.largura, altura: a.altura, png: a.blob, dados: a.dados });
       return false;
     }
   }
+
+  useEffect(() => {
+    reenviarAssinaturaRef.current = () => {
+      const a = assinRef.current;
+      const x = rRef.current;
+      const nome = x.nome.trim();
+      if (!a || encerrada.current || x.semAssinaturaMotivo || nome.length < 2 || !navigator.onLine) return;
+      if (a.envio === "pendente" || (a.envio === "falhou" && a.tentarSozinho)) void subirAssinatura(a, nome);
+    };
+  });
+
+  // F5-E-6: a falha some sozinha quando o envio funcionar. O intervalo cobre o sinal que oscila,
+  // em que o aparelho nunca chegou a dizer que estava sem internet.
+  useEffect(() => {
+    const reenviar = () => reenviarAssinaturaRef.current?.();
+    const repetir = setInterval(() => {
+      if (assinRef.current?.envio === "falhou") reenviar();
+    }, REENVIO_ASSINATURA_MS);
+    window.addEventListener("online", reenviar);
+    return () => {
+      clearInterval(repetir);
+      window.removeEventListener("online", reenviar);
+    };
+  }, []);
 
   function aoUsarAssinatura(res: ResultadoAssinatura) {
     const nova: AssinaturaLocal = {
@@ -842,7 +884,19 @@ export function VistoriaRascunho({
     5: { estado: visitados.has(5) ? "visto" : "nao_visto" },
   };
 
-  const estadoSalvo: EstadoSalvo = falhou ? "falhou" : r.sujas.length && semInternet ? "sem_internet" : salvando ? "salvando" : "salvo";
+  // "Salvo" só vale com a assinatura no servidor: enquanto ela não sobe, está guardada no celular.
+  const nomePronto = r.nome.trim().length >= 2;
+  const assinaturaParada = !motivoSem && (assin?.envio === "falhou" || (assin?.envio === "pendente" && nomePronto && semInternet));
+  const estadoSalvo: EstadoSalvo = falhou
+    ? "falhou"
+    : (r.sujas.length && semInternet) || assinaturaParada
+      ? "sem_internet"
+      : salvando || (!motivoSem && assin?.envio === "enviando")
+        ? "salvando"
+        : "salvo";
+  const textoReenvio = semInternet
+    ? "Sem internet. A assinatura está guardada no celular e sobe sozinha quando a internet voltar."
+    : "A assinatura ainda não subiu. Ela está guardada no celular e vamos tentar de novo sozinhos.";
 
   // ------------------------------------------------ concluir
   const [confirmando, setConfirmando] = useState(false);
@@ -955,12 +1009,23 @@ export function VistoriaRascunho({
   }
   function sairDaVistoria() {
     setPerguntaSair(false);
-    router.push(`/os/${osId}`);
+    // A folha fecha com history.back(), e esse voltar cancela a navegação do navegador que o App
+    // Router faz quando não há internet: o toque em "Sair" não fazia nada. Navega depois dele.
+    let foi = false;
+    const ir = () => {
+      if (foi) return;
+      foi = true;
+      window.removeEventListener("popstate", ir);
+      router.push(`/os/${osId}`);
+    };
+    window.addEventListener("popstate", ir);
+    setTimeout(ir, 500);
   }
 
   // ------------------------------------------------ quem não pode editar: só vê
+  // `contents`: o div só escuta o clique; sem caixa própria, não prende o `sticky` do cabeçalho (F5-E-4).
   const cabecalho = (
-    <div onClickCapture={aoClicarCabecalho}>
+    <div className="contents" onClickCapture={aoClicarCabecalho}>
       <Cabecalho titulo={titulo} voltar={`/os/${osId}`} />
     </div>
   );
@@ -1332,12 +1397,16 @@ export function VistoriaRascunho({
                             : assin.envio === "enviada"
                               ? "Assinatura enviada."
                               : assin.envio === "falhou"
-                                ? (assin.erro ?? "A assinatura não subiu. Ela continua guardada no celular.")
-                                : "Assinatura guardada no celular. Ela sobe quando o nome estiver preenchido."}
+                                ? assin.tentarSozinho
+                                  ? textoReenvio
+                                  : (assin.erro ?? "A assinatura não subiu. Ela continua guardada no celular.")
+                                : nomePronto && semInternet
+                                  ? textoReenvio
+                                  : "Assinatura guardada no celular. Ela sobe quando o nome estiver preenchido."}
                         </p>
                       )}
                       {assin?.envio === "falhou" && (
-                        <Botao variante="secundario" className="h-toque!" onClick={() => void subirAssinatura(assin, r.nome.trim())} disabled={r.nome.trim().length < 2}>
+                        <Botao variante="secundario" className="h-toque!" onClick={() => void subirAssinatura(assin, r.nome.trim())} disabled={semInternet || !nomePronto}>
                           Tentar de novo
                         </Botao>
                       )}

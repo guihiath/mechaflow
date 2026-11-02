@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="pt-BR" data-tema="claro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14161A">
+<title>Sem internet | MechaFlow</title>
+<script>
+// Mesmo tema do app (lib/tema.ts).
+(function () {
+  var t = null;
+  try { t = localStorage.getItem("mf-tema"); } catch (e) {}
+  if (t !== "claro" && t !== "escuro") t = window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "escuro" : "claro";
+  document.documentElement.setAttribute("data-tema", t);
+})();
+</script>
+<style>
+/* Copia dos tokens de src/app/globals.css: esta pagina nao depende de nenhum outro arquivo. */
+:root { --fundo: #F2F0EB; --texto: #14161A; --texto-suave: #4A4F57; --foco: #1D5FA8; color-scheme: light; }
+[data-tema="escuro"] { --fundo: #121417; --texto: #EDEBE6; --texto-suave: #B4B0A8; --foco: #7DB5F5; color-scheme: dark; }
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  display: flex; flex-direction: column; gap: 24px;
+  padding: max(2rem, env(safe-area-inset-top)) 16px max(1.5rem, env(safe-area-inset-bottom));
+  background: var(--fundo); color: var(--texto);
+  font: 500 18px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+main { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 12px; width: 100%; max-width: 560px; }
+svg { display: block; margin-bottom: 8px; color: var(--texto-suave); }
+h1 { margin: 0; font-size: 36px; line-height: 1.1; font-weight: 700; }
+p { margin: 0; }
+#situacao { color: var(--texto-suave); }
+button {
+  width: 100%; max-width: 560px; height: 56px; padding: 0 16px; border: 0; border-bottom: 3px solid #14161A; border-radius: 8px;
+  background: #F5B800; color: #14161A; font: inherit; font-weight: 700; cursor: pointer;
+}
+button:active { background: #D49E00; }
+button:focus-visible { outline: 3px solid var(--foco); outline-offset: 2px; }
+</style>
+</head>
+<body>
+<main>
+  <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h.01"/><path d="M8.5 16.43a5 5 0 0 1 7 0"/><path d="M5 12.86a10 10 0 0 1 5.17-2.7"/><path d="M19 12.86a10 10 0 0 0-2-1.5"/><path d="M2 8.82a15 15 0 0 1 4.18-2.65"/><path d="M22 8.82a15 15 0 0 0-11.29-3.76"/><path d="m2 2 20 20"/></svg>
+  <h1>Sem internet</h1>
+  <p>Esta tela precisa de internet para abrir. As fotos e a vistoria que você já marcou continuam guardadas neste celular.</p>
+  <p id="situacao" role="status">Assim que a internet voltar, a tela abre sozinha.</p>
+</main>
+<button id="tentar" type="button">Tentar de novo</button>
+<script>
+(function () {
+  var CHAVE_TENTOU = "mf-offline-tentou";
+  var CHAVE_AUTO = "mf-offline-auto";
+  var INTERVALO = 5000;
+  var ESPERA_ENTRE_RECARGAS = 15000;
+  var situacao = document.getElementById("situacao");
+  var conferindo = false;
+
+  function ler(chave) { try { return sessionStorage.getItem(chave); } catch (e) { return null; } }
+  function gravar(chave, valor) { try { sessionStorage.setItem(chave, valor); } catch (e) {} }
+  function apagar(chave) { try { sessionStorage.removeItem(chave); } catch (e) {} }
+
+  // Aberta direto pelo endereco, online: nao ha tela para recarregar; vai para o inicio.
+  function recarregar() {
+    if (location.pathname === "/offline.html") location.replace("/");
+    else location.reload();
+  }
+
+  if (ler(CHAVE_TENTOU)) {
+    apagar(CHAVE_TENTOU);
+    situacao.textContent = "Ainda sem internet. Assim que ela voltar, a tela abre sozinha.";
+  }
+
+  document.getElementById("tentar").addEventListener("click", function () {
+    gravar(CHAVE_TENTOU, "1");
+    recarregar();
+  });
+
+  // /sw.js nao passa pelo service worker nem pelo login do app: qualquer resposta prova que ha internet.
+  // A espera entre recargas evita piscar a tela se a conferencia passar e a tela continuar sem abrir.
+  function conferir() {
+    if (conferindo || document.visibilityState === "hidden") return;
+    if (Date.now() - Number(ler(CHAVE_AUTO) || 0) < ESPERA_ENTRE_RECARGAS) return;
+    conferindo = true;
+    fetch("/sw.js", { method: "HEAD", cache: "no-store" }).then(
+      function () {
+        conferindo = false;
+        gravar(CHAVE_AUTO, String(Date.now()));
+        recarregar();
+      },
+      function () { conferindo = false; }
+    );
+  }
+
+  window.addEventListener("online", conferir);
+  window.addEventListener("pageshow", conferir);
+  document.addEventListener("visibilitychange", conferir);
+  setInterval(conferir, INTERVALO);
+})();
+</script>
+</body>
+</html>

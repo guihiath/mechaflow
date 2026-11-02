@@ -52,6 +52,17 @@ export async function atualizarSessao(request: NextRequest) {
   const logado = Boolean(data?.claims?.sub);
 
   const { pathname, search } = request.nextUrl;
+  // Quem já tem sessão não passa pela tela de "Criar conta / Entrar" (é o start_url do PWA, F5-E-3).
+  // Fica aqui, e não na página, porque "/" é estática (Cache Components). /entrar decide o destino.
+  if (logado && pathname === "/") {
+    const destino = request.nextUrl.clone();
+    destino.pathname = "/entrar";
+    destino.search = "";
+    const redirect = NextResponse.redirect(destino);
+    redirect.headers.set("Cache-Control", "private, no-store");
+    response.cookies.getAll().forEach((c) => redirect.cookies.set(c));
+    return redirect;
+  }
   // API sem sessão: 401 em JSON (quem chama é fetch, não uma pessoa para mandar ao /login).
   if (!logado && pathname.startsWith("/api/") && !rotaPublica(pathname)) {
     const naoAutorizado = NextResponse.json(

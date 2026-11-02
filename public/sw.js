@@ -1,19 +1,34 @@
 /*
  * Service worker minimo do MechaFlow.
- * Objetivo: permitir instalar o PWA e dar uma resposta basica sem internet.
- * Estrategia: network-first (sempre tenta a rede; cache so como reserva).
+ * Objetivo: permitir instalar o PWA e, sem internet, nunca cair no erro do navegador.
  *
- * NAO cacheia: requisicoes que nao sao GET, outras origens (ex.: Supabase),
- * /api/*, /auth/*, requisicoes RSC do Next e paginas fora da lista publica.
- * Paginas com dados da oficina nunca devem ir para o cache.
+ * Navegacao (abrir ou recarregar uma tela): sempre vai para a rede. Se a rede falhar,
+ * responde com /offline.html, na mesma URL. Essa pagina e fixa, nao tem dado da oficina, e
+ * recarrega a URL em "Tentar de novo" ou sozinha quando a internet volta (PLANO 18.5).
+ * NAO e modo offline: nenhuma pagina do app fica guardada, nem as publicas.
+ *
+ * Arquivos estaticos (_next/static, icones, manifest): network-first, cache so como reserva.
+ *
+ * NAO cacheia: requisicoes que nao sao GET, outras origens (ex.: Supabase), /api/*, /auth/*,
+ * requisicoes RSC do Next e qualquer pagina. Paginas com dados nunca devem ir para o cache.
+ *
+ * Mudou este arquivo ou o /offline.html? Troque CACHE_NAME: o aparelho instala o SW novo na
+ * proxima abertura com internet e apaga o cache antigo.
  */
-const CACHE_NAME = "mechaflow-v1";
+const CACHE_NAME = "mechaflow-v2";
+const PAGINA_OFFLINE = "/offline.html";
 
-// Paginas publicas que podem ficar em cache como reserva offline.
-const PUBLIC_PAGES = ["/", "/login"];
-
-self.addEventListener("install", () => {
-  self.skipWaiting();
+self.addEventListener("install", (event) => {
+  event.waitUntil(
+    (async () => {
+      // Se a pagina nao vier inteira, a instalacao falha e o SW anterior continua valendo.
+      const resposta = await fetch(PAGINA_OFFLINE, { cache: "reload" });
+      if (!resposta.ok || resposta.redirected) throw new Error("offline.html indisponivel");
+      const cache = await caches.open(CACHE_NAME);
+      await cache.put(PAGINA_OFFLINE, resposta);
+      await self.skipWaiting();
+    })(),
+  );
 });
 
 self.addEventListener("activate", (event) => {
@@ -28,15 +43,7 @@ self.addEventListener("activate", (event) => {
   );
 });
 
-function isCacheable(request, url) {
-  if (request.method !== "GET") return false;
-  if (url.origin !== self.location.origin) return false;
-  if (url.pathname.startsWith("/api/")) return false;
-  if (url.pathname.startsWith("/auth/")) return false;
-  if (request.headers.get("RSC") || url.searchParams.has("_rsc")) return false;
-
-  if (request.mode === "navigate") return PUBLIC_PAGES.includes(url.pathname);
-
+function ehArquivoEstatico(url) {
   return (
     url.pathname.startsWith("/_next/static/") ||
     url.pathname.startsWith("/icons/") ||
@@ -48,7 +55,23 @@ self.addEventListener("fetch", (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  if (!isCacheable(request, url)) return;
+  if (request.method !== "GET") return;
+  if (url.origin !== self.location.origin) return;
+  if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/auth/")) return;
+
+  if (request.mode === "navigate") {
+    event.respondWith(
+      fetch(request).catch(async (error) => {
+        const reserva = await caches.match(PAGINA_OFFLINE);
+        if (reserva) return reserva;
+        throw error;
+      }),
+    );
+    return;
+  }
+
+  if (request.headers.get("RSC") || url.searchParams.has("_rsc")) return;
+  if (!ehArquivoEstatico(url)) return;
 
   event.respondWith(
     (async () => {
@@ -62,10 +85,6 @@ self.addEventListener("fetch", (event) => {
       } catch (error) {
         const cached = await cache.match(request);
         if (cached) return cached;
-        if (request.mode === "navigate") {
-          const home = await cache.match("/");
-          if (home) return home;
-        }
         throw error;
       }
     })(),

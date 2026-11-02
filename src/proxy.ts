@@ -11,6 +11,6 @@ export const config = {
      * Roda em tudo, menos arquivos estaticos e do PWA:
      * _next/static, _next/image, icones, manifest, service worker e imagens.
      */
-    "/((?!_next/static|_next/image|favicon.ico|icons/|manifest.webmanifest|sw.js|robots.txt|.*\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|icons/|manifest.webmanifest|sw.js|offline.html|robots.txt|.*\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 };
