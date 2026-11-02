@@ -1024,10 +1024,11 @@ export function VistoriaRascunho({
       acima: limiteAtingido ? <p className="text-sm font-bold text-alerta-texto">A vistoria chegou ao limite de 30 fotos.</p> : undefined,
     };
   else if (passo === 4) barra = { secundario: voltarBotao, primario: proximoBotao(5, "Próximo: Assinar") };
-  else
+  else if (confirmando)
+    // A confirmação vai no lugar do primário: a BarraAcoesOS some quando não há primário nem
+    // secundário (só `acima` não basta), e a pergunta nunca aparecia (achado do F4-B8).
     barra = {
-      secundario: confirmando ? undefined : voltarBotao,
-      acima: confirmando ? (
+      primario: (
         <div className="flex flex-col gap-2 py-1" role="group" aria-label="Confirmar conclusão">
           <p className="text-base font-bold">Concluir a vistoria de {placa}?</p>
           <p className="text-sm text-texto-suave">Depois disso nada pode ser mudado, nem pelo dono.</p>
@@ -1040,14 +1041,19 @@ export function VistoriaRascunho({
             </Botao>
           </div>
         </div>
-      ) : semInternet ? (
+      ),
+    };
+  else
+    barra = {
+      secundario: voltarBotao,
+      acima: semInternet ? (
         <p className="text-sm font-bold text-alerta-texto">Sem internet. Para concluir, espere a internet voltar. Nada se perde.</p>
       ) : etapa ? (
         <p role="status" className="text-sm font-bold">
           {etapa}
         </p>
       ) : undefined,
-      primario: confirmando ? undefined : (
+      primario: (
         <Botao
           onClick={pedirConcluir}
           disabled={semInternet || etapa !== null || Boolean(bloqueio)}

@@ -1,11 +1,15 @@
 #!/usr/bin/env node
 /**
- * Teste de ponta a ponta das Fases 1, 2 e 3 contra o Supabase STAGING (so dados ficticios).
+ * Teste de ponta a ponta das Fases 1, 2, 3 e 4 contra o Supabase STAGING (so dados ficticios).
  * Fase 2 (OS): os dois modos ate "entregue", autorizacao, mecanico sem valores pela API
  * (tabelas e views), isolamento entre oficinas, idempotencia e numeracao com aberturas simultaneas.
  * Fase 3: itens lancados pelo mecanico (sem valores, status, "apos a aprovacao"), observacoes
  * fora do alcance do mecanico, fotos no Storage (isolamento, URL assinada que expira, 5 MB,
  * so JPEG, caminho forjado, limite de 40, apagar/editar por papel e status) e idempotencia.
+ * Fase 4: vistoria de entrada pela API nos 3 papeis (checklist copiado, avarias, fotos e
+ * assinatura PNG no bucket "vistorias", conclusao e suas recusas), imutabilidade depois de
+ * concluida (tabelas, RPCs e Storage), complemento, anular, isolamento, mecanico (17.6),
+ * obrigatoriedade, idempotencia com reenvio simultaneo e, com APP_URL, o PDF e as paginas.
  *
  * Uso:
  *   node scripts/testar-staging.mjs                         # so testes sem login (anon)
@@ -22,6 +26,7 @@
  */
 import { readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
+import { crc32, deflateSync } from "node:zlib";
 import { createClient } from "@supabase/supabase-js";
 import { createServerClient } from "@supabase/ssr";
 
@@ -239,7 +244,8 @@ async function testesCompletos() {
   }
 
   await testesFase2({ donoA, mec, at, donoB, ofA: ofA.data, ofB: ofB.data, vei: vei.data, serv: serv.data, peca: peca.data });
-  await testesFase3({ donoA, mec, at, donoB, ofA: ofA.data, vei: vei.data, serv: serv.data, peca: peca.data, pend: pend.data });
+  const { mec2 } = await testesFase3({ donoA, mec, at, donoB, ofA: ofA.data, vei: vei.data, serv: serv.data, peca: peca.data, pend: pend.data });
+  await testesFase4({ donoA, mec, mec2, at, donoB, ofA: ofA.data, ofB: ofB.data, vei: vei.data });
 
   console.log("\n== Desativar mecanico ==");
   const desat = await donoA.sb.rpc("atualizar_membro", { p_perfil_id: mec.session.user.id, p_ativo: false });
@@ -1026,6 +1032,610 @@ async function testesFase3({ donoA, mec, at, donoB, ofA, vei, serv, peca, pend }
     checar("app mecanico: /minhas-os sem R$ nem 'centavos' com as OS da Fase 3", minhas.status === 200 && !minhas.html.includes("R$") && !/centavos/i.test(minhas.html), `status ${minhas.status}`);
     const detF = await pagina(`/os/${osF}`, ckMec);
     checar("app mecanico: /os/[id] com fotos sem R$ nem 'centavos'", detF.status === 200 && !detF.html.includes("R$") && !/centavos/i.test(detF.html), `status ${detF.status}`);
+  }
+  return { mec2 };
+}
+
+// ------------------------------------------------------------------ 6. Fase 4: vistoria do veiculo
+const BUCKET_VIST = "vistorias";
+/** PNG valido (RGB, fundo branco) gerado aqui: a assinatura do teste (o PDF embute de verdade). */
+function pngBranco(largura, altura) {
+  const bloco = (tipo, dados) => {
+    const tam = Buffer.alloc(4);
+    tam.writeUInt32BE(dados.length);
+    const td = Buffer.concat([Buffer.from(tipo, "latin1"), dados]);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(td) >>> 0);
+    return Buffer.concat([tam, td, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(largura, 0);
+  ihdr.writeUInt32BE(altura, 4);
+  ihdr[8] = 8; // 8 bits
+  ihdr[9] = 2; // RGB
+  const linhas = Buffer.alloc((largura * 3 + 1) * altura, 0xff);
+  for (let y = 0; y < altura; y++) linhas[y * (largura * 3 + 1)] = 0; // filtro 0 em cada linha
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), bloco("IHDR", ihdr), bloco("IDAT", deflateSync(linhas)), bloco("IEND", Buffer.alloc(0))]);
+}
+// 320 x 96 (nenhum desses numeros esta em VALORES_DO_TESTE)
+const PNG_ASSINATURA = pngBranco(320, 96);
+const pngBlob = () => new Blob([PNG_ASSINATURA], { type: "image/png" });
+const NOME_ASSINA = "Carlos Motorista";
+const subirV = (sb, caminho, corpo = arquivo(), contentType = "image/jpeg", upsert = false) =>
+  sb.storage.from(BUCKET_VIST).upload(caminho, corpo, { contentType, upsert });
+/** Tamanho do arquivo baixado do bucket vistorias (0 = nao baixou). */
+async function tamanhoV(sb, caminho) {
+  if (!caminho) return 0;
+  const r = await sb.storage.from(BUCKET_VIST).download(caminho);
+  return r.error ? 0 : (r.data?.size ?? 0);
+}
+const recusou = (r) => Boolean(r?.error) || (r?.data ?? []).length === 0;
+
+async function registrarFotoV(sb, vistoriaId, tipo, extra = {}) {
+  const id = extra.p_id ?? uuid();
+  const r = await sb.rpc("registrar_foto_vistoria", {
+    p_id: id, p_vistoria_id: vistoriaId, p_tipo: tipo, p_largura: 1600, p_altura: 1200,
+    p_tamanho_bytes: JPEG_1PX.length, p_tamanho_miniatura_bytes: JPEG_1PX.length, ...extra,
+  }).single();
+  return { id, r, caminho: r.data?.caminho, caminho_miniatura: r.data?.caminho_miniatura };
+}
+/** Fluxo do app (ARQUITETURA 12.3): registrar -> miniatura -> foto -> confirmar. */
+async function fotoV(sb, vistoriaId, tipo, extra = {}) {
+  const f = await registrarFotoV(sb, vistoriaId, tipo, extra);
+  const u1 = f.caminho_miniatura ? await subirV(sb, f.caminho_miniatura) : { error: { message: "sem caminho" } };
+  const u2 = f.caminho ? await subirV(sb, f.caminho) : { error: { message: "sem caminho" } };
+  const c = await sb.rpc("confirmar_foto_vistoria", { p_id: f.id });
+  return { ...f, ok: !f.r.error && !u1.error && !u2.error && !c.error, erro: `${msg(f.r)}/${errSt(u1.error)}/${errSt(u2.error)}/${msg(c)}` };
+}
+/** Assinatura: registrar -> subir o PNG (o "confirmar" e o proprio concluir_vistoria). */
+async function assinarV(sb, vistoriaId, { id = uuid(), nome = NOME_ASSINA, subir = true } = {}) {
+  const r = await sb.rpc("registrar_assinatura_vistoria", {
+    p_vistoria_id: vistoriaId, p_assinatura_id: id, p_nome: nome, p_largura: 320, p_altura: 96, p_tamanho_bytes: PNG_ASSINATURA.length,
+  });
+  const u = subir && r.data ? await subirV(sb, r.data, pngBlob(), "image/png") : { error: subir ? { message: "sem caminho" } : null };
+  return { id, caminho: r.data, r, ok: !r.error && !u.error, erro: `${msg(r)}/${errSt(u.error)}` };
+}
+
+async function testesFase4({ donoA, mec, mec2, at, donoB, ofA, ofB, vei }) {
+  const idMec = mec.session.user.id;
+  const idMec2 = mec2.session.user.id;
+  const respostasMec = []; // tudo que o mecanico recebeu na Fase 4: nenhuma resposta pode ter valor
+  const guardaMec = (r) => (respostasMec.push(r?.data ?? null), r);
+  const abrirOS = async (extra = {}) => {
+    const r = await donoA.sb.rpc("abrir_os", { p_chave_idempotencia: uuid(), p_veiculo_id: vei?.id, p_km: 600000, p_sintoma_relatado: "Vistoria", p_autorizado_por_nome: "Carlos, motorista", ...extra }).single();
+    return r.data?.os_id;
+  };
+  const vw = async (sb, id) => (await sb.from("vw_vistorias").select("*").eq("id", id).maybeSingle()).data;
+  const itensDe = async (sb, vid) => (await sb.from("vistoria_itens").select("id, ordem, descricao, situacao, observacao").eq("vistoria_id", vid).order("ordem")).data ?? [];
+  /** Vistoria curta (sem avarias, sem assinatura com motivo): para a obrigatoriedade. */
+  async function vistoriaRapida(sb, osId, motivo = "recusou") {
+    const ini = await sb.rpc("iniciar_vistoria", { p_os_id: osId }).single();
+    const vid = ini.data?.vistoria_id;
+    const ok1 = await sb.rpc("marcar_itens_restantes_ok", { p_vistoria_id: vid });
+    const ok2 = await sb.rpc("salvar_vistoria", { p_vistoria_id: vid, p_sem_avarias: true });
+    const c = await sb.rpc("concluir_vistoria", { p_vistoria_id: vid, p_sem_assinatura_motivo: motivo });
+    return { vid, ok: !ini.error && !ok1.error && !ok2.error && !c.error, erro: [ini, ok1, ok2, c].map(msg).join("/") };
+  }
+  /** Vistoria inteira como a tela faz: entrada, checklist, avaria com foto, painel, objetos, assinatura, concluir. */
+  async function vistoriaCompleta(rotulo, sb, osId, km, nomeQuemFez) {
+    const ini = await sb.rpc("iniciar_vistoria", { p_os_id: osId }).single();
+    const vid = ini.data?.vistoria_id;
+    if (rotulo.startsWith("mecanico")) guardaMec(ini);
+    checar(`${rotulo}: inicia a vistoria de entrada (rascunho novo)`, Boolean(vid) && ini.data?.status === "rascunho" && ini.data?.ja_existia === false, msg(ini));
+    const sv = await sb.rpc("salvar_vistoria", { p_vistoria_id: vid, p_km: km, p_horimetro: 12500, p_combustivel: "meio", p_objetos: ["Rádio", "  Extintor ", "Rádio"], p_observacoes: "Para-brisa trincado no canto" });
+    const itens = await itensDe(sb, vid);
+    const m1 = await sb.rpc("marcar_item_vistoria", { p_item_id: itens[0]?.id, p_situacao: "com_problema", p_observacao: "Desgaste" });
+    const m2 = await sb.rpc("marcar_item_vistoria", { p_item_id: itens[1]?.id, p_situacao: "nao_se_aplica" });
+    const resto = await sb.rpc("marcar_itens_restantes_ok", { p_vistoria_id: vid });
+    checar(
+      `${rotulo}: salva KM/horimetro/combustivel/objetos/observacoes e marca o checklist (1 problema, 1 N/A, "resto ok")`,
+      !sv.error && itens.length >= 16 && !m1.error && !m2.error && resto.data === itens.length - 2,
+      `${msg(sv)}/${itens.length} itens/${msg(m1)}/${msg(m2)}/${resto.data}`,
+    );
+    const avId = uuid();
+    const av = await sb.rpc("salvar_avaria", { p_id: avId, p_vistoria_id: vid, p_lado: "lateral_direita", p_descricao: "Amassado no para-lama" });
+    const fAv = await fotoV(sb, vid, "avaria", { p_avaria_id: avId });
+    const fPa = await fotoV(sb, vid, "painel");
+    checar(
+      `${rotulo}: avaria com foto e foto do painel (registrar -> subir no bucket vistorias -> confirmar); caminho calculado pelo banco`,
+      !av.error && fAv.ok && fPa.ok && fAv.caminho === `${ofA}/${osId}/${vid}/${fAv.id}.jpg` && fAv.caminho_miniatura === `${ofA}/${osId}/${vid}/${fAv.id}_mini.jpg`,
+      `${msg(av)} | ${fAv.erro} | ${fPa.erro}`,
+    );
+    const as = await assinarV(sb, vid);
+    checar(`${rotulo}: assinatura PNG registrada e enviada (.../assinatura_<id>.png)`, as.ok && as.caminho === `${ofA}/${osId}/${vid}/assinatura_${as.id}.png`, as.erro);
+    const conc = await sb.rpc("concluir_vistoria", { p_vistoria_id: vid });
+    const v = await vw(sb, vid);
+    if (rotulo.startsWith("mecanico")) guardaMec({ data: v });
+    checar(
+      `${rotulo}: conclui (hash SHA-256) e a vistoria guarda tudo (KM, combustivel, objetos, checklist, avaria, 2 fotos, assinatura, quem/quando)`,
+      /^[0-9a-f]{64}$/.test(conc.data ?? "") && v?.status === "concluida" && v.hash_conteudo === conc.data && v.km === km && v.horimetro === 12500 && v.combustivel === "meio" &&
+        [...(v.objetos ?? [])].sort().join("|") === "Extintor|Rádio" && v.observacoes === "Para-brisa trincado no canto" && v.itens_marcados === v.itens_total && v.itens_com_problema === 1 &&
+        v.qtd_avarias === 1 && v.qtd_fotos === 2 && v.fotos_pendentes === 0 && v.assinado_por_nome === NOME_ASSINA && v.assinatura_caminho === as.caminho && Boolean(v.concluida_em) && v.concluida_por_nome === nomeQuemFez,
+      `${msg(conc)} ${JSON.stringify(v && { status: v.status, km: v.km, objetos: v.objetos, marcados: v.itens_marcados, total: v.itens_total, fotos: v.qtd_fotos, por: v.concluida_por_nome })}`,
+    );
+    return { vid, osId, itens, avId, fAv, fPa, as, hash: conc.data };
+  }
+
+  // ---------------------------------------------------------------- checklist padrao e modelo copiado
+  console.log("\n== Fase 4: checklist padrao da oficina ==");
+  for (const [rot, sb, of] of [["oficina A", donoA.sb, ofA], ["oficina B (nova)", donoB.sb, ofB]]) {
+    const mod = await sb.from("checklist_modelos").select("id, padrao, oficina_id");
+    const its = await sb.from("checklist_modelo_itens").select("id, ativo");
+    checar(`${rot}: nasce com o checklist padrao de caminhao (1 modelo, 16 itens ativos)`, mod.data?.length === 1 && mod.data[0].padrao === true && mod.data[0].oficina_id === of && (its.data ?? []).filter((i) => i.ativo).length === 16, `${msg(mod)} ${mod.data?.length} modelos, ${its.data?.length} itens`);
+  }
+  const modeloA = (await donoA.sb.from("checklist_modelos").select("id").single()).data?.id;
+  const itensModelo = (await donoA.sb.from("checklist_modelo_itens").select("id, descricao, ordem, ativo").order("ordem")).data ?? [];
+  const atIns = await at.sb.from("checklist_modelo_itens").insert({ modelo_id: modeloA, descricao: "Invasão" }).select("id");
+  const mecUpd = await mec.sb.from("checklist_modelo_itens").update({ descricao: "Invasão" }).eq("id", itensModelo[0]?.id).select("id");
+  const bUpdMod = await donoB.sb.from("checklist_modelo_itens").update({ descricao: "Invasão" }).eq("id", itensModelo[0]?.id).select("id");
+  const delMod = await donoA.sb.from("checklist_modelo_itens").delete().eq("id", itensModelo[0]?.id).select("id");
+  checar("checklist: atendente nao adiciona, mecanico e dono B nao editam, ninguem apaga (desativar)", Boolean(atIns.error) && recusou(mecUpd) && recusou(bUpdMod) && recusou(delMod), [atIns, mecUpd, bUpdMod, delMod].map((r) => r.error?.code ?? r.data?.length).join("/"));
+  const extra = await donoA.sb.from("checklist_modelo_itens").insert({ modelo_id: modeloA, descricao: "  Item   extra do teste " }).select("id, descricao, ordem").single();
+  const ultimaOrdem = Math.max(...itensModelo.map((i) => i.ordem));
+  checar("dono: adiciona item no fim do modelo (descricao normalizada)", extra.data?.descricao === "Item extra do teste" && extra.data?.ordem === ultimaOrdem + 1, msg(extra));
+
+  // ---------------------------------------------------------------- vistoria inteira nos 3 papeis
+  console.log("\n== Fase 4: vistoria inteira (dono, atendente, mecanico na OS dele) ==");
+  const os1 = await abrirOS({ p_mecanico_id: idMec }); // do mecanico: ele ve a vistoria que o dono fez
+  const os2 = await abrirOS();
+  const os3 = await abrirOS({ p_mecanico_id: idMec });
+  checar("dono A: abre as OS diretas da Fase 4", Boolean(os1 && os2 && os3));
+  const V1 = await vistoriaCompleta("dono", donoA.sb, os1, 600500, "Dono Teste A");
+  const osKm = (await donoA.sb.from("vw_os").select("km, vistoria_entrada_id, vistoria_entrada_status").eq("id", os1).single()).data;
+  const veiKm = (await donoA.sb.from("veiculos").select("km_atual").eq("id", vei?.id).single()).data;
+  checar("KM unico: o KM da vistoria fica na OS e no veiculo; vw_os mostra a vistoria feita", osKm?.km === 600500 && veiKm?.km_atual >= 600500 && osKm?.vistoria_entrada_id === V1.vid && osKm?.vistoria_entrada_status === "concluida", JSON.stringify({ osKm, veiKm }));
+  checar("modelo copiado: a vistoria do dono tem os 16 itens + o item extra", V1.itens.length === 17 && V1.itens.some((i) => i.descricao === "Item extra do teste") && V1.itens[0]?.descricao === itensModelo[0]?.descricao, `${V1.itens.length} itens`);
+  const hist1 = (await donoA.sb.from("vw_os_historico").select("evento, observacao, por_nome").eq("os_id", os1)).data ?? [];
+  checar("historico: 'Vistoria de entrada concluida' por quem fez", hist1.some((h) => h.evento === "vistoria" && /concluída/.test(h.observacao ?? "") && h.por_nome === "Dono Teste A"), JSON.stringify(hist1.filter((h) => h.evento === "vistoria")));
+
+  // editar o modelo depois nao muda a vistoria
+  const ren = await donoA.sb.from("checklist_modelo_itens").update({ descricao: "Item extra renomeado" }).eq("id", extra.data?.id).select("id");
+  const des = await donoA.sb.from("checklist_modelo_itens").update({ ativo: false }).eq("id", itensModelo[0]?.id).select("id");
+  const itensV1 = await itensDe(donoA.sb, V1.vid);
+  checar("dono renomeia e desativa itens do modelo; a vistoria concluida continua com a descricao que tinha", ren.data?.length === 1 && des.data?.length === 1 && itensV1.length === 17 && itensV1.some((i) => i.descricao === "Item extra do teste") && !itensV1.some((i) => i.descricao === "Item extra renomeado") && itensV1[0]?.descricao === itensModelo[0]?.descricao, `${msg(ren)}/${msg(des)}`);
+  const V2 = await vistoriaCompleta("atendente", at.sb, os2, 600600, "Atendente Teste");
+  checar("vistoria nova copia o modelo NOVO (sem o desativado, com o nome novo)", V2.itens.length === 16 && V2.itens.some((i) => i.descricao === "Item extra renomeado") && !V2.itens.some((i) => i.descricao === itensModelo[0]?.descricao), `${V2.itens.length} itens`);
+  await donoA.sb.from("checklist_modelo_itens").update({ ativo: true }).eq("id", itensModelo[0]?.id);
+  await donoA.sb.from("checklist_modelo_itens").update({ ativo: false }).eq("id", extra.data?.id);
+  const V3 = await vistoriaCompleta("mecanico", mec.sb, os3, 600700, "Mecânico Teste");
+
+  // ---------------------------------------------------------------- uma entrada por OS
+  console.log("\n== Fase 4: uma vistoria de entrada por OS ==");
+  const de1 = await at.sb.rpc("iniciar_vistoria", { p_os_id: os1 }).single();
+  const de2 = guardaMec(await mec.sb.rpc("iniciar_vistoria", { p_os_id: os1, p_tipo: "entrada" }).single());
+  checar("iniciar de novo (atendente, mecanico) na OS com vistoria concluida devolve a MESMA (ja_existia)", de1.data?.vistoria_id === V1.vid && de1.data?.ja_existia === true && de1.data?.status === "concluida" && de2.data?.vistoria_id === V1.vid, `${msg(de1)}/${msg(de2)}`);
+  const insDir = await donoA.sb.from("vistorias").insert({ oficina_id: ofA, os_id: os1, veiculo_id: vei?.id, tipo: "entrada" }).select("id");
+  checar("insert direto em vistorias recusado (so pela RPC)", Boolean(insDir.error), insDir.error?.code);
+  const qtdOs1 = (await donoA.sb.from("vistorias").select("id").eq("os_id", os1)).data ?? [];
+  checar("a OS continua com uma vistoria so", qtdOs1.length === 1, `${qtdOs1.length}`);
+
+  // ---------------------------------------------------------------- recusas do concluir
+  console.log("\n== Fase 4: concluir recusado (itens, foto pendente, avaria, assinatura) ==");
+  const os4 = await abrirOS();
+  const i4 = await at.sb.rpc("iniciar_vistoria", { p_os_id: os4 }).single();
+  const V4 = i4.data?.vistoria_id;
+  const c1 = await at.sb.rpc("concluir_vistoria", { p_vistoria_id: V4 });
+  checar("concluir com item do checklist sem marcar: vistoria_itens_sem_marcar", msg(c1) === "vistoria_itens_sem_marcar", msg(c1));
+  const itens4 = await itensDe(at.sb, V4);
+  const semSit = await at.sb.rpc("marcar_item_vistoria", { p_item_id: itens4[0]?.id, p_situacao: null });
+  checar("marcar item sem situacao: situacao_obrigatoria", msg(semSit) === "situacao_obrigatoria", msg(semSit));
+  await at.sb.rpc("marcar_itens_restantes_ok", { p_vistoria_id: V4 });
+  const fPend = await registrarFotoV(at.sb, V4, "painel");
+  const c2 = await at.sb.rpc("concluir_vistoria", { p_vistoria_id: V4 });
+  checar("concluir com foto da vistoria pendente (registrada, nao enviada): vistoria_fotos_pendentes", !fPend.r.error && msg(c2) === "vistoria_fotos_pendentes", `${msg(fPend.r)}/${msg(c2)}`);
+  const conf0 = await at.sb.rpc("confirmar_foto_vistoria", { p_id: fPend.id });
+  checar("confirmar sem o arquivo no bucket: foto_nao_enviada", msg(conf0) === "foto_nao_enviada", msg(conf0));
+  const gif = await subirV(at.sb, fPend.caminho, arquivo(JPEG_1PX, "image/gif"), "image/gif");
+  const grande = await subirV(at.sb, fPend.caminho, arquivo(Buffer.alloc(5 * 1024 * 1024 + 1024, 0xff)));
+  checar("bucket vistorias recusa arquivo que nao e JPEG/PNG e maior que 5 MB", Boolean(gif.error) && Boolean(grande.error), `${errSt(gif.error)} | ${errSt(grande.error)}`);
+  await subirV(at.sb, fPend.caminho_miniatura);
+  await subirV(at.sb, fPend.caminho);
+  const conf1 = await at.sb.rpc("confirmar_foto_vistoria", { p_id: fPend.id });
+  const c3 = await at.sb.rpc("concluir_vistoria", { p_vistoria_id: V4 });
+  checar("foto enviada; concluir sem dizer se tem avaria: avarias_nao_informadas", !conf1.error && msg(c3) === "avarias_nao_informadas", `${msg(conf1)}/${msg(c3)}`);
+  const semAv = await at.sb.rpc("salvar_vistoria", { p_vistoria_id: V4, p_sem_avarias: true });
+  const av4 = uuid();
+  const nova4 = await at.sb.rpc("salvar_avaria", { p_id: av4, p_vistoria_id: V4, p_lado: "traseira" });
+  const sa4 = (await vw(at.sb, V4))?.sem_avarias;
+  const semAv2 = await at.sb.rpc("salvar_vistoria", { p_vistoria_id: V4, p_sem_avarias: true });
+  const semLado = await at.sb.rpc("salvar_avaria", { p_id: uuid(), p_vistoria_id: V4 });
+  checar("'Sem avarias' marcado e desmarcado pela avaria nova; marcar com avaria = vistoria_tem_avarias; avaria sem lado = lado_obrigatorio", !semAv.error && !nova4.error && sa4 === false && msg(semAv2) === "vistoria_tem_avarias" && msg(semLado) === "lado_obrigatorio", `${msg(semAv)}/${msg(nova4)}/${sa4}/${msg(semAv2)}/${msg(semLado)}`);
+  const c4 = await at.sb.rpc("concluir_vistoria", { p_vistoria_id: V4 });
+  checar("concluir com avaria sem foto e sem descricao: avaria_incompleta", msg(c4) === "avaria_incompleta", msg(c4));
+  const tres = [];
+  for (let i = 0; i < 3; i++) tres.push(await registrarFotoV(at.sb, V4, "avaria", { p_avaria_id: av4 }));
+  const quarta = await registrarFotoV(at.sb, V4, "avaria", { p_avaria_id: av4 });
+  checar("ate 3 fotos por avaria: a 4a e recusada (limite_fotos_avaria)", tres.every((f) => !f.r.error) && msg(quarta.r) === "limite_fotos_avaria", `${tres.map((f) => msg(f.r)).join(",")}/${msg(quarta.r)}`);
+  const apag = await Promise.all(tres.map((f) => at.sb.rpc("apagar_foto_vistoria", { p_id: f.id })));
+  checar("rascunho: atendente descarta as fotos pendentes (apagar_foto_vistoria = true)", apag.every((r) => r.data === true), apag.map(msg).join(","));
+  await at.sb.rpc("salvar_avaria", { p_id: av4, p_vistoria_id: V4, p_descricao: "Lanterna quebrada" });
+  const c5 = await at.sb.rpc("concluir_vistoria", { p_vistoria_id: V4 });
+  await at.sb.rpc("salvar_vistoria", { p_vistoria_id: V4, p_assinado_por_nome: "Fulano de Tal" });
+  const c6 = await at.sb.rpc("concluir_vistoria", { p_vistoria_id: V4 });
+  checar("concluir sem assinatura (nem com o nome guardado): assinatura_obrigatoria", msg(c5) === "assinatura_obrigatoria" && msg(c6) === "assinatura_obrigatoria", `${msg(c5)}/${msg(c6)}`);
+  const semNome = await assinarV(at.sb, V4, { nome: " ", subir: false });
+  const assGrande = await at.sb.rpc("registrar_assinatura_vistoria", { p_vistoria_id: V4, p_assinatura_id: uuid(), p_nome: "Fulano", p_largura: 320, p_altura: 96, p_tamanho_bytes: 600 * 1024 });
+  checar("assinatura sem nome: nome_assinatura_obrigatorio; PNG > 512 KB: assinatura_invalida", msg(semNome.r) === "nome_assinatura_obrigatorio" && msg(assGrande) === "assinatura_invalida", `${msg(semNome.r)}/${msg(assGrande)}`);
+  const assSemArq = await assinarV(at.sb, V4, { subir: false });
+  const c7 = await at.sb.rpc("concluir_vistoria", { p_vistoria_id: V4 });
+  checar("concluir com a assinatura registrada mas sem o PNG no bucket: assinatura_nao_enviada", !assSemArq.r.error && msg(c7) === "assinatura_nao_enviada", `${msg(assSemArq.r)}/${msg(c7)}`);
+  const c8 = await at.sb.rpc("concluir_vistoria", { p_vistoria_id: V4, p_sem_assinatura_motivo: "sumiu" });
+  checar("'sem assinatura' com motivo fora da lista: recusado", Boolean(c8.error), msg(c8));
+  const c9 = await at.sb.rpc("concluir_vistoria", { p_vistoria_id: V4, p_sem_assinatura_motivo: "motorista_ausente" });
+  const v4 = await vw(at.sb, V4);
+  checar("'sem assinatura' com motivo valido (motorista_ausente): conclui e descarta a assinatura registrada", /^[0-9a-f]{64}$/.test(c9.data ?? "") && v4?.status === "concluida" && v4.sem_assinatura_motivo === "motorista_ausente" && v4.assinatura_caminho === null && v4.assinado_por_nome === null, `${msg(c9)} ${JSON.stringify(v4 && { s: v4.status, m: v4.sem_assinatura_motivo, c: v4.assinatura_caminho })}`);
+  const hist4 = (await at.sb.from("vw_os_historico").select("evento, observacao").eq("os_id", os4)).data ?? [];
+  checar("historico: 'concluida sem assinatura (motorista ausente)'", hist4.some((h) => h.evento === "vistoria" && /sem assinatura \(motorista ausente\)/.test(h.observacao ?? "")));
+
+  // ---------------------------------------------------------------- idempotencia simultanea
+  console.log("\n== Fase 4: idempotencia com reenvio simultaneo (mesma chave) ==");
+  const os5 = await abrirOS();
+  const [s1, s2] = await Promise.all([donoA.sb.rpc("iniciar_vistoria", { p_os_id: os5 }).single(), at.sb.rpc("iniciar_vistoria", { p_os_id: os5 }).single()]);
+  const V5 = s1.data?.vistoria_id;
+  checar("iniciar_vistoria 2x ao mesmo tempo (dono e atendente): uma vistoria so", Boolean(V5) && V5 === s2.data?.vistoria_id && [s1.data?.ja_existia, s2.data?.ja_existia].filter(Boolean).length === 1, `${msg(s1)}/${msg(s2)}`);
+  const it5 = await itensDe(donoA.sb, V5);
+  const mm = await Promise.all([1, 2].map(() => donoA.sb.rpc("marcar_item_vistoria", { p_item_id: it5[0]?.id, p_situacao: "com_problema", p_observacao: "Trinca" })));
+  const rr = await Promise.all([1, 2].map(() => donoA.sb.rpc("marcar_itens_restantes_ok", { p_vistoria_id: V5 })));
+  checar("marcar item e 'resto ok' 2x ao mesmo tempo: sem erro, cada item marcado uma vez", mm.every((r) => !r.error) && rr.every((r) => !r.error) && rr[0].data + rr[1].data === it5.length - 1, `${mm.map(msg)}/${rr.map((r) => r.data)}`);
+  const av5 = uuid();
+  const aa = await Promise.all([1, 2].map(() => donoA.sb.rpc("salvar_avaria", { p_id: av5, p_vistoria_id: V5, p_lado: "frente", p_descricao: "Risco no para-choque" })));
+  const avs5 = (await donoA.sb.from("vistoria_avarias").select("id").eq("vistoria_id", V5)).data ?? [];
+  checar("salvar_avaria 2x ao mesmo tempo com o mesmo id: uma avaria", aa.every((r) => !r.error) && avs5.length === 1, `${aa.map(msg)}/${avs5.length}`);
+  const f5 = uuid();
+  const ff = await Promise.all([1, 2].map(() => registrarFotoV(donoA.sb, V5, "avaria", { p_id: f5, p_avaria_id: av5 })));
+  checar("registrar_foto_vistoria 2x ao mesmo tempo: mesmo caminho, um so registro (um ja_existia)", ff.every((f) => !f.r.error) && ff[0].caminho === ff[1].caminho && [ff[0].r.data?.ja_existia, ff[1].r.data?.ja_existia].filter(Boolean).length === 1, ff.map((f) => msg(f.r)).join("/"));
+  const ups = await Promise.all([subirV(donoA.sb, ff[0].caminho_miniatura), subirV(donoA.sb, ff[0].caminho_miniatura)]);
+  await subirV(donoA.sb, ff[0].caminho);
+  const cc = await Promise.all([1, 2].map(() => donoA.sb.rpc("confirmar_foto_vistoria", { p_id: f5 })));
+  const fotos5 = (await donoA.sb.from("vw_vistoria_fotos").select("id, enviada_em").eq("vistoria_id", V5)).data ?? [];
+  checar("upload 2x ao mesmo tempo (um entra, o outro 409) e confirmar 2x: uma foto enviada", ups.filter((u) => !u.error).length === 1 && cc.every((r) => !r.error) && fotos5.length === 1 && Boolean(fotos5[0].enviada_em), `${ups.map((u) => errSt(u.error))}/${cc.map(msg)}`);
+  const as5 = uuid();
+  const ra = await Promise.all([1, 2].map(() => donoA.sb.rpc("registrar_assinatura_vistoria", { p_vistoria_id: V5, p_assinatura_id: as5, p_nome: NOME_ASSINA, p_largura: 320, p_altura: 96, p_tamanho_bytes: PNG_ASSINATURA.length })));
+  await subirV(donoA.sb, ra[0].data, pngBlob(), "image/png");
+  checar("registrar_assinatura 2x ao mesmo tempo com o mesmo id: mesmo caminho", ra.every((r) => !r.error) && ra[0].data === ra[1].data, ra.map(msg).join("/"));
+  const co = await Promise.all([1, 2].map(() => donoA.sb.rpc("concluir_vistoria", { p_vistoria_id: V5 })));
+  checar("concluir 2x ao mesmo tempo: sem erro e o mesmo hash", co.every((r) => !r.error) && /^[0-9a-f]{64}$/.test(co[0].data ?? "") && co[0].data === co[1].data, co.map(msg).join("/"));
+  const cm5 = uuid();
+  const cp = await Promise.all([donoA.sb.rpc("complementar_vistoria", { p_id: cm5, p_vistoria_id: V5, p_texto: "Cliente voltou" }), at.sb.rpc("complementar_vistoria", { p_id: cm5, p_vistoria_id: V5, p_texto: "Cliente voltou" })]);
+  const comps5 = (await donoA.sb.from("vw_vistoria_complementos").select("id").eq("vistoria_id", V5)).data ?? [];
+  checar("complementar 2x ao mesmo tempo com o mesmo id: um complemento", cp.every((r) => !r.error) && comps5.length === 1, `${cp.map(msg)}/${comps5.length}`);
+  const hist5 = ((await donoA.sb.from("vw_os_historico").select("evento").eq("os_id", os5)).data ?? []).filter((h) => h.evento === "vistoria");
+  checar("historico sem eventos duplicados pelo reenvio (1 conclusao + 1 complemento)", hist5.length === 2, `${hist5.length}`);
+
+  // ---------------------------------------------------------------- imutabilidade
+  console.log("\n== Fase 4: depois de concluida ninguem altera nem apaga ==");
+  const pastaV1 = `${ofA}/${os1}/${V1.vid}`;
+  for (const [rot, sb] of [["dono", donoA.sb], ["atendente", at.sb], ["mecanico", mec.sb]]) {
+    const diretas = [
+      await sb.from("vistorias").update({ observacoes: "alterado" }).eq("id", V1.vid).select("id"),
+      await sb.from("vistorias").update({ status: "rascunho" }).eq("id", V1.vid).select("id"),
+      await sb.from("vistorias").delete().eq("id", V1.vid).select("id"),
+      await sb.from("vistoria_itens").update({ situacao: "ok" }).eq("vistoria_id", V1.vid).select("id"),
+      await sb.from("vistoria_itens").delete().eq("vistoria_id", V1.vid).select("id"),
+      await sb.from("vistoria_itens").insert({ oficina_id: ofA, vistoria_id: V1.vid, ordem: 99, descricao: "Invasão" }).select("id"),
+      await sb.from("vistoria_avarias").update({ descricao: "alterado" }).eq("id", V1.avId).select("id"),
+      await sb.from("vistoria_avarias").delete().eq("id", V1.avId).select("id"),
+      await sb.from("vistoria_fotos").update({ legenda: "alterado" }).eq("vistoria_id", V1.vid).select("id"),
+      await sb.from("vistoria_fotos").delete().eq("vistoria_id", V1.vid).select("id"),
+    ];
+    checar(`${rot}: update/delete/insert direto em vistorias, vistoria_itens, vistoria_avarias e vistoria_fotos recusados (${diretas.length})`, diretas.every(recusou), diretas.map((r) => r.error?.code ?? r.data?.length).join(","));
+    const rpcs = [
+      ["salvar_vistoria", { p_vistoria_id: V1.vid, p_observacoes: "alterado" }],
+      ["salvar_vistoria", { p_vistoria_id: V1.vid, p_km: 1 }],
+      ["marcar_item_vistoria", { p_item_id: V1.itens[0]?.id, p_situacao: "ok" }],
+      ["marcar_itens_restantes_ok", { p_vistoria_id: V1.vid }],
+      ["salvar_avaria", { p_id: V1.avId, p_vistoria_id: V1.vid, p_descricao: "alterado" }],
+      ["salvar_avaria", { p_id: uuid(), p_vistoria_id: V1.vid, p_lado: "frente", p_descricao: "nova" }],
+      ["remover_avaria", { p_id: V1.avId }],
+      ["registrar_foto_vistoria", { p_id: uuid(), p_vistoria_id: V1.vid, p_tipo: "painel", p_largura: 10, p_altura: 10, p_tamanho_bytes: 10, p_tamanho_miniatura_bytes: 10 }],
+      ["apagar_foto_vistoria", { p_id: V1.fAv.id }],
+      ["apagar_foto_vistoria", { p_id: V1.fPa.id }],
+      ["registrar_assinatura_vistoria", { p_vistoria_id: V1.vid, p_assinatura_id: uuid(), p_nome: "Outro", p_largura: 10, p_altura: 10, p_tamanho_bytes: 10 }],
+      ["registrar_assinatura_vistoria", { p_vistoria_id: V1.vid, p_assinatura_id: V1.as.id, p_nome: "Outro", p_largura: 10, p_altura: 10, p_tamanho_bytes: 10 }],
+    ];
+    const res = [];
+    for (const [f, a] of rpcs) res.push(await sb.rpc(f, a));
+    if (rot === "mecanico") res.forEach(guardaMec);
+    const errados = res.map((r, i) => [rpcs[i][0], msg(r)]).filter(([, m]) => m !== "vistoria_concluida");
+    checar(`${rot}: ${rpcs.length} chamadas de RPC de edicao recusadas com vistoria_concluida`, errados.length === 0, errados.map(([f, m]) => `${f}=${m}`).join(" "));
+    const B = sb.storage.from(BUCKET_VIST);
+    const st = [
+      ["sobrescrever foto", await B.upload(V1.fAv.caminho, arquivo(), { contentType: "image/jpeg", upsert: true })],
+      ["sobrescrever miniatura", await B.upload(V1.fAv.caminho_miniatura, arquivo(), { contentType: "image/jpeg", upsert: true })],
+      ["sobrescrever assinatura", await B.upload(V1.as.caminho, pngBlob(), { contentType: "image/png", upsert: true })],
+      ["subir de novo no caminho da foto", await B.upload(V1.fPa.caminho, arquivo(), { contentType: "image/jpeg" })],
+      ["mover foto", await B.move(V1.fPa.caminho, `${pastaV1}/${uuid()}.jpg`)],
+      ["mover assinatura", await B.move(V1.as.caminho, `${pastaV1}/assinatura_${uuid()}.png`)],
+      ["copiar foto", await B.copy(V1.fPa.caminho, `${pastaV1}/${uuid()}.jpg`)],
+      ["acrescentar foto", await B.upload(`${pastaV1}/${uuid()}.jpg`, arquivo(), { contentType: "image/jpeg" })],
+      ["acrescentar assinatura", await B.upload(`${pastaV1}/assinatura_${uuid()}.png`, pngBlob(), { contentType: "image/png" })],
+    ];
+    const rm = await B.remove([V1.fAv.caminho, V1.fAv.caminho_miniatura, V1.fPa.caminho, V1.as.caminho]);
+    const passaram = st.filter(([, r]) => !r.error).map(([n]) => n);
+    checar(`${rot}: Storage recusa sobrescrever, mover, copiar e acrescentar (${st.length}); remover apaga 0 arquivos`, passaram.length === 0 && (rm.data ?? []).length === 0, passaram.join(", ") || `${rm.data?.length} removidos ${errSt(rm.error)}`);
+  }
+  const [tF, tM, tP, tA] = await Promise.all([tamanhoV(donoA.sb, V1.fAv.caminho), tamanhoV(donoA.sb, V1.fAv.caminho_miniatura), tamanhoV(donoA.sb, V1.fPa.caminho), tamanhoV(donoA.sb, V1.as.caminho)]);
+  const lista1 = await donoA.sb.storage.from(BUCKET_VIST).list(pastaV1);
+  const v1d = await vw(donoA.sb, V1.vid);
+  const conf1v = await donoA.sb.rpc("conferir_vistoria", { p_vistoria_id: V1.vid });
+  checar(
+    "depois das tentativas: arquivos com o mesmo tamanho, pasta com 5 arquivos, dados iguais e conferir_vistoria = true",
+    tF === JPEG_1PX.length && tM === JPEG_1PX.length && tP === JPEG_1PX.length && tA === PNG_ASSINATURA.length && (lista1.data ?? []).length === 5 &&
+      v1d?.observacoes === "Para-brisa trincado no canto" && v1d?.qtd_avarias === 1 && v1d?.qtd_fotos === 2 && v1d?.km === 600500 && v1d?.hash_conteudo === V1.hash && conf1v.data === true,
+    `${tF}/${tM}/${tP}/${tA} lista ${lista1.data?.length} conferir ${msg(conf1v)}=${conf1v.data}`,
+  );
+  const conc2 = await donoA.sb.rpc("concluir_vistoria", { p_vistoria_id: V1.vid });
+  checar("concluir de novo devolve o mesmo hash (reenvio)", conc2.data === V1.hash, msg(conc2));
+
+  // ---------------------------------------------------------------- complemento
+  console.log("\n== Fase 4: complemento (so acrescenta) ==");
+  const cId = uuid();
+  const TEXTO_C = "Cliente avisou de um risco no para-choque";
+  const comp1 = await donoA.sb.rpc("complementar_vistoria", { p_id: cId, p_vistoria_id: V1.vid, p_texto: TEXTO_C });
+  const comp1b = await donoA.sb.rpc("complementar_vistoria", { p_id: cId, p_vistoria_id: V1.vid, p_texto: "Texto trocado" });
+  const fc = await fotoV(donoA.sb, V1.vid, "outro", { p_complemento_id: cId });
+  const fcAv = await registrarFotoV(donoA.sb, V1.vid, "avaria", { p_avaria_id: V1.avId, p_complemento_id: cId });
+  const comps = (await donoA.sb.from("vw_vistoria_complementos").select("*").eq("vistoria_id", V1.vid)).data ?? [];
+  checar(
+    "dono: complemento com texto e foto aceito; reenvio com o mesmo id nao duplica nem troca o texto; foto de 'avaria' no complemento = foto_invalida",
+    !comp1.error && !comp1b.error && fc.ok && comps.length === 1 && comps[0].texto === TEXTO_C && comps[0].qtd_fotos === 1 && comps[0].criado_por_nome === "Dono Teste A" && msg(fcAv.r) === "foto_invalida",
+    `${msg(comp1)}/${msg(comp1b)}/${fc.erro}/${comps.length}/${msg(fcAv.r)}`,
+  );
+  const updC = await donoA.sb.from("vistoria_complementos").update({ texto: "alterado" }).eq("id", cId).select("id");
+  const delC = await donoA.sb.from("vistoria_complementos").delete().eq("id", cId).select("id");
+  const apC = await donoA.sb.rpc("apagar_foto_vistoria", { p_id: fc.id });
+  const updFC = await donoA.sb.from("vistoria_fotos").update({ legenda: "x" }).eq("id", fc.id).select("id");
+  const stC = await subirV(donoA.sb, fc.caminho, arquivo(), "image/jpeg", true);
+  const rmC = await donoA.sb.storage.from(BUCKET_VIST).remove([fc.caminho, fc.caminho_miniatura]);
+  checar(
+    "complemento nao se edita nem apaga (tabela, apagar_foto_vistoria = vistoria_concluida, Storage)",
+    recusou(updC) && recusou(delC) && msg(apC) === "vistoria_concluida" && recusou(updFC) && Boolean(stC.error) && (rmC.data ?? []).length === 0 && (await tamanhoV(donoA.sb, fc.caminho)) === JPEG_1PX.length,
+    `${updC.error?.code}/${delC.error?.code}/${msg(apC)}/${errSt(stC.error)}/${rmC.data?.length}`,
+  );
+  const compM = guardaMec(await mec.sb.rpc("complementar_vistoria", { p_id: uuid(), p_vistoria_id: V1.vid, p_texto: "Mecânico viu vazamento" }));
+  const compA = await at.sb.rpc("complementar_vistoria", { p_id: uuid(), p_vistoria_id: V1.vid, p_texto: "Atendente: foto extra" });
+  checar("mecanico (OS dele, aberta) e atendente tambem complementam", !compM.error && !compA.error, `${msg(compM)}/${msg(compA)}`);
+  const conf1c = await donoA.sb.rpc("conferir_vistoria", { p_vistoria_id: V1.vid });
+  checar("complemento fica fora do hash: conferir_vistoria continua true", conf1c.data === true, msg(conf1c));
+
+  // ---------------------------------------------------------------- anular
+  console.log("\n== Fase 4: anular (so o dono) ==");
+  const anAt = await at.sb.rpc("anular_vistoria", { p_vistoria_id: V2.vid, p_motivo: "Feita na OS errada" });
+  const anMec = await mec.sb.rpc("anular_vistoria", { p_vistoria_id: V3.vid, p_motivo: "Feita na OS errada" });
+  const anSem = await donoA.sb.rpc("anular_vistoria", { p_vistoria_id: V2.vid, p_motivo: " " });
+  checar("atendente e mecanico nao anulam (acesso_negado); dono sem motivo = motivo_obrigatorio", msg(anAt) === "acesso_negado" && msg(anMec) === "acesso_negado" && msg(anSem) === "motivo_obrigatorio", `${msg(anAt)}/${msg(anMec)}/${msg(anSem)}`);
+  const MOTIVO_AN = "Feita na OS errada: era outro caminhão";
+  const an1 = await donoA.sb.rpc("anular_vistoria", { p_vistoria_id: V2.vid, p_motivo: MOTIVO_AN });
+  const an2 = await donoA.sb.rpc("anular_vistoria", { p_vistoria_id: V2.vid, p_motivo: "outro motivo" });
+  const v2a = await vw(donoA.sb, V2.vid);
+  const os2a = (await donoA.sb.from("vw_os").select("vistoria_entrada_id, vistoria_entrada_status").eq("id", os2).single()).data;
+  checar("dono anula com motivo (reenvio nao troca o motivo); a OS volta a 'Sem vistoria'", !an1.error && !an2.error && v2a?.status === "anulada" && v2a?.motivo_anulacao === MOTIVO_AN && v2a?.anulada_por_nome === "Dono Teste A" && os2a?.vistoria_entrada_status === null, `${msg(an1)}/${msg(an2)} ${JSON.stringify(os2a)}`);
+  const svAn = await at.sb.rpc("salvar_vistoria", { p_vistoria_id: V2.vid, p_observacoes: "x" });
+  const cpAn = await donoA.sb.rpc("complementar_vistoria", { p_id: uuid(), p_vistoria_id: V2.vid, p_texto: "x" });
+  const updAn = await donoA.sb.from("vistorias").update({ motivo_anulacao: "x" }).eq("id", V2.vid).select("id");
+  const rmAn = await donoA.sb.storage.from(BUCKET_VIST).remove([V2.fAv.caminho, V2.as.caminho]);
+  checar("anulada nao muda nem recebe complemento (vistoria_anulada) e os arquivos ficam", msg(svAn) === "vistoria_anulada" && msg(cpAn) === "vistoria_anulada" && recusou(updAn) && (rmAn.data ?? []).length === 0 && (await tamanhoV(donoA.sb, V2.as.caminho)) === PNG_ASSINATURA.length, `${msg(svAn)}/${msg(cpAn)}/${rmAn.data?.length}`);
+  const novaV2 = await at.sb.rpc("iniciar_vistoria", { p_os_id: os2 }).single();
+  checar("depois de anulada, a OS aceita nova vistoria de entrada (outro id, rascunho)", Boolean(novaV2.data?.vistoria_id) && novaV2.data.vistoria_id !== V2.vid && novaV2.data.ja_existia === false && novaV2.data.status === "rascunho", msg(novaV2));
+  const histAn = (await donoA.sb.from("vw_os_historico").select("evento, observacao").eq("os_id", os2)).data ?? [];
+  checar("historico do dono: 'anulada' com o motivo", histAn.some((h) => h.evento === "vistoria" && h.observacao?.includes("anulada") && h.observacao?.includes("outro caminhão")));
+
+  // ---------------------------------------------------------------- mecanico conforme 17.6
+  console.log("\n== Fase 4: mecanico (faz so na OS dele, ve a das OS que ve) ==");
+  const os6 = await abrirOS({ p_mecanico_id: idMec });
+  const iR = await donoA.sb.rpc("iniciar_vistoria", { p_os_id: os6 }).single();
+  const VR = iR.data?.vistoria_id; // fica em rascunho (PDF 409, mecanico 2)
+  const fRasc = await registrarFotoV(donoA.sb, VR, "painel"); // pendente do dono: para os uploads alheios
+  checar("rascunho do dono na OS do mecanico (fica em rascunho)", Boolean(VR) && !fRasc.r.error, `${msg(iR)}/${msg(fRasc.r)}`);
+  const mVe = guardaMec(await mec.sb.from("vw_vistorias").select("*").eq("id", V1.vid).maybeSingle());
+  const mIt = guardaMec(await mec.sb.from("vistoria_itens").select("*").eq("vistoria_id", V1.vid));
+  const mAv = guardaMec(await mec.sb.from("vistoria_avarias").select("*").eq("vistoria_id", V1.vid));
+  const mFt = guardaMec(await mec.sb.from("vw_vistoria_fotos").select("*").eq("vistoria_id", V1.vid));
+  const mCp = guardaMec(await mec.sb.from("vw_vistoria_complementos").select("*").eq("vistoria_id", V1.vid));
+  const [mBf, mBa] = await Promise.all([tamanhoV(mec.sb, V1.fAv.caminho), tamanhoV(mec.sb, V1.as.caminho)]);
+  const mUrl = await mec.sb.storage.from(BUCKET_VIST).createSignedUrls([V1.fAv.caminho_miniatura, V1.as.caminho], 900);
+  checar(
+    "mecanico ve a vistoria que o dono fez na OS dele (vistoria, itens, avarias, fotos, complementos, arquivos, URL assinada)",
+    Boolean(mVe.data) && (mIt.data ?? []).length === 17 && (mAv.data ?? []).length === 1 && (mFt.data ?? []).length >= 3 && (mCp.data ?? []).length === 3 && mBf > 0 && mBa > 0 && !mUrl.error && (mUrl.data ?? []).every((u) => Boolean(u.signedUrl)),
+    `${(mFt.data ?? []).length} fotos ${(mCp.data ?? []).length} compl. ${mBf}/${mBa} ${errSt(mUrl.error)}`,
+  );
+  checar("mecanico: pode_editar=false na concluida, pode_complementar=true, pode_anular=false", mVe.data?.pode_editar === false && mVe.data?.pode_complementar === true && mVe.data?.pode_anular === false, JSON.stringify(mVe.data && [mVe.data.pode_editar, mVe.data.pode_complementar, mVe.data.pode_anular]));
+  const mNaoVe = await mec.sb.from("vw_vistorias").select("id").in("id", [V2.vid, novaV2.data?.vistoria_id, V4]);
+  const mNaoBaixa = await tamanhoV(mec.sb, V2.fAv.caminho);
+  const mIni2 = await mec.sb.rpc("iniciar_vistoria", { p_os_id: os4 });
+  const mSalva = await mec.sb.rpc("salvar_vistoria", { p_vistoria_id: novaV2.data?.vistoria_id, p_observacoes: "x" });
+  const mComp = await mec.sb.rpc("complementar_vistoria", { p_id: uuid(), p_vistoria_id: V4, p_texto: "x" });
+  checar(
+    "mecanico em OS que nao e dele: nao ve vistoria nem arquivo, nao inicia, nao edita e nao complementa",
+    (mNaoVe.data ?? []).length === 0 && mNaoBaixa === 0 && ["os_nao_encontrada", "acesso_negado"].includes(msg(mIni2)) && msg(mSalva) === "vistoria_nao_encontrada" && msg(mComp) === "vistoria_nao_encontrada",
+    `${mNaoVe.data?.length}/${mNaoBaixa}/${msg(mIni2)}/${msg(mSalva)}/${msg(mComp)}`,
+  );
+  const mSalvaR = guardaMec(await mec.sb.rpc("salvar_vistoria", { p_vistoria_id: VR, p_combustivel: "cheio" }));
+  checar("mecanico continua a vistoria que o dono comecou na OS dele", !mSalvaR.error, msg(mSalvaR));
+  // mecanico 2 (sem ve_todas_os): nada da OS do mecanico 1
+  const m2Ve = await mec2.sb.from("vw_vistorias").select("id").in("id", [V1.vid, VR, V3.vid]);
+  const m2Bx = await tamanhoV(mec2.sb, V1.as.caminho);
+  const m2Url = await mec2.sb.storage.from(BUCKET_VIST).createSignedUrl(V1.fAv.caminho, 60);
+  const m2Ini = await mec2.sb.rpc("iniciar_vistoria", { p_os_id: os6 });
+  const m2Sv = await mec2.sb.rpc("salvar_vistoria", { p_vistoria_id: VR, p_observacoes: "x" });
+  const m2Up = await subirV(mec2.sb, fRasc.caminho);
+  checar(
+    "mecanico 2 (OS de outro): nao ve, nao baixa, nao assina URL, nao inicia, nao edita, nao sobe arquivo",
+    (m2Ve.data ?? []).length === 0 && m2Bx === 0 && Boolean(m2Url.error) && ["os_nao_encontrada", "acesso_negado"].includes(msg(m2Ini)) && msg(m2Sv) === "vistoria_nao_encontrada" && Boolean(m2Up.error),
+    `${m2Ve.data?.length}/${m2Bx}/${errSt(m2Url.error)}/${msg(m2Ini)}/${msg(m2Sv)}/${errSt(m2Up.error)}`,
+  );
+  const vt = await donoA.sb.rpc("atualizar_membro", { p_perfil_id: idMec2, p_ve_todas_os: true });
+  const vtVe = await mec2.sb.from("vw_vistorias").select("id, pode_editar, pode_complementar").eq("id", V1.vid).maybeSingle();
+  const vtBx = await tamanhoV(mec2.sb, V1.fAv.caminho);
+  const vtIni = await mec2.sb.rpc("iniciar_vistoria", { p_os_id: os6 });
+  const vtSv = await mec2.sb.rpc("salvar_vistoria", { p_vistoria_id: VR, p_observacoes: "x" });
+  const vtCp = await mec2.sb.rpc("complementar_vistoria", { p_id: uuid(), p_vistoria_id: V1.vid, p_texto: "x" });
+  checar(
+    "mecanico 2 com ve_todas_os: ve a vistoria e baixa a foto, mas nao inicia, nao edita e nao complementa (acesso_negado)",
+    !vt.error && Boolean(vtVe.data) && vtVe.data.pode_complementar === false && vtBx > 0 && msg(vtIni) === "acesso_negado" && msg(vtSv) === "acesso_negado" && msg(vtCp) === "acesso_negado",
+    `${msg(vt)}/${Boolean(vtVe.data)}/${vtBx}/${msg(vtIni)}/${msg(vtSv)}/${msg(vtCp)}`,
+  );
+  await donoA.sb.rpc("atualizar_membro", { p_perfil_id: idMec2, p_ve_todas_os: false });
+  const cpRasc = await donoA.sb.rpc("complementar_vistoria", { p_id: uuid(), p_vistoria_id: VR, p_texto: "x" });
+  checar("complementar vistoria em rascunho: vistoria_nao_concluida", msg(cpRasc) === "vistoria_nao_concluida", msg(cpRasc));
+  guardaMec(await mec.sb.from("vw_os").select("*").in("id", [os1, os3, os6]));
+  const vazados = valoresVazados(respostasMec).filter((c) => !/\.itens_total$/.test(c)); // itens_total = quantidade de itens do checklist
+  checar(`mecanico: nenhuma das ${respostasMec.length} respostas da Fase 4 traz preco, custo, total ou pagamento`, vazados.length === 0, vazados.slice(0, 5).join(", "));
+
+  // ---------------------------------------------------------------- oficina B e anon
+  console.log("\n== Fase 4: oficina B e anon nao alcancam a vistoria da A ==");
+  for (const t of ["vistorias", "vistoria_itens", "vistoria_avarias", "vistoria_fotos", "vistoria_complementos", "vw_vistorias", "vw_vistoria_fotos", "vw_vistoria_complementos", "checklist_modelos", "checklist_modelo_itens"]) {
+    const r = await donoB.sb.from(t).select("*");
+    const daA = (r.data ?? []).filter((x) => x.oficina_id === ofA);
+    checar(`dono B: nao ve ${t} da A`, !r.error && daA.length === 0, r.error?.code ?? `${daA.length} da A`);
+  }
+  const bId = await donoB.sb.from("vw_vistorias").select("id").eq("id", V1.vid);
+  const bId2 = await donoB.sb.from("vistoria_itens").select("id").eq("vistoria_id", V1.vid);
+  checar("dono B: nem com o id da vistoria", (bId.data ?? []).length === 0 && (bId2.data ?? []).length === 0);
+  const BB = donoB.sb.storage.from(BUCKET_VIST);
+  const bBx = await Promise.all([V1.fAv.caminho, V1.fAv.caminho_miniatura, V1.fPa.caminho, V1.as.caminho, fc.caminho].map((c) => tamanhoV(donoB.sb, c)));
+  const bUrl = await BB.createSignedUrl(V1.as.caminho, 60);
+  const bUrls = await BB.createSignedUrls([V1.fAv.caminho, V1.as.caminho], 60);
+  const bLs = await BB.list(pastaV1);
+  const bLs2 = await BB.list(ofA);
+  checar("dono B: nao baixa foto, miniatura, painel, assinatura nem foto do complemento com o caminho na mao", bBx.every((n) => n === 0), bBx.join(","));
+  checar("dono B: nao gera URL assinada (uma ou varias) e nao lista as pastas da A", Boolean(bUrl.error) && (Boolean(bUrls.error) || (bUrls.data ?? []).every((u) => !u.signedUrl)) && (bLs.data ?? []).length === 0 && (bLs2.data ?? []).length === 0, `${errSt(bUrl.error)} | ${errSt(bUrls.error)} | ${bLs.data?.length}/${bLs2.data?.length}`);
+  const bSobe = await subirV(donoB.sb, fRasc.caminho);
+  const bSobe2 = await subirV(donoB.sb, `${pastaV1}/${uuid()}.jpg`);
+  const bRm = await BB.remove([V1.fAv.caminho, V1.as.caminho, fRasc.caminho]);
+  checar("dono B: nao sobe (registro pendente da A nem caminho inventado) e nao apaga", Boolean(bSobe.error) && Boolean(bSobe2.error) && (bRm.data ?? []).length === 0 && (await tamanhoV(donoA.sb, V1.as.caminho)) === PNG_ASSINATURA.length, `${errSt(bSobe.error)} | ${bRm.data?.length}`);
+  const bRpcs = [
+    ["iniciar_vistoria", { p_os_id: os1 }, "os_nao_encontrada"],
+    ["salvar_vistoria", { p_vistoria_id: VR, p_observacoes: "invasao" }, "vistoria_nao_encontrada"],
+    ["marcar_item_vistoria", { p_item_id: V1.itens[0]?.id, p_situacao: "ok" }, "item_nao_encontrado"],
+    ["marcar_itens_restantes_ok", { p_vistoria_id: VR }, "vistoria_nao_encontrada"],
+    ["salvar_avaria", { p_id: uuid(), p_vistoria_id: VR, p_lado: "frente" }, "vistoria_nao_encontrada"],
+    ["registrar_foto_vistoria", { p_id: uuid(), p_vistoria_id: VR, p_tipo: "painel", p_largura: 1, p_altura: 1, p_tamanho_bytes: 1, p_tamanho_miniatura_bytes: 1 }, "vistoria_nao_encontrada"],
+    ["confirmar_foto_vistoria", { p_id: fRasc.id }, "foto_nao_encontrada"],
+    ["registrar_assinatura_vistoria", { p_vistoria_id: VR, p_assinatura_id: uuid(), p_nome: "Invasor", p_largura: 1, p_altura: 1, p_tamanho_bytes: 1 }, "vistoria_nao_encontrada"],
+    ["concluir_vistoria", { p_vistoria_id: VR }, "vistoria_nao_encontrada"],
+    ["complementar_vistoria", { p_id: uuid(), p_vistoria_id: V1.vid, p_texto: "invasao" }, "vistoria_nao_encontrada"],
+    ["anular_vistoria", { p_vistoria_id: V1.vid, p_motivo: "invasao" }, "vistoria_nao_encontrada"],
+    ["conferir_vistoria", { p_vistoria_id: V1.vid }, "vistoria_nao_encontrada"],
+  ];
+  const bRes = [];
+  for (const [f, a] of bRpcs) bRes.push(await donoB.sb.rpc(f, a));
+  const bRemAv = await donoB.sb.rpc("remover_avaria", { p_id: V1.avId });
+  const bApF = await donoB.sb.rpc("apagar_foto_vistoria", { p_id: V1.fPa.id });
+  const bErr = bRes.map((r, i) => [bRpcs[i][0], msg(r), bRpcs[i][2]]).filter(([, m, e]) => m !== e);
+  checar(`dono B: ${bRpcs.length + 2} RPCs da vistoria nao alcancam a A (remover_avaria/apagar_foto = false)`, bErr.length === 0 && bRemAv.data === false && bApF.data === false, bErr.map(([f, m]) => `${f}=${m}`).join(" ") + ` ${bRemAv.data}/${bApF.data}`);
+  const v1b = await vw(donoA.sb, V1.vid);
+  const vrB = await vw(donoA.sb, VR);
+  checar("dono A: vistorias intactas depois das tentativas da B", v1b?.status === "concluida" && v1b.qtd_avarias === 1 && vrB?.status === "rascunho" && vrB.observacoes === null && vrB.combustivel === "cheio");
+
+  const anon = novoCliente();
+  const anTabs = [];
+  for (const t of ["vistorias", "vistoria_itens", "vistoria_avarias", "vistoria_fotos", "vistoria_complementos", "vw_vistorias", "vw_vistoria_fotos", "vw_vistoria_complementos", "checklist_modelos", "checklist_modelo_itens"]) {
+    const r = await anon.from(t).select("*").limit(1);
+    if (!(Boolean(r.error) || (r.data ?? []).length === 0)) anTabs.push(t);
+  }
+  checar("anon: nao le nenhuma tabela/view da vistoria nem o checklist", anTabs.length === 0, anTabs.join(","));
+  const anR = await Promise.all([
+    anon.rpc("iniciar_vistoria", { p_os_id: os1 }),
+    anon.rpc("concluir_vistoria", { p_vistoria_id: VR }),
+    anon.rpc("conferir_vistoria", { p_vistoria_id: V1.vid }),
+    anon.rpc("complementar_vistoria", { p_id: uuid(), p_vistoria_id: V1.vid, p_texto: "x" }),
+  ]);
+  const anBx = await tamanhoV(anon, V1.as.caminho);
+  const anUrl = await anon.storage.from(BUCKET_VIST).createSignedUrl(V1.fAv.caminho, 60);
+  const anLs = await anon.storage.from(BUCKET_VIST).list(pastaV1);
+  const anUp = await subirV(anon, fRasc.caminho);
+  const pub = await fetch(`${URL_SB}/storage/v1/object/public/${BUCKET_VIST}/${V1.as.caminho}`);
+  checar(
+    "anon: nao chama as RPCs, nao baixa, nao assina URL, nao lista, nao sobe; URL publica nao abre (bucket privado)",
+    anR.every((r) => Boolean(r.error)) && anBx === 0 && Boolean(anUrl.error) && (anLs.data ?? []).length === 0 && Boolean(anUp.error) && pub.status !== 200,
+    `${anR.map((r) => r.error?.code).join(",")}/${anBx}/${errSt(anUrl.error)}/${anLs.data?.length}/${errSt(anUp.error)}/${pub.status}`,
+  );
+
+  // ---------------------------------------------------------------- obrigatoriedade
+  console.log("\n== Fase 4: vistoria obrigatoria (bloqueia pronta e entregue) ==");
+  const os7 = await abrirOS({ p_mecanico_id: idMec });
+  const os8 = await abrirOS();
+  const os9 = await abrirOS();
+  const ofOff = (await donoA.sb.from("oficinas").select("vistoria_obrigatoria").eq("id", ofA).single()).data;
+  checar("oficina nova comeca com a vistoria opcional", ofOff?.vistoria_obrigatoria === false, JSON.stringify(ofOff));
+  const pr8 = await donoA.sb.rpc("marcar_pronta", { p_os_id: os8 }); // pronta antes de ligar a chave
+  const atLiga = await at.sb.from("oficinas").update({ vistoria_obrigatoria: true }).eq("id", ofA).select("id");
+  const liga = await donoA.sb.from("oficinas").update({ vistoria_obrigatoria: true }).eq("id", ofA).select("id, vistoria_obrigatoria");
+  checar("atendente nao liga a chave; o dono liga", recusou(atLiga) && liga.data?.[0]?.vistoria_obrigatoria === true && !pr8.error, `${atLiga.error?.code ?? atLiga.data?.length}/${msg(liga)}/${msg(pr8)}`);
+  const b1 = guardaMec(await mec.sb.rpc("marcar_pronta", { p_os_id: os7, p_causa: "Teste", p_solucao: "Teste" }));
+  const b2 = await donoA.sb.rpc("mudar_status_os", { p_os_id: os7, p_de: "em_andamento", p_para: "pronta" });
+  const b3 = await donoA.sb.rpc("entregar_os", { p_os_id: os8, p_causa: "Teste", p_solucao: "Teste", p_forma_pagamento: "pix", p_pago: true });
+  checar("ligada: sem vistoria, mecanico e dono nao marcam pronta e o dono nao entrega (vistoria_obrigatoria)", [b1, b2, b3].every((r) => msg(r) === "vistoria_obrigatoria"), [b1, b2, b3].map(msg).join("/"));
+  const livreItem = guardaMec(await mec.sb.rpc("adicionar_item_os", { p_chave_idempotencia: uuid(), p_os_id: os7, p_tipo: "servico", p_descricao: "Regulagem" }));
+  const livreFoto = await registrarFoto(mec.sb, os7);
+  const livreAbre = await abrirOS();
+  checar("ligada: abrir OS, lancar item e registrar foto da OS continuam livres", !livreItem.error && !livreFoto.r.error && Boolean(livreAbre), `${msg(livreItem)}/${msg(livreFoto.r)}`);
+  await mec.sb.rpc("remover_item_mecanico", { p_item_id: livreItem.data });
+  await mec.sb.rpc("apagar_foto", { p_id: livreFoto.id });
+  const r7 = await mec.sb.rpc("iniciar_vistoria", { p_os_id: os7 }).single();
+  const b4 = await mec.sb.rpc("marcar_pronta", { p_os_id: os7 });
+  checar("vistoria em rascunho nao basta (vistoria_obrigatoria)", !r7.error && msg(b4) === "vistoria_obrigatoria", `${msg(r7)}/${msg(b4)}`);
+  const vr7 = await vistoriaRapida(mec.sb, os7, "recusou");
+  const ok7 = await mec.sb.rpc("marcar_pronta", { p_os_id: os7, p_causa: "Teste", p_solucao: "Teste" });
+  checar("mecanico conclui a vistoria ('sem assinatura: recusou') e entao marca pronta", vr7.ok && !ok7.error, `${vr7.erro}/${msg(ok7)}`);
+  const vr8 = await vistoriaRapida(at.sb, os8, "motorista_ausente");
+  const ok8 = await donoA.sb.rpc("entregar_os", { p_os_id: os8, p_causa: "Teste", p_solucao: "Teste", p_forma_pagamento: "pix", p_pago: true });
+  checar("OS ja pronta: com a vistoria concluida (atendente), o dono entrega", vr8.ok && !ok8.error, `${vr8.erro}/${msg(ok8)}`);
+  const desliga = await donoA.sb.from("oficinas").update({ vistoria_obrigatoria: false }).eq("id", ofA).select("id, vistoria_obrigatoria");
+  const ok9a = await donoA.sb.rpc("marcar_pronta", { p_os_id: os9 });
+  const ok9b = await donoA.sb.rpc("entregar_os", { p_os_id: os9, p_causa: "Teste", p_solucao: "Teste", p_forma_pagamento: "dinheiro", p_pago: true });
+  const vos9 = (await donoA.sb.from("vw_os").select("status, vistoria_entrada_status").eq("id", os9).single()).data;
+  checar("desligada: OS sem vistoria fica pronta e e entregue; vw_os sem vistoria (NULL)", desliga.data?.[0]?.vistoria_obrigatoria === false && !ok9a.error && !ok9b.error && vos9?.status === "entregue" && vos9?.vistoria_entrada_status === null, `${msg(desliga)}/${msg(ok9a)}/${msg(ok9b)}`);
+  const ent9 = await donoA.sb.rpc("iniciar_vistoria", { p_os_id: os9 });
+  checar("OS entregue nao inicia vistoria (os_fechada)", msg(ent9) === "os_fechada", msg(ent9));
+
+  // ---------------------------------------------------------------- APP_URL: PDF e paginas
+  if (APP_URL) {
+    console.log(`\n== Fase 4: PDF e paginas (${APP_URL}) ==`);
+    const [ckDono, ckAt, ckMec, ckMec2, ckB] = await Promise.all([donoA, at, mec, mec2, donoB].map((u) => cookiesDaSessao(u.session)));
+    const pdf = async (id, cookie) => {
+      const r = await fetch(`${APP_URL}/api/vistorias/${id}/pdf`, { headers: cookie ? { cookie } : {}, redirect: "manual" });
+      const buf = Buffer.from(await r.arrayBuffer());
+      return { status: r.status, tipo: r.headers.get("content-type") ?? "", cache: r.headers.get("cache-control") ?? "", inicio: buf.subarray(0, 5).toString("latin1"), bytes: buf.length };
+    };
+    const pdfOk = (p) => p.status === 200 && p.tipo.startsWith("application/pdf") && p.inicio === "%PDF-" && /no-store/.test(p.cache) && p.bytes > 1000;
+    const det = (p) => `${p.status} ${p.tipo} ${p.inicio} ${p.cache} ${p.bytes} B`;
+    for (const [rot, ck] of [["dono", ckDono], ["atendente", ckAt], ["mecanico (OS dele)", ckMec]]) {
+      const p = await pdf(V1.vid, ck);
+      checar(`PDF ${rot}: 200 application/pdf, comeca com %PDF, Cache-Control no-store`, pdfOk(p), det(p));
+    }
+    const pSemAss = await pdf(V4, ckAt);
+    const pAnul = await pdf(V2.vid, ckDono);
+    checar("PDF da vistoria 'sem assinatura' e da anulada tambem saem (200)", pdfOk(pSemAss) && pdfOk(pAnul), `${det(pSemAss)} | ${det(pAnul)}`);
+    const pB = await pdf(V1.vid, ckB);
+    const pM2 = await pdf(V1.vid, ckMec2);
+    const pAnon = await pdf(V1.vid, null);
+    const pRasc = await pdf(VR, ckDono);
+    const pLixo = await pdf("nao-e-uuid", ckDono);
+    checar("PDF: oficina B = 404, mecanico de outra OS = 404", pB.status === 404 && pM2.status === 404, `${det(pB)} | ${det(pM2)}`);
+    checar("PDF: sem login = 401", pAnon.status === 401, det(pAnon));
+    checar("PDF: vistoria em rascunho = 409; id invalido = 404", pRasc.status === 409 && pLixo.status === 404, `${det(pRasc)} | ${det(pLixo)}`);
+    checar("PDF: respostas de erro tambem sem cache", [pB, pAnon, pRasc].every((p) => /no-store/.test(p.cache)), [pB, pAnon, pRasc].map((p) => p.cache).join(" | "));
+
+    const os10 = await abrirOS({ p_mecanico_id: idMec });
+    const dSem = await pagina(`/os/${os10}`, ckDono);
+    const dFeita = await pagina(`/os/${os1}`, ckDono);
+    checar("app dono: detalhe da OS sem vistoria mostra 'Sem vistoria'", dSem.status === 200 && dSem.html.includes("Sem vistoria"), `status ${dSem.status}`);
+    checar("app dono: detalhe da OS com vistoria concluida mostra 'Vistoria feita'", dFeita.status === 200 && dFeita.html.includes("Vistoria feita"), `status ${dFeita.status}`);
+    const lDono = await pagina(`/os/${os1}/vistoria`, ckDono);
+    checar("app dono: leitura da vistoria concluida abre (assinatura e 'Complementar')", lDono.status === 200 && lDono.html.includes(NOME_ASSINA) && lDono.html.includes("Complementar"), `status ${lDono.status}`);
+    for (const [rot, cam, marca] of [
+      ["detalhe da OS com vistoria", `/os/${os1}`, "Vistoria feita"],
+      ["detalhe da OS sem vistoria", `/os/${os10}`, "Sem vistoria"],
+      ["leitura da vistoria feita pelo dono", `/os/${os1}/vistoria`, NOME_ASSINA],
+      ["leitura da vistoria dele", `/os/${os3}/vistoria`, NOME_ASSINA],
+      ["vistoria em rascunho (5 passos)", `/os/${os6}/vistoria`, "ABC1D23"],
+      ["/minhas-os", "/minhas-os?entregues=1", "ABC1D23"],
+    ]) {
+      const pg = await pagina(cam, ckMec);
+      checar(`app mecanico: ${rot} sem 'R$' nem 'centavos' no HTML/payload`, pg.status === 200 && pg.html.includes(marca) && !pg.html.includes("R$") && !/centavos/i.test(pg.html), `status ${pg.status}${pg.local ? ` -> ${pg.local}` : ""}${pg.status === 200 && !pg.html.includes(marca) ? ` sem '${marca}'` : ""}`);
+    }
   }
 }
 
