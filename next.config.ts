@@ -3,6 +3,10 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   cacheComponents: true,
   partialPrefetching: true,
+  // Fontes do PDF da vistoria (lidas com fs na rota; F4-B6).
+  outputFileTracingIncludes: {
+    "/api/vistorias/*/pdf": ["./src/assets/fonts/*.ttf"],
+  },
   turbopack: {
     rules: {
       "*.css": {

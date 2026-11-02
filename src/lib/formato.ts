@@ -364,3 +364,12 @@ export const LIMITE_FOTOS_VISTORIA = 30;
 export const LIMITE_FOTOS_AVARIA = 3;
 /** Assinatura PNG: no maximo 512 KB (CHECK em `vistorias.assinatura_tamanho_bytes`). */
 export const LIMITE_BYTES_ASSINATURA = 512 * 1024;
+
+/**
+ * Código de conferência da vistoria (12 primeiros caracteres do hash SHA-256 da conclusão,
+ * ARQUITETURA 12.4), em grupos de 4 para ler em voz alta: "3F9A-1C77-B2E0". Igual na tela e no PDF.
+ */
+export function formatarCodigoConferencia(hash: string | null | undefined): string {
+  const h = (hash ?? "").replace(/[^0-9a-f]/gi, "").slice(0, 12).toUpperCase();
+  return (h.match(/.{1,4}/g) ?? []).join("-");
+}

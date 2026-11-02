@@ -14,10 +14,13 @@ import { CaixaMensagem } from "@/components/ui/formulario";
 import { CartaoAvaria } from "@/components/vistoria/cartao-avaria";
 import { LinhaChecklistLeitura, ordenarParaLeitura } from "@/components/vistoria/linha-checklist";
 import { CombustivelLeitura } from "@/components/vistoria/marcador-combustivel";
+import { BotaoBaixarPdf, BotaoEnviarPdf, MensagensPdf, usePdfVistoria } from "@/components/vistoria/pdf-vistoria";
 import { BlocoVistoriaConcluida, type AssinaturaLeitura, type DadosComplemento } from "@/components/vistoria/vistoria-concluida";
 import {
+  formatarCodigoConferencia,
   formatarNumero,
   formatarNumeroOS,
+  normalizarPlaca,
   ROTULO_LADO_AVARIA,
   type LadoAvaria,
   type NivelCombustivel,
@@ -89,6 +92,12 @@ export function LeituraVistoria({ dados, usuarioId, ehMecanico }: { dados: Dados
   const [recado, setRecado] = useState<string | null>(null);
   const [tela, setTela] = useState({ aberta: false, indice: 0 });
   const [grandes, setGrandes] = useState<Record<string, { url: string; vence: number }>>({});
+  // PDF (F4-B6): o guardado na memória deixa de valer quando entra complemento.
+  const pdf = usePdfVistoria({
+    vistoriaId: dados.id,
+    chave: String(dados.complementos.length),
+    nomeReserva: `vistoria-OS${dados.numeroOS}-${normalizarPlaca(dados.placa)}${dados.anulada ? "-ANULADA" : ""}.pdf`,
+  });
   const grandesRef = useRef(grandes);
   useEffect(() => {
     grandesRef.current = grandes;
@@ -177,6 +186,10 @@ export function LeituraVistoria({ dados, usuarioId, ehMecanico }: { dados: Dados
     fotos: c.fotos.map((f, i) => ({ id: f.id, src: f.src, alt: `Foto ${i + 1} acrescentada. Ver foto` })),
   }));
   const podeComplementar = dados.podeComplementar && !dados.anulada;
+  // Barra (DESIGN §12.12): balcão = "Enviar ao cliente (PDF)" + "Complementar"; mecânico = só
+  // "Complementar" (na OS dele; o PDF ele baixa pela página). Anulada: sem barra.
+  const enviarNaBarra = !ehMecanico && !dados.anulada;
+  const temBarra = enviarNaBarra || podeComplementar;
   const titulo = `${formatarNumeroOS(dados.numeroOS)} (${dados.placa})`;
 
   return (
@@ -312,10 +325,15 @@ export function LeituraVistoria({ dados, usuarioId, ehMecanico }: { dados: Dados
 
         {dados.hash && (
           <p className="font-mono text-xs text-texto-suave" data-teste="hash-vistoria">
-            Código de conferência: {dados.hash.slice(0, 12)}
+            Código de conferência: {formatarCodigoConferencia(dados.hash)}
           </p>
         )}
       </BlocoVistoriaConcluida>
+
+      <section aria-label="PDF da vistoria" className="flex flex-col gap-2">
+        <BotaoBaixarPdf pdf={pdf} />
+        {!temBarra && <MensagensPdf pdf={pdf} />}
+      </section>
 
       {pendentes.length > 0 && (
         <div className="flex flex-col gap-2" data-teste="complemento-pendente">
@@ -353,15 +371,32 @@ export function LeituraVistoria({ dados, usuarioId, ehMecanico }: { dados: Dados
         </div>
       )}
 
-      {podeComplementar && (
+      {temBarra && (
         <BarraAcoesOS
+          acima={<MensagensPdf pdf={pdf} />}
           primario={
-            <Botao variante={ehMecanico ? "primario" : "secundario"} onClick={() => setComplementando(true)} data-teste="complementar">
-              <FilePlus2 size={24} strokeWidth={2.25} aria-hidden />
-              Complementar
-            </Botao>
+            enviarNaBarra ? (
+              <BotaoEnviarPdf pdf={pdf} />
+            ) : (
+              <Botao onClick={() => setComplementando(true)} data-teste="complementar">
+                <FilePlus2 size={24} strokeWidth={2.25} aria-hidden />
+                Complementar
+              </Botao>
+            )
           }
-          proximoPasso="A vistoria não muda mais. Dá para acrescentar texto ou foto."
+          secundario={
+            enviarNaBarra && podeComplementar ? (
+              <Botao variante="secundario" onClick={() => setComplementando(true)} data-teste="complementar">
+                <FilePlus2 size={24} strokeWidth={2.25} aria-hidden />
+                Complementar
+              </Botao>
+            ) : undefined
+          }
+          proximoPasso={
+            podeComplementar
+              ? "A vistoria não muda mais. Envie o PDF ao cliente ou acrescente texto ou foto."
+              : "A vistoria não muda mais. Envie o PDF ao cliente."
+          }
         />
       )}
 

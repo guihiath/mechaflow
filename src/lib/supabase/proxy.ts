@@ -52,6 +52,15 @@ export async function atualizarSessao(request: NextRequest) {
   const logado = Boolean(data?.claims?.sub);
 
   const { pathname, search } = request.nextUrl;
+  // API sem sessão: 401 em JSON (quem chama é fetch, não uma pessoa para mandar ao /login).
+  if (!logado && pathname.startsWith("/api/") && !rotaPublica(pathname)) {
+    const naoAutorizado = NextResponse.json(
+      { erro: "Entre de novo para continuar." },
+      { status: 401, headers: { "Cache-Control": "private, no-store" } },
+    );
+    response.cookies.getAll().forEach((c) => naoAutorizado.cookies.set(c));
+    return naoAutorizado;
+  }
   if (!logado && !rotaPublica(pathname)) {
     const destino = request.nextUrl.clone();
     destino.pathname = "/login";
