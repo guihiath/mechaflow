@@ -126,6 +126,11 @@ export function ConfirmarComMotivo({
   rotuloEnviando = "Cancelando…",
   rotuloVoltar = "Voltar sem cancelar",
   aoConcluir,
+  motivoInicial,
+  rotuloOutro = "Qual o motivo?",
+  ajudaOutro,
+  erroSemMotivo = "Escolha o motivo do cancelamento.",
+  erroSemTexto = "Escreva o motivo.",
 }: {
   acao: (motivo: string) => Promise<EstadoAcao>;
   rotulo?: string;
@@ -139,9 +144,16 @@ export function ConfirmarComMotivo({
   rotuloEnviando?: string;
   rotuloVoltar?: string;
   aoConcluir?: () => void;
+  /** Motivo já marcado ao abrir (ex.: anular vistoria, motivo único "Feita na OS errada"). */
+  motivoInicial?: string;
+  /** Rótulo e ajuda do campo de texto do último motivo. */
+  rotuloOutro?: string;
+  ajudaOutro?: string;
+  erroSemMotivo?: string;
+  erroSemTexto?: string;
 }) {
   const [aberto, setAberto] = useState(false);
-  const [motivo, setMotivo] = useState<string>();
+  const [motivo, setMotivo] = useState<string | undefined>(motivoInicial);
   const [outro, setOutro] = useState("");
   const [erro, setErro] = useState<string>();
   const [erroMotivo, setErroMotivo] = useState<string>();
@@ -168,7 +180,7 @@ export function ConfirmarComMotivo({
 
   function fechar() {
     setAberto(false);
-    setMotivo(undefined);
+    setMotivo(motivoInicial);
     setOutro("");
     setErro(undefined);
     setErroMotivo(undefined);
@@ -179,12 +191,12 @@ export function ConfirmarComMotivo({
     if (enviando) return;
     setErro(undefined);
     if (!motivo) {
-      setErroMotivo("Escolha o motivo do cancelamento.");
+      setErroMotivo(erroSemMotivo);
       return;
     }
     const final = ehOutro ? outro.trim() : motivo;
     if (!final) {
-      setErroOutro("Escreva o motivo.");
+      setErroOutro(erroSemTexto);
       document.getElementById(idOutro)?.focus();
       return;
     }
@@ -261,8 +273,13 @@ export function ConfirmarComMotivo({
       {ehOutro && (
         <div className="flex flex-col gap-1.5">
           <label htmlFor={idOutro} className="text-sm font-bold text-texto">
-            Qual o motivo?
+            {rotuloOutro}
           </label>
+          {ajudaOutro && (
+            <p id={`${idOutro}-ajuda`} className="text-sm text-texto-suave">
+              {ajudaOutro}
+            </p>
+          )}
           <textarea
             id={idOutro}
             rows={3}
@@ -272,7 +289,7 @@ export function ConfirmarComMotivo({
               if (e.target.value.trim()) setErroOutro(undefined);
             }}
             aria-invalid={erroOutro ? true : undefined}
-            aria-describedby={erroOutro ? `${idOutro}-erro` : undefined}
+            aria-describedby={[ajudaOutro ? `${idOutro}-ajuda` : "", erroOutro ? `${idOutro}-erro` : ""].filter(Boolean).join(" ") || undefined}
             className={`min-h-[104px] w-full rounded-md border-2 bg-superficie p-3 text-lg text-texto outline-none focus:border-foco focus:ring-[3px] focus:ring-foco/30 ${
               erroOutro ? "border-erro" : "border-borda"
             }`}

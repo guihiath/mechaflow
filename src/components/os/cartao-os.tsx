@@ -4,7 +4,8 @@ import { fotos as textoFotos } from "@/components/os/categorias-foto";
 import { BadgeStatus, EtiquetaPagamento, SemMecanico } from "@/components/os/badge-status";
 import { EtiquetaAcimaDoAprovado, EtiquetaSemPrecoContagem } from "@/components/os/etiquetas-fase3";
 import { Cartao, ChipPlaca } from "@/components/ui/estados";
-import { formatarPlaca, formatarReaisInteiros, formatarTempoDesde } from "@/lib/formato";
+import { EtiquetaVistoriaCartao, rotuloVistoriaCartao } from "@/components/vistoria/etiquetas-vistoria";
+import { formatarPlaca, formatarReaisInteiros, formatarTempoDesde, type StatusVistoria } from "@/lib/formato";
 import { INFO_STATUS, type StatusOS } from "@/lib/os-status";
 
 export type DadosCartaoOS = {
@@ -30,6 +31,11 @@ export type DadosCartaoOS = {
   acimaDoAprovado?: boolean;
   /** Mecanico (DESIGN §11.10): linha "5 fotos · 3 itens" no fim do cartao. */
   contagem?: { fotos: number; itens: number };
+  /**
+   * Vistoria de entrada (DESIGN §12.1, F4-B5): `estado` vem de `vw_os.vistoria_entrada_status`
+   * (null = sem vistoria). "Sem vistoria" só aparece com a vistoria obrigatória e a OS aberta.
+   */
+  vistoria?: { estado: StatusVistoria | null; obrigatoria: boolean };
 };
 
 /**
@@ -60,6 +66,9 @@ export function CartaoOS({
         os.contagem.itens === 0 ? "Sem itens" : os.contagem.itens === 1 ? "1 item" : `${os.contagem.itens} itens`
       }`
     : null;
+  // "Sem vistoria" em OS encerrada não ajuda ninguém (DESIGN §12.1: só OS abertas).
+  const aberta = os.status !== "entregue" && os.status !== "cancelada";
+  const vistoriaObrigatoria = Boolean(os.vistoria?.obrigatoria) && aberta;
   const rotulo = [
     `OS ${os.numero}`,
     `placa ${placa}`,
@@ -69,7 +78,8 @@ export function CartaoOS({
     linhaContagem,
   ]
     .filter(Boolean)
-    .join(", ");
+    .join(", ")
+    .concat(os.vistoria ? rotuloVistoriaCartao(os.vistoria.estado, vistoriaObrigatoria) : "");
 
   return (
     <Cartao href={os.href} faixa={INFO_STATUS[os.status].faixa} rotulo={rotulo} className="min-h-28">
@@ -86,6 +96,7 @@ export function CartaoOS({
             <EtiquetaSemPrecoContagem quantidade={semPreco} />
             {!semValores && os.acimaDoAprovado && <EtiquetaAcimaDoAprovado />}
             {!semValores && os.aReceber && <EtiquetaPagamento pago={false} />}
+            {os.vistoria && <EtiquetaVistoriaCartao estado={os.vistoria.estado} obrigatoria={vistoriaObrigatoria} />}
             {etiquetaExtra}
           </span>
           {total && <span className="font-mono text-lg font-semibold">{total}</span>}

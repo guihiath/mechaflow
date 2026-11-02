@@ -40,7 +40,9 @@ async function erroDaOS(supabase: Cliente, osId: string, error: ErroSupabase, ve
     const agora = ehStatusOS(data?.status) ? ` (agora: ${rotuloStatus(data.status)})` : "";
     return { erro: `Esta OS mudou enquanto você olhava${agora}. A tela foi atualizada.` };
   }
-  if (msg === "os_fechada" || msg === "os_nao_encontrada") refresh();
+  // vistoria_obrigatoria (corrida: o dono ligou a chave com a tela aberta): a tela recarrega e o
+  // primário vira "Fazer vistoria" (DESIGN §12.14; mensagem do banco por erros.ts).
+  if (msg === "os_fechada" || msg === "os_nao_encontrada" || msg === "vistoria_obrigatoria") refresh();
   const traduzido = traduzirErro(error, "os");
   return { erro: traduzido === GENERICO ? falha(verbo) : traduzido };
 }
@@ -821,6 +823,11 @@ export async function fecharOS(_anterior: EstadoAcao, dados: FormData): Promise<
     if (error.message === "os_itens_sem_preco") {
       refresh();
       return { erro: "Há itens sem preço. Defina o preço antes de entregar.", dados: { semPreco: "1" } };
+    }
+    // Vistoria obrigatória ainda não concluída (o banco bloqueia "entregue", ARQUITETURA 12.5).
+    if (error.message === "vistoria_obrigatoria") {
+      refresh();
+      return { erro: traduzirErro(error, "os"), dados: { semVistoria: "1" } };
     }
     const r = await erroDaOS(supabase, osId, error, "fechar a OS");
     return r?.erro === falha("fechar a OS")

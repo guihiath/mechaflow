@@ -103,6 +103,32 @@ function semAcento(t: string) {
 }
 
 /**
+ * Evento `vistoria` do historico (ARQUITETURA 12.1 V18; DESIGN §12.20): o banco grava texto do
+ * sistema ("Vistoria de entrada concluída[ sem assinatura (motorista ausente)]", "Acrescentou à
+ * vistoria de entrada", "Vistoria de entrada anulada[: motivo]"). Aqui vira a frase da tela com
+ * o nome de quem fez. O motivo da anulacao so vai para dono/atendente (o banco ja nao manda ao
+ * mecanico; a tela tambem corta). Texto desconhecido: nada (nao mostra observacao crua).
+ */
+function textoVistoria(obs: string, por: string | null, mecanico: boolean): string | null {
+  const nome = por?.trim() || null;
+  const t = obs.trim();
+  const concluida = /^Vistoria de (?:entrada|saída) concluída( sem assinatura \((motorista ausente|motorista recusou)\))?$/.exec(t);
+  if (concluida) {
+    const sem = concluida[2] === "motorista ausente" ? " (sem assinatura: motorista ausente)" : concluida[2] ? " (sem assinatura: recusou assinar)" : "";
+    return `Vistoria concluída${nome ? ` por ${nome}` : ""}${sem}`;
+  }
+  if (/^Acrescentou à vistoria de (?:entrada|saída)$/.test(t)) {
+    return nome ? `${nome} acrescentou à vistoria` : "Acrescentado à vistoria";
+  }
+  const anulada = /^Vistoria de (?:entrada|saída) anulada(?:: ([\s\S]+))?$/.exec(t);
+  if (anulada) {
+    const motivo = !mecanico && anulada[1]?.trim() ? `: ${anulada[1].trim()}` : "";
+    return `${nome ? `${nome} anulou a vistoria` : "Vistoria anulada"}${motivo}`;
+  }
+  return null;
+}
+
+/**
  * Converte o historico do banco em eventos da LinhaTempo (mais recente primeiro).
  * O texto e montado aqui: a observacao crua do banco nao vai para o navegador.
  * Mecanico: eventos de pagamento ficam de fora (DESIGN §10.0 regra 4) e o texto livre
@@ -169,6 +195,11 @@ export function montarEventos(linhas: LinhaHistorico[], papel: Papel): EventoOS[
           texto: para === "em_andamento" ? "Modo trocado para Serviço direto" : "Modo trocado para Com orçamento",
         });
         break;
+      case "vistoria": {
+        const texto = textoVistoria(obs, h.por_nome, mecanico);
+        if (texto) eventos.push({ ...base, tipo: "texto", texto });
+        break;
+      }
       case "pagamento":
         if (papel === "mecanico") break;
         eventos.push({ ...base, tipo: "texto", texto: obs ? "Pagamento voltou para a receber" : "Pagamento registrado" });

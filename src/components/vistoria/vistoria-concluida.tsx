@@ -86,9 +86,11 @@ export function BlocoVistoriaConcluida({
   aoAbrirFotoComplemento,
 }: {
   numeroOS: number | string;
-  concluidaEm: string;
+  /** Vazio/null: a vistoria foi anulada ainda em rascunho (nunca concluída). */
+  concluidaEm: string | null;
   concluidaPor: string;
-  assinatura: AssinaturaLeitura;
+  /** null: nada registrado (anulada em rascunho, sem assinatura). */
+  assinatura: AssinaturaLeitura | null;
   complementos: DadosComplemento[];
   anulada?: { em: string; por: string; motivo: string } | null;
   children?: ReactNode;
@@ -106,7 +108,7 @@ export function BlocoVistoriaConcluida({
         <EtiquetaVistoria estado={anulada ? "anulada" : "concluida"} />
         <p className="text-base">Vistoria de entrada da {formatarNumeroOS(numeroOS)}</p>
         <p className="text-sm text-texto-suave">
-          Concluída em {formatarDiaHora(concluidaEm)} por {concluidaPor}
+          {concluidaEm ? `Concluída em ${formatarDiaHora(concluidaEm)} por ${concluidaPor}` : "Não chegou a ser concluída."}
         </p>
       </div>
 
@@ -114,7 +116,7 @@ export function BlocoVistoriaConcluida({
         <h2 id={`${id}-assinatura`} className="text-xl">
           Assinatura
         </h2>
-        <AssinaturaVistoria assinatura={assinatura} />
+        {assinatura ? <AssinaturaVistoria assinatura={assinatura} /> : <p className="text-base text-texto-suave">Nenhuma assinatura registrada.</p>}
       </section>
 
       {children}

@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
-import { ChevronLeft, ChevronRight, CircleAlert, Pencil, RotateCw, Trash2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, CircleAlert, Pencil, RotateCw, Trash2, X, type LucideIcon } from "lucide-react";
 import { Botao } from "@/components/ui/botao";
 import { Etiqueta } from "@/components/ui/estados";
 import { CATEGORIAS_FOTO, formatarDiaHoraFoto, rotuloCategoriaFoto } from "@/components/os/categorias-foto";
@@ -20,6 +20,9 @@ export type FotoTelaCheiaDados = DadosMiniaturaFoto & {
   podeApagar?: boolean;
   /** Foto da fila com erro: texto do motivo (DESIGN §11.6, "Erros que Tentar de novo nao resolve"). */
   motivo?: string | null;
+  /** Etiqueta no lugar do tipo da OS (fotos da vistoria: "Avaria: Frente", "Painel"...). */
+  rotuloTipo?: string;
+  iconeTipo?: LucideIcon | null;
 };
 
 type Resultado = { erro?: string } | void;
@@ -233,8 +236,12 @@ export function FotoTelaCheia({
   // Portal so depois de hidratar (o servidor nao tem `document`; evita diferenca na hidratacao).
   if (!noNavegador) return null;
 
-  const tipo = foto ? rotuloCategoriaFoto(foto.categoria) : "";
-  const IconeTipo = foto ? (CATEGORIAS_FOTO.find((c) => c.valor === foto.categoria)?.icone ?? null) : null;
+  const tipo = foto ? (foto.rotuloTipo ?? rotuloCategoriaFoto(foto.categoria)) : "";
+  const IconeTipo = foto
+    ? foto.rotuloTipo !== undefined
+      ? (foto.iconeTipo ?? null)
+      : (CATEGORIAS_FOTO.find((c) => c.valor === foto.categoria)?.icone ?? null)
+    : null;
   const legenda = foto?.legenda?.trim();
   const quando = formatarDiaHoraFoto(foto?.enviadoEm);
   const podeRemover = !!foto?.podeApagar && (naFila ? !!aoRemoverDaFila : !!aoApagar);

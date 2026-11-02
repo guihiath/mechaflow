@@ -95,6 +95,13 @@ function lerVistoriaEntrada(supabase: Cliente, osId: string) {
   return supabase.from("vw_vistorias").select(COLUNAS_VISTORIA).eq("os_id", osId).eq("tipo", "entrada").neq("status", "anulada").maybeSingle();
 }
 
+/** Vistorias de entrada anuladas da OS (só os ids, a mais nova primeiro): "1 vistoria anulada". */
+function lerAnuladas(supabase: Cliente, osId: string) {
+  return supabase.from("vw_vistorias").select("id").eq("os_id", osId).eq("tipo", "entrada").eq("status", "anulada").order("anulada_em", { ascending: false });
+}
+
+const idsAnuladas = (r: Awaited<ReturnType<typeof lerAnuladas>>) => (r.data ?? []).map((a) => a.id).filter((x): x is string => Boolean(x));
+
 /** Chave "vistoria obrigatória" da oficina (todos os papéis leem; ARQUITETURA 12.6). */
 function lerObrigatoria(supabase: Cliente, oficinaId: string) {
   return supabase.from("oficinas").select("vistoria_obrigatoria").eq("id", oficinaId).maybeSingle();
@@ -142,7 +149,7 @@ function Info({ rotulo, children }: { rotulo: string; children: React.ReactNode 
 async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string; sp: Params }) {
   const supabase = await createClient();
   const ehDono = ctx.papel === "dono";
-  const [{ data: os, error }, itensR, histR, equipeR, andamentoR, vistoriaR, oficinaR] = await Promise.all([
+  const [{ data: os, error }, itensR, histR, equipeR, andamentoR, vistoriaR, oficinaR, anuladasR] = await Promise.all([
     supabase.from("vw_os").select("*").eq("id", id).maybeSingle(),
     supabase.from("vw_os_itens").select("*").eq("os_id", id).order("criado_em"),
     supabase.from("vw_os_historico").select("id, evento, de_status, para_status, observacao, por_nome, em").eq("os_id", id).order("em"),
@@ -150,6 +157,7 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
     supabase.from("vw_os").select("mecanico_id").eq("status", "em_andamento").not("mecanico_id", "is", null),
     lerVistoriaEntrada(supabase, id),
     lerObrigatoria(supabase, ctx.oficina_id),
+    lerAnuladas(supabase, id),
   ]);
   if (error || itensR.error || histR.error) return <Erro id={id} voltar="/os" />;
   if (!os || !ehStatusOS(os.status)) notFound();
@@ -158,6 +166,7 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
   const modo = (os.modo ?? "com_orcamento") as ModoOS;
   const placa = formatarPlaca(os.placa);
   const encerrada = osEncerrada(status);
+  const obrigatoria = Boolean(oficinaR.data?.vistoria_obrigatoria);
   const itens = itensR.data ?? [];
   const contagem = new Map<string, number>();
   for (const r of andamentoR.data ?? []) if (r.mecanico_id) contagem.set(r.mecanico_id, (contagem.get(r.mecanico_id) ?? 0) + 1);
@@ -202,6 +211,10 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
       conferido: i.precificado_pelo_balcao_em != null,
     })),
     precificarAoAbrir: param(sp.precificar) === "1",
+    // Vistoria obrigatória sem a de entrada concluída: o primário de "em andamento"/"pronta"
+    // leva à vistoria (DESIGN §12.2 c; o banco bloqueia pronta e entregue, ARQUITETURA 12.5).
+    vistoriaBloqueia:
+      obrigatoria && !encerrada && vistoriaR.data?.status !== "concluida" ? { emAndamento: vistoriaR.data?.status === "rascunho" } : null,
   };
 
   const aberta = param(sp.aberta);
@@ -306,7 +319,7 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
         {aberta && <CaixaMensagem tipo="sucesso">OS #{aberta} aberta.</CaixaMensagem>}
         {/* Convite no fim do "Abrir OS" (DESIGN §12.2 a), só na chegada */}
         {param(sp.vistoria) === "oferecer" && !vistoriaR.data && !encerrada && (
-          <ConviteVistoria osId={id} obrigatoria={Boolean(oficinaR.data?.vistoria_obrigatoria)} />
+          <ConviteVistoria osId={id} obrigatoria={obrigatoria} />
         )}
         {entregue && <CaixaMensagem tipo="sucesso">OS #{os.numero} entregue. Veículo liberado.</CaixaMensagem>}
         {(aberta || entregue || dados.precificarAoAbrir) && <LimparUrl />}
@@ -336,7 +349,14 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
             </div>
 
             {/* Vistoria de entrada: alto na página, é o que se faz na chegada (DESIGN §12.2 b) */}
-            <CartaoVistoriaOS osId={id} vistoria={resumoVistoria(vistoriaR.data)} podeFazer={!encerrada} encerrada={encerrada} />
+            <CartaoVistoriaOS
+              osId={id}
+              vistoria={resumoVistoria(vistoriaR.data)}
+              podeFazer={!encerrada}
+              encerrada={encerrada}
+              obrigatoria={obrigatoria}
+              anuladas={idsAnuladas(anuladasR)}
+            />
 
             {/* Celular: aviso dos itens do mecanico logo abaixo do topo (DESIGN §11.9) */}
             <div className="lg:hidden">
@@ -484,7 +504,7 @@ const RECADO: Partial<Record<StatusOS, { tipo: "alerta" | "info" | "sucesso"; te
 async function DetalheMecanico({ ctx, id }: { ctx: ContextoAtivo; id: string }) {
   const supabase = await createClient();
   // Colunas escolhidas uma a uma: nada de valor, telefone ou autorizacao (DESIGN §10.10).
-  const [{ data: os, error }, itensR, histR, vistoriaR, oficinaR] = await Promise.all([
+  const [{ data: os, error }, itensR, histR, vistoriaR, oficinaR, anuladasR] = await Promise.all([
 supabase
   .from("vw_os")
   .select(
@@ -501,6 +521,7 @@ supabase
 supabase.from("vw_os_historico").select("id, evento, de_status, para_status, observacao, por_nome, em").eq("os_id", id).order("em"),
 lerVistoriaEntrada(supabase, id),
 lerObrigatoria(supabase, ctx.oficina_id),
+lerAnuladas(supabase, id),
   ]);
   if (error || itensR.error || histR.error) return <Erro id={id} voltar="/minhas-os" />;
   if (!os || !ehStatusOS(os.status)) notFound();
@@ -574,7 +595,14 @@ vistoriaBarra:
     )}
 
     {/* Mecânico faz a vistoria só na OS dele e aberta (ARQUITETURA 12.6) */}
-    <CartaoVistoriaOS osId={id} vistoria={resumoVistoria(vistoriaR.data)} podeFazer={minha && !osEncerrada(status)} encerrada={osEncerrada(status)} />
+    <CartaoVistoriaOS
+      osId={id}
+      vistoria={resumoVistoria(vistoriaR.data)}
+      podeFazer={minha && !osEncerrada(status)}
+      encerrada={osEncerrada(status)}
+      obrigatoria={Boolean(oficinaR.data?.vistoria_obrigatoria)}
+      anuladas={idsAnuladas(anuladasR)}
+    />
 
     <Cartao>
       <dl className="flex flex-col gap-3">

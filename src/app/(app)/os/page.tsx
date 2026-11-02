@@ -11,6 +11,7 @@ import { BotaoLink } from "@/components/ui/botao";
 import { Busca } from "@/components/ui/busca";
 import { CaixaErro, ChipPlaca, EstadoVazio, ListaCarregando, Pagina } from "@/components/ui/estados";
 import { FiltroChips } from "@/components/ui/filtro-chips";
+import { EtiquetaVistoriaCartao } from "@/components/vistoria/etiquetas-vistoria";
 import { exigirContexto } from "@/lib/dal";
 import {
   formatarPlaca,
@@ -77,7 +78,7 @@ function limparParaOr(t: string) {
 }
 
 async function Lista({ searchParams }: { searchParams: Promise<Params> }) {
-  await exigirContexto(["dono", "atendente"]);
+  const ctx = await exigirContexto(["dono", "atendente"]);
   const sp = await searchParams;
   const q = param(sp.q).slice(0, 80);
   const statusParam = param(sp.status);
@@ -90,7 +91,7 @@ async function Lista({ searchParams }: { searchParams: Promise<Params> }) {
   let consulta = supabase
     .from("vw_os")
     .select(
-      "id, numero, status, modo, placa, veiculo_marca, veiculo_modelo, cliente_nome, mecanico_nome, sintoma_relatado, atualizado_em, total_centavos, pago_em, itens_sem_preco, valor_aprovado_centavos",
+      "id, numero, status, modo, placa, veiculo_marca, veiculo_modelo, cliente_nome, mecanico_nome, sintoma_relatado, atualizado_em, total_centavos, pago_em, itens_sem_preco, valor_aprovado_centavos, vistoria_entrada_status",
       { count: "exact" },
     )
     .in("status", [...filtro.status]);
@@ -114,12 +115,15 @@ async function Lista({ searchParams }: { searchParams: Promise<Params> }) {
       ? consulta.order("pronta_em", { ascending: true, nullsFirst: false })
       : consulta.order("atualizado_em", { ascending: false });
 
-  const [{ data: lista, count, error }, { data: abertas }, { count: qtdSemPreco }] = await Promise.all([
+  const [{ data: lista, count, error }, { data: abertas }, { count: qtdSemPreco }, oficinaR] = await Promise.all([
     consulta.range(0, limite - 1),
     supabase.from("ordens_servico").select("status").in("status", [...STATUS_ABERTOS]).limit(5000),
     // Chip "Sem preço": OS abertas com item sem preco (contagem so para dono/atendente).
     supabase.from("vw_os").select("id", { count: "exact", head: true }).in("status", [...STATUS_ABERTOS]).gt("itens_sem_preco", 0),
+    // "Sem vistoria" na lista só com a vistoria obrigatória (DESIGN §12.1).
+    supabase.from("oficinas").select("vistoria_obrigatoria").eq("id", ctx.oficina_id).maybeSingle(),
   ]);
+  const obrigatoria = Boolean(oficinaR.data?.vistoria_obrigatoria);
 
   const contagemStatus = new Map<StatusOS, number>();
   for (const o of abertas ?? []) contagemStatus.set(o.status, (contagemStatus.get(o.status) ?? 0) + 1);
@@ -203,6 +207,7 @@ async function Lista({ searchParams }: { searchParams: Promise<Params> }) {
                     aReceber: o.status === "entregue" && !o.pago_em,
                     itensSemPreco: o.itens_sem_preco ?? 0,
                     acimaDoAprovado: acimaDoAprovado(o),
+                    vistoria: { estado: o.vistoria_entrada_status, obrigatoria },
                   }}
                 />
               </li>
@@ -245,6 +250,10 @@ async function Lista({ searchParams }: { searchParams: Promise<Params> }) {
                         <EtiquetaSemPrecoContagem quantidade={o.itens_sem_preco ?? 0} />
                         {acimaDoAprovado(o) && <EtiquetaAcimaDoAprovado />}
                         {o.status === "entregue" && !o.pago_em && <EtiquetaPagamento pago={false} />}
+                        <EtiquetaVistoriaCartao
+                          estado={o.vistoria_entrada_status}
+                          obrigatoria={obrigatoria && o.status !== "entregue" && o.status !== "cancelada"}
+                        />
                       </span>
                     </td>
                     <td className="px-4">{o.mecanico_nome ?? <SemMecanico />}</td>

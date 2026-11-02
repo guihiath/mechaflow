@@ -32,4 +32,9 @@ export type DestinoVistoria = {
   vistoriaId: string;
   avariaId: string | null;
   tipo: "avaria" | "painel" | "outro";
+  /**
+   * Foto de complemento (F4-B5): a vistoria já está concluída e o complemento já existe no
+   * banco (`complementar_vistoria` antes do envio). Tipo `outro`; até 10 (ARQUITETURA 12.3).
+   */
+  complementoId?: string | null;
 };

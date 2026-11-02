@@ -8,7 +8,7 @@ import { CartaoOS } from "@/components/os/cartao-os";
 import { CaixaErro, Cartao, EstadoVazio, ListaCarregando, Pagina } from "@/components/ui/estados";
 import { FiltroChips } from "@/components/ui/filtro-chips";
 import { exigirContexto } from "@/lib/dal";
-import { param } from "@/lib/formato";
+import { param, type StatusVistoria } from "@/lib/formato";
 import type { StatusOS } from "@/lib/os-status";
 import { createClient } from "@/lib/supabase/server";
 
@@ -46,10 +46,11 @@ type Linha = {
   pronta_em: string | null;
   entregue_em: string | null;
   qtd_fotos: number | null;
+  vistoria_entrada_status: StatusVistoria | null;
 };
 
 const COLUNAS =
-  "id, numero, status, placa, veiculo_marca, veiculo_modelo, cliente_nome, sintoma_relatado, mecanico_nome, atualizado_em, criado_em, iniciado_em, pronta_em, entregue_em, qtd_fotos";
+  "id, numero, status, placa, veiculo_marca, veiculo_modelo, cliente_nome, sintoma_relatado, mecanico_nome, atualizado_em, criado_em, iniciado_em, pronta_em, entregue_em, qtd_fotos, vistoria_entrada_status";
 
 async function Conteudo({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const ctx = await exigirContexto(["mecanico"]);
@@ -70,7 +71,13 @@ async function Conteudo({ searchParams }: { searchParams: Promise<Record<string,
     .limit(100);
   if (!todas) entregues = entregues.eq("mecanico_id", ctx.usuario_id);
 
-  const [{ data, error }, ent] = await Promise.all([abertas, verEntregues ? entregues : Promise.resolve({ data: [] as Linha[], error: null })]);
+  const [{ data, error }, ent, oficinaR] = await Promise.all([
+    abertas,
+    verEntregues ? entregues : Promise.resolve({ data: [] as Linha[], error: null }),
+    // "Sem vistoria" na lista só com a vistoria obrigatória (DESIGN §12.1). Nenhum valor aqui.
+    supabase.from("oficinas").select("vistoria_obrigatoria").eq("id", ctx.oficina_id).maybeSingle(),
+  ]);
+  const obrigatoria = Boolean(oficinaR.data?.vistoria_obrigatoria);
   if (error || ent.error) {
     return <CaixaErro titulo="Não foi possível carregar suas OS." tentarDeNovo={todas ? "/minhas-os?ver=todas" : "/minhas-os"} />;
   }
@@ -124,6 +131,7 @@ async function Conteudo({ searchParams }: { searchParams: Promise<Record<string,
           atualizadoEm: o.atualizado_em,
           mecanico: o.mecanico_nome,
           contagem: semContagem ? undefined : { fotos: o.qtd_fotos ?? 0, itens: itensPorOS.get(o.id ?? "") ?? 0 },
+          vistoria: { estado: o.vistoria_entrada_status, obrigatoria },
         }}
       />
     </li>

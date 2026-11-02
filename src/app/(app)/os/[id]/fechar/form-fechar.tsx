@@ -19,6 +19,8 @@ export function FormFechar({
   numero,
   placa,
   semPreco,
+  semVistoria = false,
+  vistoriaEmAndamento = false,
   acimaDoAprovadoCentavos = 0,
   causa: causaInicial,
   solucao: solucaoInicial,
@@ -29,6 +31,9 @@ export function FormFechar({
   placa: string;
   /** Itens sem preço: com algum, a entrega fica bloqueada e o primário vira "Definir preços (N)" (M3 do F3-R1). */
   semPreco: number;
+  /** Vistoria obrigatória sem a de entrada concluída: entrega bloqueada, primário "Fazer vistoria" (DESIGN §12.14). */
+  semVistoria?: boolean;
+  vistoriaEmAndamento?: boolean;
   /** Total atual acima do aprovado (so avisa na confirmacao, DESIGN §11.9). */
   acimaDoAprovadoCentavos?: number;
   causa: string;
@@ -46,7 +51,9 @@ export function FormFechar({
   const [qual, setQual] = useState<"salvar" | "entregar" | null>(null);
   const travado = useRef(false);
   const campos = estado?.campos ?? {};
-  const bloqueado = semPreco > 0;
+  // O banco também pode recusar na hora (corrida): `dados.semVistoria` volta da ação.
+  const faltaVistoria = semVistoria || estado?.dados?.semVistoria === "1";
+  const bloqueado = semPreco > 0 || faltaVistoria;
 
   useEffect(() => {
     if (confirmando) caixa.current?.focus();
@@ -66,7 +73,7 @@ export function FormFechar({
           return;
         }
         setEstado(r);
-        if (r?.campos || r?.dados?.semPreco) {
+        if (r?.campos || r?.dados?.semPreco || r?.dados?.semVistoria) {
           setConfirmando(false);
           focarPrimeiroErro(form.current);
         }
@@ -192,7 +199,10 @@ export function FormFechar({
               rotuloEnviando="Salvando…"
               onClick={() => enviar("salvar")}
             />
-            {bloqueado ? (
+            {faltaVistoria ? (
+              // Vistoria obrigatória: o primário leva à vistoria (DESIGN §12.14).
+              <BotaoLink href={`/os/${osId}/vistoria`}>{vistoriaEmAndamento ? "Continuar vistoria" : "Fazer vistoria"}</BotaoLink>
+            ) : bloqueado ? (
               // Mesma regra do detalhe em "pronta": o primário leva ao que destrava a entrega.
               <BotaoLink href={`/os/${osId}?precificar=1`}>Definir preços ({semPreco})</BotaoLink>
             ) : (

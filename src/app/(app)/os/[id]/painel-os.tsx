@@ -15,7 +15,7 @@ import {
   type FormEvent,
   type ReactNode,
 } from "react";
-import { Camera, Check, CircleAlert, CircleCheckBig, ClipboardCheck, Images, Play, Plus, Search, ThumbsDown, ThumbsUp, TriangleAlert } from "lucide-react";
+import { Camera, Check, CircleAlert, CircleCheckBig, ClipboardCheck, ClipboardX, Images, Play, Plus, Search, ThumbsDown, ThumbsUp, TriangleAlert } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { iniciarVistoria } from "@/acoes/vistoria";
 import {
@@ -153,6 +153,11 @@ export type DadosPainel = {
   precificarAoAbrir?: boolean;
   /** Só na versão do mecânico, na OS dele aberta e sem vistoria concluída (DESIGN §12.2 c). */
   vistoriaBarra?: { emAndamento: boolean; obrigatoria: boolean } | null;
+  /**
+   * Só dono/atendente: oficina com vistoria obrigatória e OS aberta sem a de entrada concluída.
+   * Em "em andamento"/"pronta" o primário vira "Fazer vistoria" (DESIGN §12.2 c, F4-B5).
+   */
+  vistoriaBloqueia?: { emAndamento: boolean } | null;
 };
 
 type FolhaAberta =
@@ -480,6 +485,15 @@ export function BarraOS({ proximoPasso }: { proximoPasso?: string }) {
     </Botao>
   );
   const rotuloOcupado = (r: string) => (ocupado ? "Enviando…" : r);
+  // Vistoria obrigatória ainda não feita: o primário que o banco bloquearia leva à vistoria.
+  const vb = os.vistoriaBloqueia;
+  const bloqueadaPelaVistoria = vb != null && (os.status === "em_andamento" || os.status === "pronta");
+  const avisoVistoria = bloqueadaPelaVistoria ? (
+    <p className="flex items-start gap-1.5 text-[15px] font-bold text-alerta-texto" data-teste="aviso-vistoria-obrigatoria">
+      <ClipboardX size={20} strokeWidth={2.25} aria-hidden className="mt-0.5 shrink-0" />
+      {os.status === "pronta" ? "Vistoria obrigatória: sem ela a OS não pode ser entregue." : "Vistoria obrigatória: sem ela a OS não fica pronta."}
+    </p>
+  ) : null;
 
   let primario: ReactNode = null;
   let secundario: ReactNode = null;
@@ -512,18 +526,23 @@ export function BarraOS({ proximoPasso }: { proximoPasso?: string }) {
         secundario = add;
         break;
       case "em_andamento":
-        primario = (
-          <Botao onClick={() => abrir({ tipo: "pronta" })}>
-            <Check size={24} strokeWidth={2.5} aria-hidden />
-            Marcar como pronta
-          </Botao>
-        );
+        primario =
+          vb != null ? (
+            <BotaoFazerVistoria osId={os.id} emAndamento={vb.emAndamento} />
+          ) : (
+            <Botao onClick={() => abrir({ tipo: "pronta" })}>
+              <Check size={24} strokeWidth={2.5} aria-hidden />
+              Marcar como pronta
+            </Botao>
+          );
         secundario = add;
         break;
       case "pronta":
         // Com item sem preco a entrega esta bloqueada: o primario leva ao que destrava (DESIGN §11.9).
-        primario =
-          (os.itensSemPreco ?? 0) > 0 ? (
+        // Vistoria obrigatória não feita bloqueia também (DESIGN §12.2 c).
+        primario = vb != null ? (
+          <BotaoFazerVistoria osId={os.id} emAndamento={vb.emAndamento} />
+        ) : (os.itensSemPreco ?? 0) > 0 ? (
             <Botao onClick={definirPrecos}>Definir preços ({os.itensSemPreco})</Botao>
           ) : (
             <BotaoLink href={`/os/${os.id}/fechar`}>Fechar e entregar</BotaoLink>
@@ -542,8 +561,42 @@ export function BarraOS({ proximoPasso }: { proximoPasso?: string }) {
   return (
     <>
       <EsconderNavegacao />
-      <BarraAcoesOS primario={primario} secundario={secundario} acima={acima} proximoPasso={proximoPasso} />
+      <BarraAcoesOS primario={primario} secundario={secundario} acima={acima ?? avisoVistoria ?? undefined} proximoPasso={proximoPasso} />
     </>
+  );
+}
+
+/**
+ * Primário "Fazer vistoria" / "Continuar vistoria" do dono/atendente quando a vistoria
+ * obrigatória bloqueia "pronta"/"entregue" (DESIGN §12.2 c). Iniciar é idempotente.
+ */
+function BotaoFazerVistoria({ osId, emAndamento }: { osId: string; emAndamento: boolean }) {
+  const router = useRouter();
+  const [abrindo, iniciar] = useTransition();
+  if (emAndamento) {
+    return (
+      <BotaoLink href={`/os/${osId}/vistoria`} data-teste="barra-fazer-vistoria">
+        <ClipboardCheck size={24} strokeWidth={2.25} aria-hidden />
+        Continuar vistoria
+      </BotaoLink>
+    );
+  }
+  return (
+    <Botao
+      disabled={abrindo}
+      aria-busy={abrindo}
+      data-teste="barra-fazer-vistoria"
+      onClick={() =>
+        iniciar(async () => {
+          const r = await iniciarVistoria(osId);
+          // Falhou: a tela da vistoria mostra o cartão com "Fazer vistoria" e o motivo.
+          if (r?.erro) router.push(`/os/${osId}/vistoria`);
+        })
+      }
+    >
+      <ClipboardCheck size={24} strokeWidth={2.25} aria-hidden />
+      {abrindo ? "Abrindo…" : "Fazer vistoria"}
+    </Botao>
   );
 }
 

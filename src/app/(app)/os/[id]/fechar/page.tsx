@@ -37,17 +37,20 @@ export default function FecharOsPage({ params }: PageProps<"/os/[id]/fechar">) {
 }
 
 async function Conteudo({ params }: { params: Promise<{ id: string }> }) {
-  await exigirContexto(["dono", "atendente"]);
+  const ctx = await exigirContexto(["dono", "atendente"]);
   const { id } = await params;
   if (!UUID.test(id)) notFound();
   const supabase = await createClient();
-  const { data: os, error } = await supabase
-    .from("vw_os")
-    .select(
-      "id, numero, status, modo, placa, veiculo_marca, veiculo_modelo, cliente_nome, codigo_falha, causa_encontrada, solucao_aplicada, total_centavos, qtd_itens, itens_sem_preco, valor_aprovado_centavos, orcamento_aprovado_em, itens_apos_aprovacao",
-    )
-    .eq("id", id)
-    .maybeSingle();
+  const [{ data: os, error }, oficinaR] = await Promise.all([
+    supabase
+      .from("vw_os")
+      .select(
+        "id, numero, status, modo, placa, veiculo_marca, veiculo_modelo, cliente_nome, codigo_falha, causa_encontrada, solucao_aplicada, total_centavos, qtd_itens, itens_sem_preco, valor_aprovado_centavos, orcamento_aprovado_em, itens_apos_aprovacao, vistoria_entrada_status",
+      )
+      .eq("id", id)
+      .maybeSingle(),
+    supabase.from("oficinas").select("vistoria_obrigatoria").eq("id", ctx.oficina_id).maybeSingle(),
+  ]);
   if (error) {
     return (
       <>
@@ -63,6 +66,8 @@ async function Conteudo({ params }: { params: Promise<{ id: string }> }) {
 
   const placa = formatarPlaca(os.placa);
   const semPreco = os.itens_sem_preco ?? 0;
+  // Vistoria obrigatória sem a de entrada concluída: o banco recusa a entrega (ARQUITETURA 12.5).
+  const semVistoria = Boolean(oficinaR.data?.vistoria_obrigatoria) && os.vistoria_entrada_status !== "concluida";
   // Itens depois da aprovacao (DESIGN §11.9): so avisa, nao bloqueia (decisao nº 4).
   const total = os.total_centavos ?? 0;
   const aprovado = os.valor_aprovado_centavos;
@@ -83,6 +88,17 @@ async function Conteudo({ params }: { params: Promise<{ id: string }> }) {
           <p className="font-mono text-[1.75rem] font-semibold">Total: {formatarCentavos(os.total_centavos ?? 0)}</p>
         </div>
 
+        {semVistoria && (
+          <div className="flex flex-col gap-1" data-teste="bloqueio-vistoria">
+            <CaixaMensagem tipo="erro">Falta a vistoria de entrada. Ela é obrigatória nesta oficina.</CaixaMensagem>
+            <Link
+              href={`/os/${id}/vistoria`}
+              className="inline-flex min-h-toque items-center self-start font-bold text-info-texto underline max-lg:hidden"
+            >
+              Fazer vistoria
+            </Link>
+          </div>
+        )}
         {semPreco > 0 && (
           <div className="flex flex-col gap-1">
             {/* No celular o caminho é o primário "Definir preços (N)" da barra (M3 do F3-R1); no desktop a barra fica no fim do formulário. */}
@@ -128,6 +144,8 @@ async function Conteudo({ params }: { params: Promise<{ id: string }> }) {
           numero={os.numero ?? 0}
           placa={placa}
           semPreco={semPreco}
+          semVistoria={semVistoria}
+          vistoriaEmAndamento={os.vistoria_entrada_status === "rascunho"}
           acimaDoAprovadoCentavos={comAprovacao && diferenca > 0 ? diferenca : 0}
           causa={os.causa_encontrada ?? ""}
           solucao={os.solucao_aplicada ?? ""}

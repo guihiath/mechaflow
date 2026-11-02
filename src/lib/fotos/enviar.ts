@@ -104,6 +104,7 @@ const DEFINITIVOS_RPC = new Set([
   "avaria_nao_encontrada",
   "limite_fotos_avaria",
   "limite_fotos_vistoria",
+  "complemento_nao_encontrado",
 ]);
 
 export function erroRpc(etapa: EtapaEnvio, e: { message?: string; code?: string } | null): ErroEnvio {
@@ -312,6 +313,7 @@ export async function enviarFoto({
         p_vistoria_id: vistoria.vistoriaId,
         p_tipo: vistoria.tipo,
         ...(vistoria.avariaId ? { p_avaria_id: vistoria.avariaId } : {}),
+        ...(vistoria.complementoId ? { p_complemento_id: vistoria.complementoId } : {}),
         p_largura: preparada.largura,
         p_altura: preparada.altura,
         p_tamanho_bytes: preparada.foto.size,

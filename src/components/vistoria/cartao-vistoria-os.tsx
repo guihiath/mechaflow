@@ -31,11 +31,17 @@ export function CartaoVistoriaOS({
   vistoria,
   podeFazer,
   encerrada,
+  obrigatoria = false,
+  anuladas = [],
 }: {
   osId: string;
   vistoria: ResumoVistoriaOS;
   podeFazer: boolean;
   encerrada: boolean;
+  /** Oficina exige a vistoria (DESIGN §12.1: "Sem vistoria" em alerta, F4-B5). */
+  obrigatoria?: boolean;
+  /** Ids das vistorias anuladas desta OS, a mais nova primeiro (DESIGN §12.2 b: "1 vistoria anulada"). */
+  anuladas?: string[];
 }) {
   const [erro, setErro] = useState<string>();
   const [abrindo, iniciar] = useTransition();
@@ -81,11 +87,22 @@ export function CartaoVistoriaOS({
     <Cartao>
       <div className="flex flex-col items-start gap-2" data-teste="cartao-vistoria">
         <h2 className="text-lg">Vistoria de entrada</h2>
-        <EtiquetaVistoria estado={emAndamento ? "rascunho" : "sem"} />
+        <EtiquetaVistoria estado={emAndamento ? "rascunho" : "sem"} obrigatoria={obrigatoria && !encerrada} />
         {emAndamento && (
           <p className="text-sm text-texto-suave">
             Começada{vistoria.criadoPorNome ? ` por ${vistoria.criadoPorNome}` : ""} em {formatarDiaHora(vistoria.criadoEm)}
           </p>
+        )}
+        {!emAndamento && obrigatoria && !encerrada && (
+          <p className="text-sm text-alerta-texto">Esta oficina exige a vistoria: sem ela a OS não fica pronta nem é entregue.</p>
+        )}
+        {anuladas.length > 0 && (
+          <a
+            href={`/os/${osId}/vistoria?ver=${anuladas[0]}`}
+            className="inline-flex min-h-toque items-center text-sm font-bold text-info-texto underline underline-offset-4"
+          >
+            {anuladas.length === 1 ? "1 vistoria anulada. Ver a anulada" : `${anuladas.length} vistorias anuladas. Ver a última`}
+          </a>
         )}
         {erro && <CaixaMensagem tipo="erro">{erro}</CaixaMensagem>}
         {podeFazer ? (

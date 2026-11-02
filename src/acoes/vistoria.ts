@@ -25,3 +25,24 @@ export async function iniciarVistoria(osId: string): Promise<EstadoAcao> {
   }
   redirect(`/os/${osId}/vistoria`);
 }
+
+/**
+ * "Anular vistoria" (F4-B5; ARQUITETURA 12.1 V14, DESIGN §12.13): só o dono, com motivo, para a
+ * vistoria feita na OS errada. A anulada fica guardada (imutável) e libera outra na OS.
+ * Reenvio com ela já anulada não faz nada (RPC idempotente). Depois abre a leitura da anulada.
+ */
+export async function anularVistoria(osId: string, vistoriaId: string, motivo: string): Promise<EstadoAcao> {
+  if (!UUID.test(osId) || !UUID.test(vistoriaId)) return { erro: "Vistoria não encontrada." };
+  const ctx = await contextoParaAcao(["dono"]);
+  if (!ctx) return { erro: "Só o dono pode anular a vistoria." };
+  const texto = motivo.trim();
+  if (texto.length < 3) return { erro: "Explique o que aconteceu." };
+  if (texto.length > 500) return { erro: "Máximo de 500 letras." };
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("anular_vistoria", { p_vistoria_id: vistoriaId, p_motivo: texto });
+  if (error) {
+    const t = traduzirErro(error, "os");
+    return { erro: t === "Algo deu errado. Tente de novo." ? "Não foi possível anular a vistoria. Confira a internet e tente de novo." : t };
+  }
+  redirect(`/os/${osId}/vistoria?ver=${vistoriaId}&anulada=1`);
+}
