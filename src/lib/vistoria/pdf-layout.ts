@@ -3,9 +3,11 @@ import { degrees, PDFDocument, rgb, type PDFFont, type PDFImage, type PDFPage, t
 import {
   formatarCodigoConferencia,
   formatarData,
+  formatarMotivoAnulacao,
   formatarNumero,
   formatarNumeroOS,
   FRACAO_COMBUSTIVEL,
+  juntarContagens,
   ROTULO_COMBUSTIVEL,
   ROTULO_LADO_AVARIA,
   ROTULO_TIPO_VISTORIA,
@@ -89,6 +91,9 @@ const FOTO_L = 85 * MM;
 const FOTO_A = FOTO_L * 0.75;
 const FOTO_ESPACO = LARGURA - 2 * FOTO_L;
 const FOTO_ESPACO_V = 8;
+/** Painel: 3 por linha (~58 mm), para a assinatura caber na 1ª página em vistoria curta. */
+const PAINEL_L = (LARGURA - 2 * FOTO_ESPACO) / 3;
+const PAINEL_A = PAINEL_L * 0.75;
 
 const FUSO = "America/Sao_Paulo";
 const fmtHora = new Intl.DateTimeFormat("pt-BR", { timeZone: FUSO, hour: "2-digit", minute: "2-digit" });
@@ -116,7 +121,8 @@ class Escritor {
   constructor(
     readonly pdf: PDFDocument,
     readonly fontes: { normal: Fonte; negrito: Fonte; condensada: Fonte; mono: Fonte },
-    readonly cabecalhoCurto: string,
+    /** Cabeçalho das páginas seguintes; a parte `mono` é a placa (§12.17). */
+    readonly cabecalhoCurto: { texto: string; mono?: boolean }[],
   ) {}
 
   novaPagina(primeira = false) {
@@ -125,7 +131,12 @@ class Escritor {
     this.y = TOPO;
     if (!primeira) {
       // Cabeçalho curto (placa, OS) nas páginas seguintes; o número da página vai no rodapé.
-      this.escrever(this.cabecalhoCurto, MARGEM, this.y - 10, this.fontes.negrito, 10, SUAVE);
+      let x = MARGEM;
+      for (const parte of this.cabecalhoCurto) {
+        const fonte = parte.mono ? this.fontes.mono : this.fontes.negrito;
+        this.escrever(parte.texto, x, this.y - 10, fonte, 10, SUAVE);
+        x += this.largura(parte.texto, fonte, 10);
+      }
       this.linha(this.y - 16);
       this.y -= 28;
     }
@@ -285,6 +296,16 @@ function gradeFotos(e: Escritor, fotos: Imagem[]) {
 
 const alturaGrade = (n: number) => Math.ceil(n / 2) * (FOTO_A + FOTO_ESPACO_V);
 
+/** Fotos do painel (até 3): uma linha só, com 3 colunas. */
+function gradePainel(e: Escritor, fotos: Imagem[]) {
+  for (let i = 0; i < fotos.length; i += 3) {
+    e.garantir(PAINEL_A + FOTO_ESPACO_V);
+    e.y -= PAINEL_A;
+    fotos.slice(i, i + 3).forEach((f, c) => desenharContida(e, f, MARGEM + c * (PAINEL_L + FOTO_ESPACO), e.y, PAINEL_L, PAINEL_A));
+    e.y -= FOTO_ESPACO_V;
+  }
+}
+
 // ------------------------------------------------------------------ ícones do checklist (não dependem de cor)
 
 function iconeSituacao(e: Escritor, s: SituacaoItemVistoria | null, x: number, yBase: number) {
@@ -323,7 +344,7 @@ export async function gerarPdfVistoria(d: DadosPdfVistoria, fontesBytes: FontesP
   pdf.registerFontkit(fontkit);
   const tipoTexto = ROTULO_TIPO_VISTORIA[d.tipo];
   const osTexto = formatarNumeroOS(d.numeroOS);
-  pdf.setTitle(`${tipoTexto} · ${osTexto} · ${d.placa}`);
+  pdf.setTitle(`${tipoTexto} · ${osTexto} · ${d.placa}${d.anulada ? " · ANULADA" : ""}`);
   pdf.setAuthor(d.oficina.nome);
   pdf.setCreator("MechaFlow");
   pdf.setProducer("MechaFlow");
@@ -350,7 +371,11 @@ export async function gerarPdfVistoria(d: DadosPdfVistoria, fontesBytes: FontesP
     Promise.all(d.complementos.map((c) => Promise.all(c.fotos.map((f) => embutir(pdf, f))))),
   ]);
 
-  const e = new Escritor(pdf, { normal, negrito, condensada, mono }, `${tipoTexto} · ${osTexto} · ${d.placa}`);
+  const e = new Escritor(pdf, { normal, negrito, condensada, mono }, [
+    { texto: `${tipoTexto} · ${osTexto} · ` },
+    { texto: d.placa, mono: true },
+    ...(d.anulada ? [{ texto: " · ANULADA" }] : []),
+  ]);
   e.novaPagina(true);
 
   // ---------------- cabeçalho
@@ -358,7 +383,7 @@ export async function gerarPdfVistoria(d: DadosPdfVistoria, fontesBytes: FontesP
   pg.drawRectangle({ x: 0, y: PAGINA[1] - 3 * MM, width: PAGINA[0], height: 3 * MM, color: AMARELO });
 
   const dir = MARGEM + LARGURA;
-  const titulo = tipoTexto.toUpperCase().replace(/^VISTORIA DE /, "VISTORIA DE\n").split("\n");
+  const titulo = `${tipoTexto.toUpperCase()}${d.anulada ? " — ANULADA" : ""}`.replace(/^VISTORIA DE /, "VISTORIA DE\n").split("\n");
   let yd = TOPO;
   for (const t of titulo) {
     yd -= 20;
@@ -401,7 +426,7 @@ export async function gerarPdfVistoria(d: DadosPdfVistoria, fontesBytes: FontesP
 
   // ---------------- anulada: linha no topo com motivo, quem e quando
   if (d.anulada) {
-    const texto = `VISTORIA ANULADA em ${dataHora(d.anulada.em)} por ${d.anulada.por}. Motivo: ${d.anulada.motivo}`;
+    const texto = `VISTORIA ANULADA em ${dataHora(d.anulada.em)} por ${d.anulada.por}. Motivo: ${formatarMotivoAnulacao(d.anulada.motivo)}`;
     const linhas = e.quebrar(texto, negrito, 11, LARGURA - 16);
     const altura = linhas.length * 14.5 + 12;
     e.y -= 8;
@@ -413,9 +438,19 @@ export async function gerarPdfVistoria(d: DadosPdfVistoria, fontesBytes: FontesP
 
   // ---------------- entrada
   e.secao("Entrada", 34);
-  const partesKm = [`KM ${formatarNumero(d.km) || "não informado"}`];
-  if (d.horimetro != null) partesKm.push(`Horímetro ${formatarNumero(d.horimetro)} h`);
-  e.paragrafo(partesKm.join(" · "), { fonte: negrito, tamanho: 11.5 });
+  // Números em mono (§12.17), rótulos em negrito, tudo na mesma linha.
+  const partesKm: { texto: string; mono?: boolean }[] = [{ texto: "KM " }];
+  if (d.km != null) partesKm.push({ texto: formatarNumero(d.km), mono: true });
+  else partesKm.push({ texto: "não informado" });
+  if (d.horimetro != null) partesKm.push({ texto: " · Horímetro " }, { texto: formatarNumero(d.horimetro), mono: true }, { texto: " h" });
+  e.garantir(16);
+  e.y -= 15.5;
+  let xKm = MARGEM;
+  for (const parte of partesKm) {
+    const fonte = parte.mono ? mono : negrito;
+    e.escrever(parte.texto, xKm, e.y + 4, fonte, 11.5);
+    xKm += e.largura(parte.texto, fonte, 11.5);
+  }
   e.garantir(18);
   e.y -= 16;
   e.escrever("Combustível", MARGEM, e.y + 2, normal, 11);
@@ -436,10 +471,12 @@ export async function gerarPdfVistoria(d: DadosPdfVistoria, fontesBytes: FontesP
   if (!d.itens.length) {
     e.paragrafo("Nenhum item no checklist.");
   } else {
-    e.paragrafo(`${conta("com_problema")} com problema · ${conta("ok")} ok · ${conta("nao_se_aplica")} não se aplica`, {
-      tamanho: 9.5,
-      cor: SUAVE,
-    });
+    const contagens = juntarContagens([
+      [conta("com_problema"), "com problema"],
+      [conta("ok"), "ok"],
+      [conta("nao_se_aplica"), "não se aplica"],
+    ]);
+    if (contagens) e.paragrafo(contagens, { tamanho: 9.5, cor: SUAVE });
     e.y -= 4;
     const itens = ordenarChecklist(d.itens);
     const colL = (LARGURA - 16) / 2;
@@ -502,13 +539,13 @@ export async function gerarPdfVistoria(d: DadosPdfVistoria, fontesBytes: FontesP
   });
 
   // ---------------- painel
-  e.secao("Painel", d.painel.length ? FOTO_A : 20);
-  if (d.painel.length) gradeFotos(e, painelImg);
+  e.secao("Painel", d.painel.length ? PAINEL_A : 20);
+  if (d.painel.length) gradePainel(e, painelImg);
   else e.paragrafo("Sem foto do painel.", { cor: SUAVE });
 
   // ---------------- objetos
   e.secao("Objetos no veículo", 20);
-  if (d.objetos === null) e.paragrafo("Não informado.", { cor: SUAVE });
+  if (d.objetos === null) e.paragrafo("Objetos: não informado.", { cor: SUAVE });
   else if (!d.objetos.length) e.paragrafo("Nenhum objeto.");
   else e.paragrafo(d.objetos.join(", "));
 

@@ -25,7 +25,6 @@ export function ChaveVistoria({ obrigatoria, osSemVistoria }: { obrigatoria: boo
   const [erro, setErro] = useState<string>();
   const [enviando, iniciar] = useTransition();
   const caixaConfirmar = useRef<HTMLDivElement>(null);
-  const valor: Valor = confirmando ? "obrigatoria" : salvo;
 
   useEffect(() => {
     if (confirmando) caixaConfirmar.current?.focus();
@@ -70,13 +69,14 @@ export function ChaveVistoria({ obrigatoria, osSemVistoria }: { obrigatoria: boo
       <Escolha<Valor>
         rotulo="A vistoria é…"
         name="vistoria_obrigatoria"
-        valor={valor}
+        valor={salvo}
         aoMudar={escolher}
+        aoTocarMarcada={() => setConfirmando(false)}
         opcoes={[
           { valor: "opcional", rotulo: "Opcional", desabilitado: enviando },
-          { valor: "obrigatoria", rotulo: "Obrigatória", desabilitado: enviando },
+          { valor: "obrigatoria", rotulo: "Obrigatória", desabilitado: enviando, pendente: confirmando },
         ]}
-        ajuda={<span className="text-base">{AJUDA[valor]}</span>}
+        ajuda={<span className="text-base">{AJUDA[salvo]}</span>}
       />
       {confirmando && (
         <div
@@ -92,7 +92,7 @@ export function ChaveVistoria({ obrigatoria, osSemVistoria }: { obrigatoria: boo
               : `${osSemVistoria} OS abertas estão sem vistoria. Elas não vão poder ficar prontas até alguém fazer a vistoria.`}
           </p>
           <Botao variante="secundario" onClick={() => setConfirmando(false)}>
-            Voltar
+            Manter opcional
           </Botao>
           <Botao onClick={() => salvar("obrigatoria")}>Tornar obrigatória</Botao>
         </div>

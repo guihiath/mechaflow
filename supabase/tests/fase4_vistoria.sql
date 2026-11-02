@@ -10,6 +10,8 @@
 --     mecanico com ve_todas_os ve mas nao faz; mecanico sem acesso nao ve nada;
 --   * KM unico: salvar na vistoria grava na OS; a conclusao copia o KM e
 --     atualiza o veiculo;
+--   * objetos: nasce NULL (nao informado); '{}' so por escolha ("Nenhum objeto");
+--     limpar volta a NULL; concluir com NULL e com '{}' mantem cada um e o hash confere;
 --   * concluir recusado sem marcar itens, com foto pendente, com avaria vazia,
 --     sem assinatura/nome, sem o arquivo da assinatura; "sem assinatura" com motivo;
 --   * DEPOIS DE CONCLUIDA: nada muda nem sai - dono, atendente, mecanico e ate
@@ -28,7 +30,7 @@
 -- tabelas) para provar que o hash acusa a alteracao; tudo volta no ROLLBACK.
 --
 -- Como rodar: SQL Editor do Supabase STAGING (usuario postgres), DEPOIS das
--- migracoes 20261101000001..04 da Fase 4. Colar tudo e executar.
+-- migracoes 20261101000001..04 e 20261102000001 da Fase 4. Colar tudo e executar.
 -- Resultado esperado: 'FASE 4 OK: vistoria passou'.
 -- Tudo numa transacao que termina em ROLLBACK: nada fica gravado.
 -- =============================================================================
@@ -218,6 +220,12 @@ begin
   assert (select status from public.vw_os where id = osA) is not null
      and (select vistoria_entrada_status from public.vw_os where id = osA) = 'rascunho', 'vw_os deveria mostrar o rascunho';
   assert (select pode_editar from public.vw_vistorias where id = r.vistoria_id), 'atendente deveria poder editar';
+  -- objetos: ninguem escolheu nada ainda (DESIGN 12.8)
+  assert (select objetos from public.vistorias where id = r.vistoria_id) is null, 'vistoria nova deveria nascer com objetos NULL';
+  assert (select objetos from public.vw_vistorias where id = r.vistoria_id) is null, 'vw_vistorias deveria mostrar objetos NULL';
+  assert (select column_default is null and is_nullable = 'YES' from information_schema.columns
+           where table_schema = 'public' and table_name = 'vistorias' and column_name = 'objetos'),
+    'coluna objetos deveria aceitar NULL e nascer NULL';
 end $$;
 
 -- dono renomeia o item do modelo: a vistoria continua com a descricao copiada
@@ -252,6 +260,25 @@ begin
   assert (select km from public.ordens_servico where id = osA) = 1200, 'KM da vistoria nao gravou na OS';
   assert (select km from public.vw_vistorias where id = vA) = 1200, 'rascunho deveria mostrar o KM da OS';
   assert (select objetos from public.vistorias where id = vA) = array['Rádio', 'Documentos'], 'objetos nao normalizados';
+  -- objetos: NULL = nao informado; '{}' = "Nenhum objeto"; limpar e pedido explicito
+  perform public.salvar_vistoria(vA, p_limpar_objetos => true);
+  assert (select objetos from public.vistorias where id = vA) is null, 'limpar deveria voltar a NULL';
+  perform public.salvar_vistoria(vA, p_limpar_objetos => true);   -- reenvio
+  assert (select objetos from public.vistorias where id = vA) is null, 'reenvio do limpar deveria continuar NULL';
+  perform public.salvar_vistoria(vA, p_km => 1200);
+  assert (select objetos from public.vistorias where id = vA) is null, 'salvar outra parte nao deveria inventar objetos';
+  perform public.salvar_vistoria(vA, p_objetos => '{}');
+  assert (select objetos from public.vistorias where id = vA) = '{}'::text[], '"Nenhum objeto" deveria gravar lista vazia';
+  perform public.salvar_vistoria(vA, p_km => 1200, p_objetos => null);
+  assert (select objetos from public.vistorias where id = vA) = '{}'::text[], 'p_objetos NULL sem limpar nao deveria mudar';
+  perform public.salvar_vistoria(vA, p_objetos => array['  ', '']);
+  assert (select objetos from public.vistorias where id = vA) is null, 'lista so com brancos nao e "Nenhum objeto"';
+  perform public.salvar_vistoria(vA, p_objetos => array['Rádio'], p_limpar_objetos => true);
+  assert (select objetos from public.vistorias where id = vA) is null, 'limpar deveria vencer p_objetos';
+  perform public.salvar_vistoria(vA, p_objetos => array['Rádio', 'Documentos'], p_limpar_objetos => null);
+  assert (select objetos from public.vistorias where id = vA) = array['Rádio', 'Documentos'], 'objetos deveriam voltar';
+  assert public.zz_erro(format($q$ select public.salvar_vistoria(%L, p_objetos => array_fill('x'::text, array[31])) $q$, vA)) = 'objetos_demais',
+    'mais de 30 objetos aceitos';
   assert (select observacoes from public.vistorias where id = vA) = 'Cabine suja', 'observacoes nao normalizadas';
   assert (select combustivel from public.vistorias where id = vA) = 'meio', 'combustivel nao gravou';
   assert public.zz_erro(format($q$ select public.salvar_vistoria(%L, p_km => -1) $q$, vA)) = 'km_invalido', 'KM negativo aceito';
@@ -775,6 +802,72 @@ begin
   assert (select count(*) from storage.objects where bucket_id = 'vistorias') = 0, 'MECANICO SEM ACESSO LISTA ARQUIVOS DA VISTORIA';
   assert not exists (select 1 from storage.objects where name = current_setting('teste.ass')), 'MECANICO SEM ACESSO ABRE A ASSINATURA';
 end $$;
+
+-- =============================================================================
+-- 10b) OBJETOS NA CONCLUSAO: NULL e '{}' ficam como estao, o hash distingue e confere
+-- =============================================================================
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000004a1","role":"authenticated"}', true);
+select set_config('teste.osN', (select os_id::text from public.abrir_os('f4000000-0000-4000-8000-00000000001a',
+  p_veiculo_id => current_setting('teste.veiculo')::uuid)), true);
+select set_config('teste.osV', (select os_id::text from public.abrir_os('f4000000-0000-4000-8000-00000000001b',
+  p_veiculo_id => current_setting('teste.veiculo')::uuid)), true);
+do $$
+declare
+  vN uuid;
+  vV uuid;
+  hN text;
+begin
+  select vistoria_id into vN from public.iniciar_vistoria(current_setting('teste.osN')::uuid);
+  perform public.marcar_itens_restantes_ok(vN);
+  perform public.salvar_vistoria(vN, p_sem_avarias => true);
+  hN := public.concluir_vistoria(vN, 'recusou');
+  assert hN ~ '^[0-9a-f]{64}$', 'concluir com objetos nao informados deveria dar hash';
+  assert (select status = 'concluida' and objetos is null from public.vistorias where id = vN), 'concluida deveria manter objetos NULL';
+  assert public.conferir_vistoria(vN), 'hash com objetos NULL deveria conferir';
+  assert public.concluir_vistoria(vN) = hN, 'reenvio do concluir com objetos NULL deveria devolver o mesmo hash';
+
+  select vistoria_id into vV from public.iniciar_vistoria(current_setting('teste.osV')::uuid);
+  perform public.marcar_itens_restantes_ok(vV);
+  perform public.salvar_vistoria(vV, p_sem_avarias => true, p_objetos => '{}');
+  perform public.concluir_vistoria(vV, 'recusou');
+  assert (select status = 'concluida' and objetos = '{}'::text[] from public.vistorias where id = vV), 'concluida deveria manter "Nenhum objeto"';
+  assert public.conferir_vistoria(vV), 'hash com "Nenhum objeto" deveria conferir';
+
+  assert public.zz_erro(format($q$ select public.salvar_vistoria(%L, p_limpar_objetos => true) $q$, vV)) = 'vistoria_concluida', 'LIMPOU OBJETOS DE VISTORIA CONCLUIDA';
+  assert public.zz_erro(format($q$ select public.salvar_vistoria(%L, p_objetos => '{}') $q$, vN)) = 'vistoria_concluida', 'MUDOU OBJETOS DE VISTORIA CONCLUIDA';
+  perform set_config('teste.vN', vN::text, true);
+  perform set_config('teste.vV', vV::text, true);
+
+  -- anular passa pelo trigger que compara o resto da linha: NULL nao pode atrapalhar
+  perform public.anular_vistoria(vN, 'Feita na OS errada: teste');
+  assert (select status = 'anulada' and objetos is null from public.vistorias where id = vN), 'anulada deveria manter objetos NULL';
+end $$;
+
+reset role;
+do $$
+declare
+  vN uuid := current_setting('teste.vN')::uuid;
+  vV uuid := current_setting('teste.vV')::uuid;
+begin
+  -- o conteudo assinado distingue "nao informado" de "Nenhum objeto"
+  assert private.conteudo_vistoria(vN) -> 'objetos' = 'null'::jsonb, 'conteudo deveria ter objetos null';
+  assert private.conteudo_vistoria(vV) -> 'objetos' = '[]'::jsonb, 'conteudo deveria ter objetos []';
+  -- nem o postgres troca um pelo outro depois de concluida
+  assert public.zz_erro(format($q$ update public.vistorias set objetos = null where id = %L $q$, vV)) = 'vistoria_concluida',
+    'POSTGRES LIMPOU OBJETOS DE VISTORIA CONCLUIDA';
+  assert public.zz_erro(format($q$ update public.vistorias set objetos = '{}' where id = %L $q$, vN)) = 'vistoria_concluida',
+    'POSTGRES MARCOU NENHUM OBJETO EM VISTORIA ANULADA';
+  -- so existe a assinatura nova da RPC, com as mesmas permissoes
+  assert (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+           where n.nspname = 'public' and p.proname = 'salvar_vistoria') = 1, 'salvar_vistoria deveria ter uma versao so';
+  assert (select prosecdef and proconfig = array['search_path=""'] from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+           where n.nspname = 'public' and p.proname = 'salvar_vistoria'), 'salvar_vistoria deveria ser security definer com search_path vazio';
+  assert not has_function_privilege('anon', 'public.salvar_vistoria(uuid, integer, integer, public.nivel_combustivel, text[], text, boolean, text, boolean)', 'execute'),
+    'ANON PODE CHAMAR salvar_vistoria';
+  assert has_function_privilege('authenticated', 'public.salvar_vistoria(uuid, integer, integer, public.nivel_combustivel, text[], text, boolean, text, boolean)', 'execute'),
+    'authenticated deveria chamar salvar_vistoria';
+end $$;
+set local role authenticated;
 
 -- =============================================================================
 -- 11) Anon

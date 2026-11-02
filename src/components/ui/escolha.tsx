@@ -19,10 +19,12 @@ export function Escolha<T extends string>({
   erro,
   colunas,
   rotuloOculto,
+  aoTocarMarcada,
 }: {
   rotulo: string;
   name: string;
-  opcoes: { valor: T; rotulo: ReactNode; desabilitado?: boolean }[];
+  /** `pendente`: esperando confirmar. Borda de alerta, sem marcar (ex.: "Obrigatória" antes de confirmar). */
+  opcoes: { valor: T; rotulo: ReactNode; desabilitado?: boolean; pendente?: boolean }[];
   valor: T | "" | null | undefined;
   aoMudar: (valor: T) => void;
   ajuda?: ReactNode;
@@ -30,6 +32,8 @@ export function Escolha<T extends string>({
   /** Padrao: 3 opcoes = 3 colunas; resto = 2. */
   colunas?: 1 | 2 | 3;
   rotuloOculto?: boolean;
+  /** Toque na opção já marcada (o radio não dispara mudança). Ex.: desistir de uma confirmação aberta. */
+  aoTocarMarcada?: (valor: T) => void;
 }) {
   const id = useId();
   const n = colunas ?? (opcoes.length === 3 ? 3 : 2);
@@ -48,7 +52,9 @@ export function Escolha<T extends string>({
               } ${
                 ativo
                   ? "border-grafite bg-primaria text-primaria-texto"
-                  : erro
+                  : o.pendente
+                    ? "border-alerta bg-superficie text-texto"
+                    : erro
                     ? "border-erro bg-superficie text-texto"
                     : "border-borda bg-superficie text-texto"
               }`}
@@ -60,6 +66,7 @@ export function Escolha<T extends string>({
                 checked={ativo}
                 disabled={o.desabilitado}
                 onChange={() => aoMudar(o.valor)}
+                onClick={ativo && aoTocarMarcada ? () => aoTocarMarcada(o.valor) : undefined}
                 data-invalido={erro ? "true" : undefined}
                 className="sr-only"
               />

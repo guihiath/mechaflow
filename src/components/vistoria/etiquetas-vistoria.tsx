@@ -68,6 +68,15 @@ export function EtiquetaVistoriaCartao({
 }) {
   const e = !estado || estado === "anulada" ? "sem" : estado;
   if (e === "sem" && !obrigatoria) return null;
+  // Na lista quase toda OS pode estar assim: contorno, para não gritar em todo cartão (sólido só no detalhe).
+  if (e === "sem") {
+    return (
+      <span className="inline-flex h-8 items-center gap-1.5 rounded-sm border-2 border-alerta bg-superficie px-2.5 text-sm font-bold text-alerta-texto">
+        <ClipboardX {...ICONE} />
+        Sem vistoria
+      </span>
+    );
+  }
   return <EtiquetaVistoria estado={e} obrigatoria={obrigatoria} />;
 }
 

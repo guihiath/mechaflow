@@ -131,10 +131,16 @@ function ordemParte(p: Parte): number {
   return { entrada: 1, objetos: 2, observacoes: 3, nome: 4, sem_avarias: 5, resto_ok: 7 }[p as string] ?? 5;
 }
 
+/**
+ * Banco -> tela. null = não informado; [] = "Nenhum objeto" (só quando o banco tem a lista vazia).
+ * Só texto em "Outros" deixa os chips em null: apagar o texto volta a "não informado", em vez de
+ * virar "Nenhum objeto" sem ninguém ter escolhido.
+ */
 function separarObjetos(arr: string[] | null): { objetos: string[] | null; outros: string } {
   if (!arr) return { objetos: null, outros: "" };
+  if (arr.length === 0) return { objetos: [], outros: "" };
   const chips = arr.filter((o) => (OBJETOS_VISTORIA as readonly string[]).includes(o));
-  return { objetos: chips, outros: arr.filter((o) => !chips.includes(o)).join(", ") };
+  return { objetos: chips.length ? chips : null, outros: arr.filter((o) => !chips.includes(o)).join(", ") };
 }
 
 function doServidor(v: VistoriaServidor, itens: ItemServidor[], passo: NumeroPasso): RascunhoVistoria {
@@ -192,6 +198,7 @@ function aplicarLocal(base: RascunhoVistoria, local: RascunhoVistoria): Rascunho
   return x;
 }
 
+/** O que a parte "objetos" manda ao banco; null = voltar a "não informado" (p_limpar_objetos). */
 function objetosParaEnviar(x: RascunhoVistoria): string[] | null {
   const outros = x.outrosObjetos.trim().slice(0, LIMITE_OUTROS_OBJETOS);
   if (x.objetos === null && !outros) return null;
@@ -299,7 +306,7 @@ export function VistoriaRascunho({
       });
     } else if (parte === "objetos") {
       const objetos = objetosParaEnviar(x);
-      if (objetos) q = supabase.rpc("salvar_vistoria", { p_vistoria_id: id, p_objetos: objetos });
+      q = supabase.rpc("salvar_vistoria", objetos ? { p_vistoria_id: id, p_objetos: objetos } : { p_vistoria_id: id, p_limpar_objetos: true });
     } else if (parte === "observacoes") {
       q = supabase.rpc("salvar_vistoria", { p_vistoria_id: id, p_observacoes: x.observacoes.trim() });
     } else if (parte === "nome") {
@@ -946,6 +953,10 @@ export function VistoriaRascunho({
     e.preventDefault();
     setPerguntaSair(true);
   }
+  function sairDaVistoria() {
+    setPerguntaSair(false);
+    router.push(`/os/${osId}`);
+  }
 
   // ------------------------------------------------ quem não pode editar: só vê
   const cabecalho = (
@@ -996,13 +1007,15 @@ export function VistoriaRascunho({
           <Botao
             variante="secundario"
             className="px-2"
+            aria-label="Sem avarias, próximo passo"
             onClick={() => {
               mudar((x) => ({ ...x, semAvarias: true }), ["sem_avarias"]);
               irPara(4);
             }}
             data-teste="sem-avarias"
           >
-            Sem avarias, próximo
+            Sem avarias
+            <ArrowRight size={22} strokeWidth={2.25} aria-hidden />
           </Botao>
         ) : (
           <Botao variante="secundario" onClick={() => irPara(4)} data-teste="proximo-passo">
@@ -1201,11 +1214,14 @@ export function VistoriaRascunho({
                 aoAlternarObjeto={(o) =>
                   mudar((x) => {
                     const atuais = x.objetos ?? [];
-                    return { ...x, objetos: atuais.includes(o) ? atuais.filter((y) => y !== o) : [...atuais, o] };
+                    const novos = atuais.includes(o) ? atuais.filter((y) => y !== o) : [...atuais, o];
+                    return { ...x, objetos: novos.length ? novos : null }; // desmarcou o último: não informado
                   }, ["objetos"])
                 }
-                aoMarcarNenhum={() => mudar((x) => ({ ...x, objetos: [], outrosObjetos: "" }), ["objetos"])}
-                aoMudarOutros={(t) => mudar((x) => ({ ...x, outrosObjetos: t, objetos: x.objetos ?? [] }), ["objetos"])}
+                aoMarcarNenhum={() =>
+                  mudar((x) => ({ ...x, objetos: x.objetos?.length === 0 && !x.outrosObjetos.trim() ? null : [], outrosObjetos: "" }), ["objetos"])
+                }
+                aoMudarOutros={(t) => mudar((x) => ({ ...x, outrosObjetos: t, objetos: x.objetos?.length ? x.objetos : null }), ["objetos"])}
                 observacoes={r.observacoes}
                 aoMudarObservacoes={(t) => mudar((x) => ({ ...x, observacoes: t }), ["observacoes"])}
               />
@@ -1499,21 +1515,25 @@ export function VistoriaRascunho({
           <Folha aberta aoFechar={() => setPerguntaSair(false)} titulo="Sair da vistoria?">
             <div className="flex flex-col gap-3">
               <p className="text-base">
-                {fotosAndando > 0
-                  ? `Ainda tem ${fotosAndando === 1 ? "1 foto" : `${fotosAndando} fotos`} para enviar.`
-                  : "Ainda tem mudanças para salvar no servidor."}{" "}
-                Se sair agora, fica tudo guardado neste celular e é enviado quando você abrir a vistoria de novo.
+                {semInternet
+                  ? "Sem internet agora. O que você marcou está guardado neste celular e vai ser enviado quando você abrir a vistoria com internet."
+                  : "Ainda está salvando o que você marcou. Se sair agora, fica guardado neste celular e é enviado quando você abrir a vistoria de novo."}
               </p>
-              <Botao onClick={() => setPerguntaSair(false)}>Ficar até enviar</Botao>
-              <Botao
-                variante="secundario"
-                onClick={() => {
-                  setPerguntaSair(false);
-                  router.push(`/os/${osId}`);
-                }}
-              >
-                Sair mesmo assim
-              </Botao>
+              {semInternet ? (
+                <>
+                  <Botao onClick={sairDaVistoria}>Sair (fica guardado)</Botao>
+                  <Botao variante="secundario" onClick={() => setPerguntaSair(false)}>
+                    Continuar na vistoria
+                  </Botao>
+                </>
+              ) : (
+                <>
+                  <Botao onClick={() => setPerguntaSair(false)}>Esperar salvar</Botao>
+                  <Botao variante="secundario" onClick={sairDaVistoria}>
+                    Sair mesmo assim
+                  </Botao>
+                </>
+              )}
             </div>
           </Folha>
         )}

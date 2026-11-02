@@ -56,7 +56,7 @@ export function AvisoDesfazer({
       onPointerLeave={() => setEmCima(false)}
       onTouchStart={() => setEmCima(true)}
       onTouchEnd={() => setEmCima(false)}
-      className="fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-50 flex min-h-14 items-center gap-3 bg-grafite py-1 pr-2 pl-4 text-base text-[#EDEBE6] lg:inset-x-auto lg:bottom-6 lg:left-[calc(15rem+2rem)] lg:min-w-96 lg:rounded-md"
+      className="fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-50 flex min-h-14 items-center gap-3 border-t border-borda bg-grafite py-1 pr-2 pl-4 text-base text-[#EDEBE6] lg:inset-x-auto lg:bottom-6 lg:left-[calc(15rem+2rem)] lg:min-w-96 lg:rounded-md"
     >
       <p className="min-w-0 flex-1">{mensagem}</p>
       <button

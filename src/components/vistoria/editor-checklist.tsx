@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useId, useLayoutEffect, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, ChevronRight, CircleAlert, RotateCcw } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronRight, CircleAlert, PenLine, RotateCcw } from "lucide-react";
 
 export type ItemEditorChecklist = { id: string; descricao: string };
 export type Direcao = "subir" | "descer";
@@ -42,6 +42,7 @@ export function LinhaEditorChecklist({
           {posicao}
         </span>
         <span className="min-w-0 flex-1 text-lg leading-snug font-bold break-words">{item.descricao}</span>
+        <PenLine size={18} strokeWidth={2.25} aria-hidden className="shrink-0 text-texto-suave" />
       </button>
       <button
         type="button"

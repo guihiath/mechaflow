@@ -112,7 +112,7 @@ export type Database = {
           id: string
           km: number | null
           motivo_anulacao: string | null
-          objetos: string[]
+          objetos: string[] | null
           observacoes: string | null
           sem_avarias: boolean
           oficina_id: string
@@ -143,7 +143,7 @@ export type Database = {
           id?: string
           km?: number | null
           motivo_anulacao?: string | null
-          objetos?: string[]
+          objetos?: string[] | null
           observacoes?: string | null
           sem_avarias?: boolean
           oficina_id: string
@@ -174,7 +174,7 @@ export type Database = {
           id?: string
           km?: number | null
           motivo_anulacao?: string | null
-          objetos?: string[]
+          objetos?: string[] | null
           observacoes?: string | null
           sem_avarias?: boolean
           oficina_id?: string
@@ -1782,6 +1782,7 @@ export type Database = {
           p_combustivel?: Database["public"]["Enums"]["nivel_combustivel"] | null
           p_horimetro?: number | null
           p_km?: number | null
+          p_limpar_objetos?: boolean | null
           p_objetos?: string[] | null
           p_assinado_por_nome?: string | null
           p_observacoes?: string | null

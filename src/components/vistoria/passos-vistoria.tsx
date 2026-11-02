@@ -50,12 +50,12 @@ export function PassosVistoria({
                 onClick={() => aoIr(p.numero)}
                 aria-current={ehAtual ? "step" : undefined}
                 aria-label={`Passo ${p.numero}: ${nome}`}
-                className={`relative flex h-12 w-full min-w-0 flex-col items-center justify-center rounded-md px-0.5 leading-none transition-colors ${
+                className={`relative flex h-12 w-full min-w-0 flex-col items-center justify-center rounded-md px-0 leading-none transition-colors ${
                   ehAtual
                     ? "border-b-[3px] border-grafite bg-primaria text-primaria-texto"
                     : e.estado === "nao_visto"
-                      ? "border-2 border-borda bg-superficie text-texto active:bg-superficie-2"
-                      : "border-2 border-borda-sutil bg-superficie text-texto active:bg-superficie-2"
+                      ? "border-[1.5px] border-borda bg-superficie text-texto active:bg-superficie-2"
+                      : "border-[1.5px] border-borda-sutil bg-superficie text-texto active:bg-superficie-2"
                 }`}
               >
                 {feito ? (
@@ -70,7 +70,7 @@ export function PassosVistoria({
                     {p.numero}
                   </span>
                 )}
-                <span aria-hidden className="mt-0.5 max-w-full truncate text-xs font-bold tracking-tight [hyphens:none]">
+                <span aria-hidden className="mt-0.5 text-[clamp(11px,3.3vw,13px)] font-bold tracking-[-0.01em] whitespace-nowrap">
                   {p.curto}
                 </span>
                 {pendente && (

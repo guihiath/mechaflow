@@ -12,6 +12,7 @@ import { CombustivelLeitura, MarcadorCombustivel } from "@/components/vistoria/m
 import type { NumeroPasso } from "@/components/vistoria/passos-vistoria";
 import {
   formatarNumero,
+  juntarContagens,
   ROTULO_LADO_AVARIA,
   ROTULO_SITUACAO_ITEM_LEITURA,
   soDigitos,
@@ -321,13 +322,13 @@ export function PassoPainelObjetos({
           </p>
         ) : (
           <div className="grid grid-cols-2 gap-2">
-            <label htmlFor={idCamera} className={classesBotaoArquivo("secundario", "px-2")}>
-              <Camera size={22} strokeWidth={2.25} aria-hidden />
-              Fotografar painel
-              <input id={idCamera} type="file" accept="image/*" capture="environment" className="sr-only" onChange={aoEscolherPainel} data-teste="camera-painel" />
+            <label htmlFor={idCamera} className={classesBotaoArquivo("secundario", "gap-1.5 px-2 whitespace-nowrap")}>
+              <Camera size={22} strokeWidth={2.25} aria-hidden className="shrink-0" />
+              Fotografar
+              <input id={idCamera} type="file" accept="image/*" capture="environment" aria-label="Fotografar painel" className="sr-only" onChange={aoEscolherPainel} data-teste="camera-painel" />
             </label>
-            <label htmlFor={idGaleria} className={classesBotaoArquivo("secundario", "px-2")}>
-              <Images size={22} strokeWidth={2.25} aria-hidden />
+            <label htmlFor={idGaleria} className={classesBotaoArquivo("secundario", "gap-1.5 px-2 whitespace-nowrap")}>
+              <Images size={22} strokeWidth={2.25} aria-hidden className="shrink-0" />
               Da galeria
               <input id={idGaleria} type="file" accept="image/*" multiple className="sr-only" onChange={aoEscolherPainel} data-teste="galeria-painel" />
             </label>
@@ -454,17 +455,27 @@ export function ResumoVistoria({
     <div className="flex flex-col gap-3" data-teste="resumo-vistoria">
       <BlocoResumo titulo="Entrada" passo={1} irPara={irPara}>
         <p className="flex flex-wrap items-center gap-x-2 text-base">
-          <span className="font-mono">KM {km || "—"}</span>
-          {horimetro && <span className="font-mono">· {horimetro} h</span>}
-          <span>·</span>
+          <span>
+            KM <span className="font-mono">{km || "—"}</span>
+          </span>
+          {horimetro && (
+            <span>
+              · Horímetro <span className="font-mono">{horimetro}</span> h
+            </span>
+          )}
+          <span>· Combustível</span>
           <CombustivelLeitura nivel={combustivel} />
         </p>
       </BlocoResumo>
       <BlocoResumo titulo="Checklist" passo={2} irPara={irPara}>
         <p className="text-base">
-          {itens.length} {itens.length === 1 ? "item" : "itens"}: {conta("ok")} ok · {conta("com_problema")} com problema · {conta("nao_se_aplica")}{" "}
-          não se aplica
-          {itens.some((i) => !i.situacao) ? ` · ${itens.filter((i) => !i.situacao).length} sem marcar` : ""}
+          {itens.length} {itens.length === 1 ? "item" : "itens"}:{" "}
+          {juntarContagens([
+            [conta("ok"), "ok"],
+            [conta("com_problema"), "com problema"],
+            [conta("nao_se_aplica"), "não se aplica"],
+            [itens.filter((i) => !i.situacao).length, "sem marcar"],
+          ])}
         </p>
         {problemas.length > 0 && (
           <ul className="flex flex-col gap-1">
@@ -517,10 +528,16 @@ export function ResumoVistoria({
         ) : (
           <p className="text-base text-texto-suave">Sem foto do painel</p>
         )}
-        <p className="text-base">
-          Objetos: {objetos === null && !outros.trim() ? "não informado." : listaObjetos.length ? `${listaObjetos.join(", ")}.` : "nenhum objeto."}
-        </p>
-        {observacoes.trim() && <p className="text-base break-words whitespace-pre-line">{observacoes.trim()}</p>}
+        {objetos === null && !outros.trim() ? (
+          <p className="text-base text-texto-suave" data-teste="objetos-resumo">
+            Objetos: não informado.
+          </p>
+        ) : (
+          <p className="text-base" data-teste="objetos-resumo">
+            Objetos: {listaObjetos.length ? `${listaObjetos.join(", ")}.` : "nenhum objeto."}
+          </p>
+        )}
+        {observacoes.trim() && <p className="text-base break-words whitespace-pre-line">Observações: {observacoes.trim()}</p>}
       </BlocoResumo>
     </div>
   );

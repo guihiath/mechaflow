@@ -99,7 +99,7 @@ async function Conteudo({
   const encerrada = osEncerrada(os.status);
   const v = vR.data;
   if (verId && !v?.id) notFound();
-  const titulo = `Vistoria · ${placa}`;
+  const titulo = `${v?.status === "anulada" ? "Vistoria anulada" : "Vistoria"} · ${placa}`;
   const anuladas = (anuladasR.data ?? []).map((a) => a.id).filter((x): x is string => Boolean(x));
   const podeFazer = !encerrada && (ctx.papel !== "mecanico" || os.mecanico_id === ctx.usuario_id);
 
@@ -239,14 +239,22 @@ async function Conteudo({
           {param(sp.concluida) === "1" && concluida && (
             <CaixaMensagem tipo="sucesso">Vistoria concluída. Agora ninguém pode mudar.</CaixaMensagem>
           )}
-          {param(sp.anulada) === "1" && v.status === "anulada" && (
-            <CaixaMensagem tipo="sucesso">Vistoria anulada. Ela fica guardada aqui e outra pode ser feita na OS.</CaixaMensagem>
-          )}
           {(param(sp.concluida) === "1" || param(sp.anulada) === "1") && <LimparUrl manter={verId ? `?ver=${verId}` : undefined} />}
-          {v.status === "anulada" && (
-            <CartaoVistoriaOS osId={id} vistoria={ativa} podeFazer={podeFazer} encerrada={encerrada} />
-          )}
-          <LeituraVistoria dados={dadosLeitura} usuarioId={ctx.usuario_id} ehMecanico={ctx.papel === "mecanico"} />
+          <LeituraVistoria
+            dados={dadosLeitura}
+            usuarioId={ctx.usuario_id}
+            ehMecanico={ctx.papel === "mecanico"}
+            aposAnulada={
+              v.status === "anulada" ? (
+                <>
+                  {param(sp.anulada) === "1" && (
+                    <CaixaMensagem tipo="info">Vistoria anulada. Ela fica guardada aqui e outra pode ser feita na OS.</CaixaMensagem>
+                  )}
+                  <CartaoVistoriaOS osId={id} vistoria={ativa} podeFazer={podeFazer} encerrada={encerrada} aposAnulada />
+                </>
+              ) : undefined
+            }
+          />
         </Pagina>
       </>
     );

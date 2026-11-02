@@ -491,7 +491,7 @@ export function BarraOS({ proximoPasso }: { proximoPasso?: string }) {
   const avisoVistoria = bloqueadaPelaVistoria ? (
     <p className="flex items-start gap-1.5 text-[15px] font-bold text-alerta-texto" data-teste="aviso-vistoria-obrigatoria">
       <ClipboardX size={20} strokeWidth={2.25} aria-hidden className="mt-0.5 shrink-0" />
-      {os.status === "pronta" ? "Vistoria obrigatória: sem ela a OS não pode ser entregue." : "Vistoria obrigatória: sem ela a OS não fica pronta."}
+      {os.status === "pronta" ? "Sem vistoria, a OS não é entregue." : "Sem vistoria, a OS não fica pronta."}
     </p>
   ) : null;
 

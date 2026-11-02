@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, type ReactNode } from "react";
-import { ImageOff } from "lucide-react";
+import { Ban, ImageOff } from "lucide-react";
 import { Cartao } from "@/components/ui/estados";
 import { CaixaMensagem } from "@/components/ui/formulario";
 import {
@@ -9,7 +9,7 @@ import {
   EtiquetaSemAssinatura,
   EtiquetaVistoria,
 } from "@/components/vistoria/etiquetas-vistoria";
-import { formatarDiaHora, formatarNumeroOS, type MotivoSemAssinatura } from "@/lib/formato";
+import { formatarDiaHora, formatarMotivoAnulacao, formatarNumeroOS, type MotivoSemAssinatura } from "@/lib/formato";
 
 export type AssinaturaLeitura =
   | { tipo: "assinada"; src: string | null; nome: string; em?: string | null }
@@ -73,7 +73,9 @@ export function AssinaturaVistoria({ assinatura }: { assinatura: AssinaturaLeitu
 
 /**
  * Topo da vistoria concluida (DESIGN §12.12 itens 2 e 3) + o conteudo (entrada, checklist,
- * avarias... vem em `children`) + complementos. Anulada: caixa de erro no topo (§12.13).
+ * avarias... vem em `children`) + complementos. Anulada: caixa de erro no topo (§12.13), logo depois
+ * o que dá para fazer (`aposAnulada`) e a faixa "Vistoria anulada" de novo acima da assinatura: rolada
+ * para baixo, a página não pode parecer uma vistoria válida.
  */
 export function BlocoVistoriaConcluida({
   numeroOS,
@@ -84,6 +86,7 @@ export function BlocoVistoriaConcluida({
   anulada,
   children,
   aoAbrirFotoComplemento,
+  aposAnulada,
 }: {
   numeroOS: number | string;
   /** Vazio/null: a vistoria foi anulada ainda em rascunho (nunca concluída). */
@@ -95,15 +98,18 @@ export function BlocoVistoriaConcluida({
   anulada?: { em: string; por: string; motivo: string } | null;
   children?: ReactNode;
   aoAbrirFotoComplemento?: (complemento: DadosComplemento, indiceFoto: number) => void;
+  /** Só na anulada: aviso e "Fazer nova vistoria", logo depois da caixa de erro. */
+  aposAnulada?: ReactNode;
 }) {
   const id = useId();
   return (
     <div className="flex flex-col gap-6">
       {anulada && (
         <CaixaMensagem tipo="erro">
-          Vistoria anulada em {formatarDiaHora(anulada.em)} por {anulada.por}. Motivo: {anulada.motivo}
+          Vistoria anulada em {formatarDiaHora(anulada.em)} por {anulada.por}. Motivo: {formatarMotivoAnulacao(anulada.motivo)}
         </CaixaMensagem>
       )}
+      {anulada && aposAnulada}
       <div className="flex flex-col items-start gap-1.5">
         <EtiquetaVistoria estado={anulada ? "anulada" : "concluida"} />
         <p className="text-base">Vistoria de entrada da {formatarNumeroOS(numeroOS)}</p>
@@ -113,6 +119,12 @@ export function BlocoVistoriaConcluida({
       </div>
 
       <section aria-labelledby={`${id}-assinatura`} className="flex flex-col gap-2">
+        {anulada && (
+          <p className="flex min-h-toque items-center gap-2 rounded-md border-2 border-erro px-3 text-base font-bold text-erro-texto" data-teste="faixa-anulada">
+            <Ban size={20} strokeWidth={2.25} aria-hidden className="shrink-0" />
+            Vistoria anulada
+          </p>
+        )}
         <h2 id={`${id}-assinatura`} className="text-xl">
           Assinatura
         </h2>

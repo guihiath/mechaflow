@@ -131,6 +131,7 @@ export function ConfirmarComMotivo({
   ajudaOutro,
   erroSemMotivo = "Escolha o motivo do cancelamento.",
   erroSemTexto = "Escreva o motivo.",
+  aoMudarAberto,
 }: {
   acao: (motivo: string) => Promise<EstadoAcao>;
   rotulo?: string;
@@ -151,6 +152,8 @@ export function ConfirmarComMotivo({
   ajudaOutro?: string;
   erroSemMotivo?: string;
   erroSemTexto?: string;
+  /** Avisa o pai quando a caixa abre/fecha (ex.: esconder a barra de ações). */
+  aoMudarAberto?: (aberto: boolean) => void;
 }) {
   const [aberto, setAberto] = useState(false);
   const [motivo, setMotivo] = useState<string | undefined>(motivoInicial);
@@ -178,8 +181,14 @@ export function ConfirmarComMotivo({
     }
   }, [aberto]);
 
+  function abrirCaixa() {
+    setAberto(true);
+    aoMudarAberto?.(true);
+  }
+
   function fechar() {
     setAberto(false);
+    aoMudarAberto?.(false);
     setMotivo(motivoInicial);
     setOutro("");
     setErro(undefined);
@@ -212,7 +221,7 @@ export function ConfirmarComMotivo({
 
   if (!aberto) {
     return (
-      <Botao ref={abrir} variante="secundario" className="text-erro-texto!" onClick={() => setAberto(true)}>
+      <Botao ref={abrir} variante="secundario" className="text-erro-texto!" onClick={abrirCaixa}>
         <CircleX size={24} strokeWidth={2.25} aria-hidden />
         {rotulo}
       </Botao>
@@ -234,41 +243,46 @@ export function ConfirmarComMotivo({
         {texto && <p className="text-base text-texto-suave">{texto}</p>}
       </div>
 
-      <fieldset className="flex flex-col gap-1.5" aria-describedby={erroMotivo ? `${idMotivo}-erro` : undefined}>
-        <legend className="mb-1.5 text-sm font-bold text-texto">Motivo</legend>
-        <div className="grid grid-cols-2 gap-2">
-          {motivos.map((m) => {
-            const ativo = m === motivo;
-            return (
-              <label
-                key={m}
-                className={`flex min-h-toque cursor-pointer items-center justify-center gap-1.5 rounded-md border-2 px-2 text-center text-base font-bold transition-colors has-[:focus-visible]:outline has-[:focus-visible]:outline-[3px] has-[:focus-visible]:outline-foco ${
-                  ativo
-                    ? "border-grafite bg-primaria text-primaria-texto"
-                    : erroMotivo
-                      ? "border-erro bg-superficie text-texto"
-                      : "border-borda bg-superficie text-texto"
-                }`}
-              >
-                <input
-                  type="radio"
-                  name={idMotivo}
-                  value={m}
-                  checked={ativo}
-                  onChange={() => {
-                    setMotivo(m);
-                    setErroMotivo(undefined);
-                  }}
-                  className="sr-only"
-                />
-                {ativo && <Check size={20} strokeWidth={2.5} aria-hidden className="shrink-0" />}
-                {m}
-              </label>
-            );
-          })}
-        </div>
-        {erroMotivo && <ErroLinha id={`${idMotivo}-erro`}>{erroMotivo}</ErroLinha>}
-      </fieldset>
+      {motivos.length === 1 ? (
+        // Motivo único não é escolha: vira texto.
+        <p className="text-base font-bold">Motivo: {motivos[0].charAt(0).toLowerCase() + motivos[0].slice(1)}</p>
+      ) : (
+        <fieldset className="flex flex-col gap-1.5" aria-describedby={erroMotivo ? `${idMotivo}-erro` : undefined}>
+          <legend className="mb-1.5 text-sm font-bold text-texto">Motivo</legend>
+          <div className="grid grid-cols-2 gap-2">
+            {motivos.map((m) => {
+              const ativo = m === motivo;
+              return (
+                <label
+                  key={m}
+                  className={`flex min-h-toque cursor-pointer items-center justify-center gap-1.5 rounded-md border-2 px-2 text-center text-base font-bold transition-colors has-[:focus-visible]:outline has-[:focus-visible]:outline-[3px] has-[:focus-visible]:outline-foco ${
+                    ativo
+                      ? "border-grafite bg-primaria text-primaria-texto"
+                      : erroMotivo
+                        ? "border-erro bg-superficie text-texto"
+                        : "border-borda bg-superficie text-texto"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name={idMotivo}
+                    value={m}
+                    checked={ativo}
+                    onChange={() => {
+                      setMotivo(m);
+                      setErroMotivo(undefined);
+                    }}
+                    className="sr-only"
+                  />
+                  {ativo && <Check size={20} strokeWidth={2.5} aria-hidden className="shrink-0" />}
+                  {m}
+                </label>
+              );
+            })}
+          </div>
+          {erroMotivo && <ErroLinha id={`${idMotivo}-erro`}>{erroMotivo}</ErroLinha>}
+        </fieldset>
+      )}
 
       {ehOutro && (
         <div className="flex flex-col gap-1.5">

@@ -33,6 +33,8 @@ export function CartaoVistoriaOS({
   encerrada,
   obrigatoria = false,
   anuladas = [],
+  aposAnulada = false,
+  botaoNaBarra = false,
 }: {
   osId: string;
   vistoria: ResumoVistoriaOS;
@@ -42,6 +44,10 @@ export function CartaoVistoriaOS({
   obrigatoria?: boolean;
   /** Ids das vistorias anuladas desta OS, a mais nova primeiro (DESIGN §12.2 b: "1 vistoria anulada"). */
   anuladas?: string[];
+  /** Na página da vistoria anulada: o próximo passo é refazer, então vira o primário "Fazer nova vistoria" (M8). */
+  aposAnulada?: boolean;
+  /** A barra de ações já tem "Fazer/Continuar vistoria" como primário: o cartão não repete (M9). */
+  botaoNaBarra?: boolean;
 }) {
   const [erro, setErro] = useState<string>();
   const [abrindo, iniciar] = useTransition();
@@ -105,10 +111,10 @@ export function CartaoVistoriaOS({
           </a>
         )}
         {erro && <CaixaMensagem tipo="erro">{erro}</CaixaMensagem>}
-        {podeFazer ? (
-          <Botao variante="secundario" onClick={fazer} disabled={abrindo} aria-busy={abrindo} className="mt-1 w-full">
+        {botaoNaBarra ? null : podeFazer ? (
+          <Botao variante={aposAnulada && !emAndamento ? "primario" : "secundario"} onClick={fazer} disabled={abrindo} aria-busy={abrindo} className="mt-1 w-full">
             <ClipboardCheck size={22} strokeWidth={2.25} aria-hidden />
-            {abrindo ? "Abrindo…" : emAndamento ? "Continuar vistoria" : "Fazer vistoria"}
+            {abrindo ? "Abrindo…" : emAndamento ? "Continuar vistoria" : aposAnulada ? "Fazer nova vistoria" : "Fazer vistoria"}
           </Botao>
         ) : emAndamento ? (
           <a href={`/os/${osId}/vistoria`} className="inline-flex min-h-toque items-center text-base font-bold text-info-texto underline underline-offset-4">

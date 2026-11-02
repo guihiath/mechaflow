@@ -10,6 +10,8 @@
  * assinatura PNG no bucket "vistorias", conclusao e suas recusas), imutabilidade depois de
  * concluida (tabelas, RPCs e Storage), complemento, anular, isolamento, mecanico (17.6),
  * obrigatoriedade, idempotencia com reenvio simultaneo e, com APP_URL, o PDF e as paginas.
+ * Objetos da vistoria: NULL = nao informado, [] = "Nenhum objeto" (exige a migracao
+ * 20261102000001_fase4_objetos_nao_informado no staging).
  *
  * Uso:
  *   node scripts/testar-staging.mjs                         # so testes sem login (anon)
@@ -1209,6 +1211,62 @@ async function testesFase4({ donoA, mec, mec2, at, donoB, ofA, ofB, vei }) {
   const qtdOs1 = (await donoA.sb.from("vistorias").select("id").eq("os_id", os1)).data ?? [];
   checar("a OS continua com uma vistoria so", qtdOs1.length === 1, `${qtdOs1.length}`);
 
+  // ---------------------------------------------------------------- objetos: nao informado (REVISAO-FASE4 C1)
+  console.log("\n== Fase 4: objetos (NULL = nao informado; [] = Nenhum objeto) ==");
+  const osObjNull = await abrirOS({ p_mecanico_id: idMec });
+  const osObjVazio = await abrirOS();
+  const iniObj = await donoA.sb.rpc("iniciar_vistoria", { p_os_id: osObjNull }).single();
+  const VObjNull = iniObj.data?.vistoria_id;
+  const objDe = async (id) => (await vw(donoA.sb, id))?.objetos;
+  const salvarObj = (sb, args) => sb.rpc("salvar_vistoria", { p_vistoria_id: VObjNull, ...args });
+  checar("vistoria nova nasce com objetos NULL (nao informado), sem 'Nenhum objeto' sozinho", Boolean(VObjNull) && (await objDe(VObjNull)) === null, `${msg(iniObj)} ${JSON.stringify(await objDe(VObjNull))}`);
+  const svOutraParte = await salvarObj(donoA.sb, { p_km: 600800, p_combustivel: "meio" });
+  checar("salvar outra parte (KM, combustivel) nao inventa objetos", !svOutraParte.error && (await objDe(VObjNull)) === null, msg(svOutraParte));
+  const svMarca = await salvarObj(donoA.sb, { p_objetos: ["Documentos", "Rádio PX"] });
+  const objMarcados = await objDe(VObjNull);
+  const svLimpa = await salvarObj(donoA.sb, { p_limpar_objetos: true });
+  const objLimpos = await objDe(VObjNull);
+  const svLimpa2 = await salvarObj(donoA.sb, { p_limpar_objetos: true });
+  checar("marcar grava a lista; limpar (p_limpar_objetos) volta a NULL; reenvio do limpar nao quebra", !svMarca.error && objMarcados?.join("|") === "Documentos|Rádio PX" && !svLimpa.error && objLimpos === null && !svLimpa2.error && (await objDe(VObjNull)) === null, `${msg(svMarca)}/${msg(svLimpa)}/${msg(svLimpa2)} ${JSON.stringify(objMarcados)} -> ${JSON.stringify(objLimpos)}`);
+  const svNenhum = await salvarObj(donoA.sb, { p_objetos: [] });
+  const objNenhum = await objDe(VObjNull);
+  const svNenhumKm = await salvarObj(donoA.sb, { p_km: 600800 });
+  const objNenhumKm = await objDe(VObjNull);
+  checar("'Nenhum objeto' grava lista vazia e p_objetos ausente nao muda", !svNenhum.error && Array.isArray(objNenhum) && objNenhum.length === 0 && !svNenhumKm.error && Array.isArray(objNenhumKm) && objNenhumKm.length === 0, `${msg(svNenhum)} ${JSON.stringify(objNenhum)} ${JSON.stringify(objNenhumKm)}`);
+  const svBrancos = await salvarObj(donoA.sb, { p_objetos: ["  ", ""] });
+  const objBrancos = await objDe(VObjNull);
+  const svMecLimpa = guardaMec(await salvarObj(mec.sb, { p_limpar_objetos: true }));
+  const svAtLimpa = await salvarObj(at.sb, { p_objetos: ["Ferramentas"], p_limpar_objetos: true });
+  const objDepoisPapeis = await objDe(VObjNull);
+  checar("lista so com brancos = NULL; mecanico da OS e atendente limpam; limpar vence p_objetos", !svBrancos.error && objBrancos === null && !svMecLimpa.error && !svAtLimpa.error && objDepoisPapeis === null, `${msg(svBrancos)}/${msg(svMecLimpa)}/${msg(svAtLimpa)} ${JSON.stringify(objDepoisPapeis)}`);
+  const svMec2Limpa = await salvarObj(mec2.sb, { p_limpar_objetos: true });
+  const svBLimpa = await salvarObj(donoB.sb, { p_limpar_objetos: true });
+  checar("mecanico de outra OS e oficina B nao limpam", Boolean(svMec2Limpa.error) && msg(svBLimpa) === "vistoria_nao_encontrada", `${msg(svMec2Limpa)}/${msg(svBLimpa)}`);
+
+  // Concluir nao exige objetos (DESIGN 12.8: nao esta em "Para concluir, falta"; o resumo diz "nao informado").
+  const faltaObj1 = await donoA.sb.rpc("marcar_itens_restantes_ok", { p_vistoria_id: VObjNull });
+  const faltaObj2 = await salvarObj(donoA.sb, { p_sem_avarias: true });
+  const concNull = await donoA.sb.rpc("concluir_vistoria", { p_vistoria_id: VObjNull, p_sem_assinatura_motivo: "motorista_ausente" });
+  const vNull = await vw(donoA.sb, VObjNull);
+  const confNull = await donoA.sb.rpc("conferir_vistoria", { p_vistoria_id: VObjNull });
+  checar("concluir com objetos NULL e aceito: fica NULL, hash gravado e conferir_vistoria = true", !faltaObj1.error && !faltaObj2.error && /^[0-9a-f]{64}$/.test(concNull.data ?? "") && vNull?.status === "concluida" && vNull?.objetos === null && confNull.data === true, `${msg(concNull)} ${JSON.stringify(vNull?.objetos)} conferir=${JSON.stringify(confNull.data)}`);
+  const reconcNull = await donoA.sb.rpc("concluir_vistoria", { p_vistoria_id: VObjNull });
+  checar("reenvio do concluir com objetos NULL devolve o mesmo hash", reconcNull.data === concNull.data, msg(reconcNull));
+  const limpaConc = await salvarObj(donoA.sb, { p_limpar_objetos: true });
+  const marcaConc = await salvarObj(donoA.sb, { p_objetos: [] });
+  const updConc = await donoA.sb.from("vistorias").update({ objetos: [] }).eq("id", VObjNull).select("id");
+  const vNull2 = await vw(donoA.sb, VObjNull);
+  checar("depois de concluida, objetos nao mudam (RPC = vistoria_concluida; update direto recusado)", msg(limpaConc) === "vistoria_concluida" && msg(marcaConc) === "vistoria_concluida" && recusou(updConc) && vNull2?.objetos === null, `${msg(limpaConc)}/${msg(marcaConc)}/${updConc.error?.code ?? updConc.data?.length}`);
+
+  const iniVazio = await donoA.sb.rpc("iniciar_vistoria", { p_os_id: osObjVazio }).single();
+  const VObjVazio = iniVazio.data?.vistoria_id;
+  await donoA.sb.rpc("marcar_itens_restantes_ok", { p_vistoria_id: VObjVazio });
+  const svVazio = await donoA.sb.rpc("salvar_vistoria", { p_vistoria_id: VObjVazio, p_sem_avarias: true, p_objetos: [] });
+  const concVazio = await donoA.sb.rpc("concluir_vistoria", { p_vistoria_id: VObjVazio, p_sem_assinatura_motivo: "recusou" });
+  const vVazio = await vw(donoA.sb, VObjVazio);
+  const confVazio = await donoA.sb.rpc("conferir_vistoria", { p_vistoria_id: VObjVazio });
+  checar("concluir com 'Nenhum objeto' mantem a lista vazia e o hash confere", !svVazio.error && !concVazio.error && Array.isArray(vVazio?.objetos) && vVazio.objetos.length === 0 && confVazio.data === true, `${msg(svVazio)}/${msg(concVazio)} ${JSON.stringify(vVazio?.objetos)}`);
+
   // ---------------------------------------------------------------- recusas do concluir
   console.log("\n== Fase 4: concluir recusado (itens, foto pendente, avaria, assinatura) ==");
   const os4 = await abrirOS();
@@ -1617,6 +1675,15 @@ async function testesFase4({ donoA, mec, mec2, at, donoB, ofA, ofB, vei }) {
     checar("PDF: sem login = 401", pAnon.status === 401, det(pAnon));
     checar("PDF: vistoria em rascunho = 409; id invalido = 404", pRasc.status === 409 && pLixo.status === 404, `${det(pRasc)} | ${det(pLixo)}`);
     checar("PDF: respostas de erro tambem sem cache", [pB, pAnon, pRasc].every((p) => /no-store/.test(p.cache)), [pB, pAnon, pRasc].map((p) => p.cache).join(" | "));
+
+    const pObjNull = await pdf(VObjNull, ckDono);
+    checar("PDF da vistoria com objetos NULL sai (200)", pdfOk(pObjNull), det(pObjNull));
+    const lObjNull = await pagina(`/os/${osObjNull}/vistoria`, ckMec);
+    const lObjVazio = await pagina(`/os/${osObjVazio}/vistoria`, ckDono);
+    checar("leitura: objetos NULL = 'Objetos: nao informado.' (nunca 'Nenhum objeto')", lObjNull.status === 200 && lObjNull.html.includes("Objetos: não informado.") && !lObjNull.html.includes("Nenhum objeto"), `status ${lObjNull.status}`);
+    checar("leitura: lista vazia = 'Nenhum objeto.'", lObjVazio.status === 200 && lObjVazio.html.includes("Nenhum objeto.") && !lObjVazio.html.includes("Objetos: não informado."), `status ${lObjVazio.status}`);
+    const lAnulada = await pagina(`/os/${os2}/vistoria?ver=${V2.vid}`, ckDono);
+    checar("anulada: cabecalho 'Vistoria anulada · placa', faixa acima da assinatura e motivo legivel", lAnulada.status === 200 && lAnulada.html.includes("Vistoria anulada · ") && lAnulada.html.includes("faixa-anulada") && lAnulada.html.includes("feita na OS errada (era outro caminhão)."), `status ${lAnulada.status}`);
 
     const os10 = await abrirOS({ p_mecanico_id: idMec });
     const dSem = await pagina(`/os/${os10}`, ckDono);

@@ -356,6 +356,7 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
               encerrada={encerrada}
               obrigatoria={obrigatoria}
               anuladas={idsAnuladas(anuladasR)}
+              botaoNaBarra={dados.vistoriaBloqueia != null && (status === "em_andamento" || status === "pronta")}
             />
 
             {/* Celular: aviso dos itens do mecanico logo abaixo do topo (DESIGN §11.9) */}

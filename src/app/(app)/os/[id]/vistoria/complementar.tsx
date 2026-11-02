@@ -271,14 +271,13 @@ export function FolhaComplemento({
           <AreaTexto
             rotulo="O que quer acrescentar?"
             name="texto_complemento"
-            opcional
             value={texto}
             maxLength={LIMITE_TEXTO}
             onChange={(e) => {
               setTexto(e.target.value);
               if (erro) setErro(null);
             }}
-            ajuda="Ex.: motorista avisou que o retrovisor já estava solto."
+            ajuda="Escreva ou tire uma foto. Ex.: motorista avisou que o retrovisor já estava solto."
             disabled={fase.tipo === "salvando"}
           />
 

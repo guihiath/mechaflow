@@ -373,3 +373,26 @@ export function formatarCodigoConferencia(hash: string | null | undefined): stri
   const h = (hash ?? "").replace(/[^0-9a-f]/gi, "").slice(0, 12).toUpperCase();
   return (h.match(/.{1,4}/g) ?? []).join("-");
 }
+
+/** "2 com problema · 13 ok": junta as contagens e omite as que deram zero (revisão F4, M3). */
+export function juntarContagens(partes: readonly (readonly [number, string])[]): string {
+  return partes
+    .filter(([n]) => n > 0)
+    .map(([n, texto]) => `${n} ${texto}`)
+    .join(" · ");
+}
+
+const INICIO_MOTIVO_OS_ERRADA = /^feita na os errada\s*[:.-]?\s*/i;
+
+/**
+ * Motivo da anulação para ler (tela e PDF, revisão F4, M7). O banco guarda
+ * "Feita na OS errada: era o caminhão da OS #6"; aqui vira
+ * "feita na OS errada (era o caminhão da OS #6)." Outro texto só ganha o ponto final.
+ */
+export function formatarMotivoAnulacao(motivo: string): string {
+  const t = motivo.trim().replace(/[.\s]+$/, "");
+  if (!t) return "";
+  if (!INICIO_MOTIVO_OS_ERRADA.test(t)) return `${t}.`;
+  const detalhe = t.replace(INICIO_MOTIVO_OS_ERRADA, "");
+  return detalhe ? `feita na OS errada (${detalhe}).` : "feita na OS errada.";
+}

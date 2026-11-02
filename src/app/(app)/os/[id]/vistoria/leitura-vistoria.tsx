@@ -1,8 +1,8 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { FilePlus2, Gauge, ImageOff, Paperclip, TriangleAlert, type LucideIcon } from "lucide-react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { FilePlus2, Gauge, ImageOff, TriangleAlert, type LucideIcon } from "lucide-react";
 import { anularVistoria } from "@/acoes/vistoria";
 import { useFila } from "@/components/fotos/usar-fila";
 import { BarraAcoesOS } from "@/components/os/barra-acoes-os";
@@ -20,6 +20,7 @@ import {
   formatarCodigoConferencia,
   formatarNumero,
   formatarNumeroOS,
+  juntarContagens,
   normalizarPlaca,
   ROTULO_LADO_AVARIA,
   type LadoAvaria,
@@ -84,11 +85,23 @@ type FotoTela = FotoTelaCheiaDados & { caminho: string };
  * com Anterior/Próxima entre todas as fotos da vistoria, sem editar nem apagar.
  * Nenhum valor em dinheiro: o mecânico lê a mesma tela.
  */
-export function LeituraVistoria({ dados, usuarioId, ehMecanico }: { dados: DadosLeitura; usuarioId: string; ehMecanico: boolean }) {
+export function LeituraVistoria({
+  dados,
+  usuarioId,
+  ehMecanico,
+  aposAnulada,
+}: {
+  dados: DadosLeitura;
+  usuarioId: string;
+  ehMecanico: boolean;
+  /** Só na anulada: vai logo depois da caixa de erro do topo. */
+  aposAnulada?: ReactNode;
+}) {
   const router = useRouter();
   const fila = useFila();
   const idObjetos = useId();
   const [complementando, setComplementando] = useState(false);
+  const [anulando, setAnulando] = useState(false);
   const [recado, setRecado] = useState<string | null>(null);
   const [tela, setTela] = useState({ aberta: false, indice: 0 });
   const [grandes, setGrandes] = useState<Record<string, { url: string; vence: number }>>({});
@@ -189,8 +202,14 @@ export function LeituraVistoria({ dados, usuarioId, ehMecanico }: { dados: Dados
   // Barra (DESIGN §12.12): balcão = "Enviar ao cliente (PDF)" + "Complementar"; mecânico = só
   // "Complementar" (na OS dele; o PDF ele baixa pela página). Anulada: sem barra.
   const enviarNaBarra = !ehMecanico && !dados.anulada;
-  const temBarra = enviarNaBarra || podeComplementar;
+  // Com a confirmação de anular aberta, a barra sai: a decisão ali é só anular ou voltar (M6).
+  const temBarra = (enviarNaBarra || podeComplementar) && !anulando;
   const titulo = `${formatarNumeroOS(dados.numeroOS)} (${dados.placa})`;
+  const contagens = juntarContagens([
+    [conta("com_problema"), "com problema"],
+    [conta("ok"), "ok"],
+    [conta("nao_se_aplica"), "não se aplica"],
+  ]);
 
   return (
     <div data-teste="leitura-vistoria" className="flex flex-col gap-6">
@@ -203,6 +222,7 @@ export function LeituraVistoria({ dados, usuarioId, ehMecanico }: { dados: Dados
         assinatura={dados.assinatura}
         complementos={complementos}
         anulada={dados.anulada}
+        aposAnulada={aposAnulada}
         aoAbrirFotoComplemento={(c, i) => {
           const f = dados.complementos.find((x) => x.id === c.id)?.fotos[i];
           if (f) abrirFoto(f.id);
@@ -238,9 +258,7 @@ export function LeituraVistoria({ dados, usuarioId, ehMecanico }: { dados: Dados
           <h2 id={`${idObjetos}-checklist`} className="text-xl">
             Checklist ({dados.itens.length})
           </h2>
-          <p className="text-base text-texto-suave">
-            {conta("com_problema")} com problema · {conta("ok")} ok · {conta("nao_se_aplica")} não se aplica
-          </p>
+          {contagens && <p className="text-base text-texto-suave">{contagens}</p>}
           {itens.length > 0 ? (
             <Cartao>
               <ul data-teste="checklist-leitura">
@@ -297,18 +315,17 @@ export function LeituraVistoria({ dados, usuarioId, ehMecanico }: { dados: Dados
             Objetos no veículo
           </h2>
           {dados.objetos === null ? (
-            <p className="text-base text-texto-suave">Não informado.</p>
+            <p className="text-base text-texto-suave" data-teste="objetos-leitura">
+              Objetos: não informado.
+            </p>
           ) : dados.objetos.length === 0 ? (
-            <p className="text-base">Nenhum objeto.</p>
+            <p className="text-base" data-teste="objetos-leitura">
+              Nenhum objeto.
+            </p>
           ) : (
-            <ul className="flex flex-wrap gap-2">
-              {dados.objetos.map((o) => (
-                <li key={o} className="inline-flex min-h-10 items-center gap-1.5 rounded-full border border-borda-sutil bg-superficie px-3 text-base font-bold">
-                  <Paperclip size={16} strokeWidth={2.25} aria-hidden className="text-texto-suave" />
-                  {o}
-                </li>
-              ))}
-            </ul>
+            <p className="text-base break-words" data-teste="objetos-leitura">
+              {dados.objetos.join(", ")}.
+            </p>
           )}
         </section>
 
@@ -367,6 +384,7 @@ export function LeituraVistoria({ dados, usuarioId, ehMecanico }: { dados: Dados
             rotuloConfirmar="Anular vistoria"
             rotuloEnviando="Anulando…"
             rotuloVoltar="Voltar sem anular"
+            aoMudarAberto={setAnulando}
           />
         </div>
       )}
