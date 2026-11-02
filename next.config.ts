@@ -3,6 +3,10 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   cacheComponents: true,
   partialPrefetching: true,
+  // Versão publicada no "Enviar feedback" (F5-F1): só o commit curto, nunca o env inteiro.
+  env: {
+    NEXT_PUBLIC_VERSAO_APP: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) || "local",
+  },
   // Fontes do PDF da vistoria (lidas com fs na rota; F4-B6).
   outputFileTracingIncludes: {
     "/api/vistorias/*/pdf": ["./src/assets/fonts/*.ttf"],

@@ -1,12 +1,13 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { ArrowLeft } from "lucide-react";
+import { BotaoFeedback } from "@/components/feedback/botao-feedback";
 import { EH_PRODUCAO } from "@/lib/brand";
 
 /**
  * Cabecalho (DESIGN 5.7): 56px, grafite, titulo Condensed 20px a esquerda,
  * voltar 48x48 quando nao e tela raiz, no maximo 1 acao secundaria a direita.
- * Em staging: faixa listrada + "TESTE".
+ * Em staging: faixa listrada + "TESTE" + "Enviar feedback" (F5-F1).
  */
 export function Cabecalho({
   titulo,
@@ -40,7 +41,10 @@ export function Cabecalho({
         )}
         <h1 className="min-w-0 flex-1 truncate font-display text-xl">{titulo}</h1>
         {!EH_PRODUCAO && (
-          <span className="rounded-sm bg-primaria px-1.5 text-xs font-bold text-primaria-texto">TESTE</span>
+          <>
+            <span className="shrink-0 rounded-sm bg-primaria px-1.5 text-xs font-bold text-primaria-texto">TESTE</span>
+            <BotaoFeedback />
+          </>
         )}
         {acao}
       </div>
