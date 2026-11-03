@@ -4,3 +4,8 @@
  * Só serve para marcar o item ativo; não decide acesso.
  */
 export const CABECALHO_CAMINHO = "x-mf-caminho";
+
+/** Página pública do orçamento: não renova sessão nem registra service worker (DESIGN §13.1). */
+export function ehOrcamentoPublico(pathname: string) {
+  return pathname.startsWith("/orcamento/");
+}

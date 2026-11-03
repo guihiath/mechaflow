@@ -2,13 +2,13 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import type { Database } from "./database.types";
 import { getSupabaseEnv } from "./env";
-import { CABECALHO_CAMINHO } from "@/lib/caminho";
+import { CABECALHO_CAMINHO, ehOrcamentoPublico } from "@/lib/caminho";
 
 /**
  * Prefixos publicos (sem login). Todo o resto exige sessao.
  * "/" e exato; os demais valem para a rota e as filhas.
  */
-const ROTAS_PUBLICAS = ["/login", "/cadastro", "/convite", "/termos", "/auth", "/esqueci-senha", "/redefinir-senha"];
+const ROTAS_PUBLICAS = ["/login", "/cadastro", "/convite", "/termos", "/auth", "/esqueci-senha", "/redefinir-senha", "/orcamento"];
 
 export function rotaPublica(pathname: string) {
   if (pathname === "/") return true;
@@ -24,6 +24,10 @@ export function rotaPublica(pathname: string) {
  * (src/lib/dal.ts) e a RLS do banco e a protecao final.
  */
 export async function atualizarSessao(request: NextRequest) {
+  // Orçamento por link: a página usa cliente sem sessão, e robô de prévia não tem o que renovar.
+  // Sem cookie na resposta, com ou sem login no aparelho.
+  if (ehOrcamentoPublico(request.nextUrl.pathname)) return NextResponse.next();
+
   const { url, publishableKey } = getSupabaseEnv();
   // Caminho pedido, para a barra de navegação hidratar igual ao HTML do servidor (F4-P1).
   request.headers.set(CABECALHO_CAMINHO, request.nextUrl.pathname);

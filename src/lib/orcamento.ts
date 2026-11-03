@@ -136,3 +136,93 @@ export function textoDiasRestantes(expiraEm: string, agora: string): string {
   if (dias <= 0) return "(vence hoje)";
   return dias === 1 ? "(falta 1 dia)" : `(faltam ${dias} dias)`;
 }
+
+const SITUACOES_SEM_ACESSO: readonly string[] = ["vencido", "substituido", "atualizado", "encerrado", "nao_encontrado", "limite"];
+
+function ehObjeto(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+function textoOuNull(v: unknown): string | null {
+  return typeof v === "string" ? v : null;
+}
+
+function respostaDoBanco(v: unknown): DadosRespostaCliente | null {
+  if (!ehObjeto(v) || (v.tipo !== "aprovou" && v.tipo !== "recusou") || typeof v.respondido_em !== "string") return null;
+  return { tipo: v.tipo, nome: textoOuNull(v.nome), respondido_em: v.respondido_em };
+}
+
+/** Lista fechada de ARQUITETURA 13.3, campo a campo: o que o banco mandar além disto não chega à página. */
+function documentoDoBanco(v: unknown): DadosDocumentoOrcamento | null {
+  if (!ehObjeto(v) || !Array.isArray(v.itens)) return null;
+  return {
+    oficina_nome: String(v.oficina_nome ?? ""),
+    oficina_telefone: textoOuNull(v.oficina_telefone),
+    os_numero: Number(v.os_numero),
+    veiculo_placa: String(v.veiculo_placa ?? ""),
+    veiculo_marca: textoOuNull(v.veiculo_marca),
+    veiculo_modelo: textoOuNull(v.veiculo_modelo),
+    cliente_nome: textoOuNull(v.cliente_nome),
+    itens: v.itens.filter(ehObjeto).map((i) => ({
+      tipo: i.tipo === "peca" ? "peca" : "servico",
+      descricao: String(i.descricao ?? ""),
+      quantidade: Number(i.quantidade),
+      unidade: String(i.unidade ?? ""),
+      preco_unitario_centavos: i.preco_unitario_centavos == null ? null : Number(i.preco_unitario_centavos),
+      subtotal_centavos: i.subtotal_centavos == null ? null : Number(i.subtotal_centavos),
+    })),
+    subtotal_servicos_centavos: Number(v.subtotal_servicos_centavos),
+    subtotal_pecas_centavos: Number(v.subtotal_pecas_centavos),
+    total_centavos: Number(v.total_centavos),
+    prazo_estimado: textoOuNull(v.prazo_estimado),
+    condicoes_pagamento: textoOuNull(v.condicoes_pagamento),
+  };
+}
+
+/** Resposta de `ver_orcamento` -> objeto da página. null = formato inesperado ("Erro ao abrir"). */
+export function leituraDoBanco(dado: unknown): LeituraOrcamento | null {
+  if (!ehObjeto(dado) || typeof dado.situacao !== "string") return null;
+  if (SITUACOES_SEM_ACESSO.includes(dado.situacao)) return { situacao: dado.situacao as SituacaoSemAcesso };
+  if (dado.situacao !== "aberto" && dado.situacao !== "aprovado" && dado.situacao !== "recusado") return null;
+  const documento = documentoDoBanco(dado.documento);
+  if (!documento || typeof dado.expira_em !== "string") return null;
+  return { situacao: dado.situacao, expira_em: dado.expira_em, documento, resposta: respostaDoBanco(dado.resposta) };
+}
+
+/** Resposta de `responder_orcamento` -> resultado da tela. Formato inesperado conta como erro do servidor. */
+export function resultadoDoBanco(dado: unknown): ResultadoRespostaCliente {
+  if (!ehObjeto(dado) || typeof dado.situacao !== "string") return { falha: "servidor" };
+  if (SITUACOES_SEM_ACESSO.includes(dado.situacao)) return { situacao: dado.situacao as SituacaoSemAcesso };
+  if (dado.situacao === "aberto" && typeof dado.erro === "string") return { situacao: "aberto", erro: dado.erro as ErroRespostaCliente };
+  if (dado.situacao === "aprovado" || dado.situacao === "recusado") {
+    const resposta = respostaDoBanco(dado.resposta);
+    if (resposta) return { situacao: dado.situacao, aplicada: dado.aplicada === true, resposta };
+  }
+  return { falha: "servidor" };
+}
+
+/** Mensagem do WhatsApp (DESIGN §13.14): sem valor e sem itens, com o link em linha própria. */
+export function mensagemWhatsAppOrcamento(dados: {
+  oficinaNome: string;
+  osNumero: number;
+  placa: string;
+  link: string;
+  expiraEm: string;
+  versao: number;
+}): string {
+  const os = `OS #${dados.osNumero} (placa ${dados.placa})`;
+  const segunda =
+    dados.versao > 1 ? `O orçamento da ${os} foi atualizado. O link anterior não vale mais.` : `O orçamento da ${os} está pronto.`;
+  return [
+    `Olá! Aqui é da ${dados.oficinaNome}.`,
+    segunda,
+    "Veja os itens e responda por este link, sem precisar de cadastro:",
+    dados.link,
+    `Vale até ${formatarData(dados.expiraEm)}.`,
+  ].join("\n");
+}
+
+/** `wa.me` com a mensagem inteira codificada, incluindo o `#`. Sem número, a pessoa escolhe o contato. */
+export function linkWhatsApp(numero: string | null, texto: string): string {
+  return `https://wa.me/${numero ?? ""}?text=${encodeURIComponent(texto)}`;
+}

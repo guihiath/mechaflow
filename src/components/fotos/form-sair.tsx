@@ -5,6 +5,7 @@ import { sair } from "@/acoes/sessao";
 import { Botao } from "@/components/ui/botao";
 import { fotos as nFotos } from "@/components/os/categorias-foto";
 import { lerFila, pendente } from "@/lib/fotos/fila";
+import { apagarLinksLocais } from "@/lib/orcamento-link-local";
 import { contarGuardados } from "@/lib/fotos/fila-db";
 import { apagarRascunhosAoSair, contarRascunhosPendentes } from "@/lib/vistoria/rascunho";
 
@@ -40,6 +41,7 @@ export function FormSair({ className, botaoClassName, children }: { className?: 
 
   function sairAgora(apagarPendentes: boolean) {
     if (usuario.current) apagarRascunhosAoSair(usuario.current, apagarPendentes);
+    apagarLinksLocais();
     confirmado.current = true;
     form.current?.requestSubmit();
   }

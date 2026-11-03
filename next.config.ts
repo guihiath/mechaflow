@@ -30,6 +30,15 @@ const nextConfig: NextConfig = {
         ],
       },
       {
+        // Orçamento por link (PLANO 19.4). Depois da regra geral: no mesmo cabeçalho, a última vence.
+        source: "/orcamento/:path*",
+        headers: [
+          { key: "X-Robots-Tag", value: "noindex, nofollow" },
+          { key: "Referrer-Policy", value: "no-referrer" },
+          { key: "Cache-Control", value: "no-store" },
+        ],
+      },
+      {
         source: "/sw.js",
         headers: [
           { key: "Content-Type", value: "application/javascript; charset=utf-8" },

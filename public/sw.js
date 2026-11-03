@@ -10,12 +10,13 @@
  * Arquivos estaticos (_next/static, icones, manifest): network-first, cache so como reserva.
  *
  * NAO cacheia: requisicoes que nao sao GET, outras origens (ex.: Supabase), /api/*, /auth/*,
+ * /orcamento/* (pagina publica do cliente, o SW fica de fora dela, DESIGN 13.1),
  * requisicoes RSC do Next e qualquer pagina. Paginas com dados nunca devem ir para o cache.
  *
  * Mudou este arquivo ou o /offline.html? Troque CACHE_NAME: o aparelho instala o SW novo na
  * proxima abertura com internet e apaga o cache antigo.
  */
-const CACHE_NAME = "mechaflow-v2";
+const CACHE_NAME = "mechaflow-v3";
 const PAGINA_OFFLINE = "/offline.html";
 
 self.addEventListener("install", (event) => {
@@ -58,6 +59,7 @@ self.addEventListener("fetch", (event) => {
   if (request.method !== "GET") return;
   if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/auth/")) return;
+  if (url.pathname.startsWith("/orcamento/")) return;
 
   if (request.mode === "navigate") {
     event.respondWith(

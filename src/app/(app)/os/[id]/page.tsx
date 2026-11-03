@@ -8,6 +8,8 @@ import { Cabecalho } from "@/components/layout/cabecalho";
 import { EsconderNavegacao } from "@/components/layout/marcador-pagina";
 import { BadgeStatus, EtiquetaModo, EtiquetaPagamento, SemMecanico } from "@/components/os/badge-status";
 import { FotosDaOS } from "@/components/fotos/fotos-da-os";
+import type { SituacaoCartaoLink } from "@/components/orcamento/cartao-link";
+import { EnviarWhatsApp } from "@/components/orcamento/enviar-whatsapp";
 import { AprovadoAgora } from "@/components/os/aprovado-agora";
 import { DetalheCarregando } from "@/components/os/detalhe-carregando";
 import { LinhaTempo } from "@/components/os/linha-tempo";
@@ -30,6 +32,7 @@ import {
   soDigitos,
 } from "@/lib/formato";
 import { podeEnviarFoto } from "@/lib/fotos/regras";
+import { numeroWhatsAppBrasil } from "@/lib/orcamento";
 import { CANAL_NA_FRASE, montarEventos, ROTULO_FORMA_PAGAMENTO } from "@/lib/os";
 import { ehStatusOS, osEncerrada, proximoPasso, type ModoOS, type StatusOS } from "@/lib/os-status";
 import { createClient } from "@/lib/supabase/server";
@@ -121,6 +124,33 @@ function resumoVistoria(v: Awaited<ReturnType<typeof lerVistoriaEntrada>>["data"
   };
 }
 
+const COLUNAS_SITUACAO_LINK =
+  "link_situacao, link_criado_em, link_criado_por_nome, link_expira_em, link_revogado_em, link_revogado_motivo, link_revogado_por_nome, versao_numero";
+
+function lerSituacaoLink(supabase: Cliente, osId: string) {
+  return supabase.from("vw_orcamento_situacao").select(COLUNAS_SITUACAO_LINK).eq("os_id", osId).maybeSingle();
+}
+
+/** Situação do link para o `CartaoLink` (ARQUITETURA 13.9), só em `orcamento_enviado` com versão. */
+function cartaoDoLink(s: Awaited<ReturnType<typeof lerSituacaoLink>>["data"]): SituacaoCartaoLink | null {
+  if (!s?.link_situacao || !s.versao_numero) return null;
+  if (s.link_situacao === "aberto" && s.link_criado_em && s.link_expira_em) {
+    return {
+      situacao: "ativo",
+      geradoPor: s.link_criado_por_nome,
+      geradoEm: s.link_criado_em,
+      versao: s.versao_numero,
+      expiraEm: s.link_expira_em,
+      agora: new Date().toISOString(),
+    };
+  }
+  if (s.link_situacao === "vencido" && s.link_expira_em) return { situacao: "vencido", versao: s.versao_numero, expiraEm: s.link_expira_em };
+  if (s.link_situacao === "encerrado" && s.link_revogado_motivo === "manual" && s.link_revogado_em) {
+    return { situacao: "cancelado", canceladoPor: s.link_revogado_por_nome, canceladoEm: s.link_revogado_em, versao: s.versao_numero };
+  }
+  return null;
+}
+
 function Erro({ id, voltar }: { id: string; voltar: string }) {
   return (
     <>
@@ -149,7 +179,7 @@ function Info({ rotulo, children }: { rotulo: string; children: React.ReactNode 
 async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string; sp: Params }) {
   const supabase = await createClient();
   const ehDono = ctx.papel === "dono";
-  const [{ data: os, error }, itensR, histR, equipeR, andamentoR, vistoriaR, oficinaR, anuladasR] = await Promise.all([
+  const [{ data: os, error }, itensR, histR, equipeR, andamentoR, vistoriaR, oficinaR, anuladasR, situacaoLinkR] = await Promise.all([
     supabase.from("vw_os").select("*").eq("id", id).maybeSingle(),
     supabase.from("vw_os_itens").select("*").eq("os_id", id).order("criado_em"),
     supabase.from("vw_os_historico").select("id, evento, de_status, para_status, observacao, por_nome, em").eq("os_id", id).order("em"),
@@ -158,6 +188,7 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
     lerVistoriaEntrada(supabase, id),
     lerObrigatoria(supabase, ctx.oficina_id),
     lerAnuladas(supabase, id),
+    lerSituacaoLink(supabase, id),
   ]);
   if (error || itensR.error || histR.error) return <Erro id={id} voltar="/os" />;
   if (!os || !ehStatusOS(os.status)) notFound();
@@ -230,7 +261,21 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
   const podeTrocarModo =
     (modo === "com_orcamento" && (status === "aguardando_orcamento" || status === "orcamento_enviado")) ||
     (modo === "direto" && status === "em_andamento" && itens.length === 0);
-  const frase = proximoPasso(status, { entregueEm: os.entregue_em, motivoCancelamento: os.motivo_cancelamento });
+  const linkSituacao = os.orcamento_link_situacao;
+  const frase = proximoPasso(status, {
+    entregueEm: os.entregue_em,
+    motivoCancelamento: os.motivo_cancelamento,
+    linkSituacao,
+    temItens: itens.length > 0,
+  });
+  // Enviar por WhatsApp (F6-B2). OS antiga em `orcamento_enviado`, sem versão, também pode gerar.
+  const itensTravados = Boolean(os.orcamento_itens_travados);
+  const podeGerarLink =
+    modo === "com_orcamento" &&
+    (status === "aguardando_orcamento" || (status === "orcamento_enviado" && !itensTravados)) &&
+    itens.length > 0 &&
+    semPreco === 0;
+  const cartaoLink = modo === "com_orcamento" && status === "orcamento_enviado" && itensTravados ? cartaoDoLink(situacaoLinkR.data) : null;
   const temFechamento = status === "entregue" || os.causa_encontrada || os.solucao_aplicada;
   const tel = formatarTelefone(os.cliente_telefone);
 
@@ -358,6 +403,24 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
               anuladas={idsAnuladas(anuladasR)}
               botaoNaBarra={dados.vistoriaBloqueia != null && (status === "em_andamento" || status === "pronta")}
             />
+
+            {/* Link do orçamento: logo depois da vistoria (DESIGN §13.8). */}
+            {(podeGerarLink || cartaoLink) && (
+              <EnviarWhatsApp
+                osId={id}
+                osNumero={os.numero ?? 0}
+                placa={os.placa ?? ""}
+                oficinaNome={ctx.oficina_nome ?? ""}
+                clienteNome={os.cliente_nome ?? ""}
+                telefone={tel}
+                numeroWhatsApp={numeroWhatsAppBrasil(os.cliente_telefone)}
+                totalCentavos={os.total_centavos ?? 0}
+                qtdItens={itens.length}
+                podeGerar={podeGerarLink}
+                clienteRecusou={linkSituacao === "recusado"}
+                cartao={cartaoLink}
+              />
+            )}
 
             {/* Celular: aviso dos itens do mecanico logo abaixo do topo (DESIGN §11.9) */}
             <div className="lg:hidden">

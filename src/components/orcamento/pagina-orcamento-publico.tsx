@@ -32,9 +32,12 @@ const ERRO_NOME = "Escreva seu nome para aprovar.";
 export function PaginaOrcamentoPublico({
   leitura,
   responder,
+  permitirRecusa = true,
 }: {
   leitura: LeituraOrcamento;
   responder: (pedido: PedidoRespostaCliente) => Promise<ResultadoRespostaCliente>;
+  /** A rota real passa `false` até o F6-B3 (PLANO 19.2: o F6-B2 é sem recusa). */
+  permitirRecusa?: boolean;
 }) {
   const [dados, setDados] = useState(leitura);
   const [passo, setPasso] = useState<TipoResposta | null>(null);
@@ -207,5 +210,5 @@ export function PaginaOrcamentoPublico({
     );
   }
 
-  return <DocumentoOrcamento documento={dados.documento} expiraEm={dados.expira_em} resposta={<BotoesResposta aoEscolher={abrirPasso} />} />;
+  return <DocumentoOrcamento documento={dados.documento} expiraEm={dados.expira_em} resposta={<BotoesResposta aoEscolher={abrirPasso} permitirRecusa={permitirRecusa} />} />;
 }

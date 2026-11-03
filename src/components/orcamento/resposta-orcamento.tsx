@@ -24,7 +24,15 @@ const ALTURA_FLEXIVEL = "h-auto! min-h-toque-principal py-2";
  * "Sua resposta" (DESIGN §13.2): Aprovar em cima, Recusar embaixo, 24 px entre eles, sem barra
  * fixa. `desativado` é a prévia do balcão: aparecem como o cliente vê e não respondem.
  */
-export function BotoesResposta({ aoEscolher, desativado = false }: { aoEscolher?: (tipo: TipoResposta) => void; desativado?: boolean }) {
+export function BotoesResposta({
+  aoEscolher,
+  desativado = false,
+  permitirRecusa = true,
+}: {
+  aoEscolher?: (tipo: TipoResposta) => void;
+  desativado?: boolean;
+  permitirRecusa?: boolean;
+}) {
   const tocar = (tipo: TipoResposta) => {
     if (!desativado) aoEscolher?.(tipo);
   };
@@ -43,10 +51,12 @@ export function BotoesResposta({ aoEscolher, desativado = false }: { aoEscolher?
           <ThumbsUp size={24} strokeWidth={2.25} aria-hidden />
           Aprovar orçamento
         </Botao>
-        <Botao variante="secundario" className={ALTURA_FLEXIVEL} aria-disabled={desativado || undefined} onClick={() => tocar("recusou")}>
-          <ThumbsDown size={24} strokeWidth={2.25} aria-hidden />
-          Recusar orçamento
-        </Botao>
+        {permitirRecusa && (
+          <Botao variante="secundario" className={ALTURA_FLEXIVEL} aria-disabled={desativado || undefined} onClick={() => tocar("recusou")}>
+            <ThumbsDown size={24} strokeWidth={2.25} aria-hidden />
+            Recusar orçamento
+          </Botao>
+        )}
       </div>
       {desativado && <p className="text-sm text-texto-suave">Na prévia, os botões não funcionam.</p>}
     </section>
