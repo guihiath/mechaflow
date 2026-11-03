@@ -91,6 +91,15 @@ const MENSAGENS: Record<string, string> = {
   complemento_nao_encontrado: "Complemento não encontrado. Recarregue a página.",
   texto_grande_demais: "Texto grande demais (máximo 1000 letras).",
   direcao_invalida: "Não deu para mudar a ordem. Recarregue a página.",
+  // Fase 6 — orçamento por link (docs/ARQUITETURA.md, §13.8)
+  orcamento_mudou: "O orçamento mudou enquanto você conferia. Confira de novo.",
+  orcamento_ja_enviado: "Este orçamento já foi enviado. Use Reenviar ou Alterar.",
+  orcamento_travado: "Os itens estão travados porque o orçamento já foi enviado. Toque em Alterar para mudar.",
+  orcamento_imutavel: "O orçamento enviado e a resposta do cliente não podem ser mudados.",
+  sem_versao_enviada: "Ainda não há orçamento enviado por link nesta OS.",
+  cliente_ja_respondeu: "O cliente acabou de responder pelo link. A tela foi atualizada.",
+  texto_orcamento_grande: "Prazo e condições têm no máximo 120 letras cada.",
+  versao_nao_encontrada: "Versão do orçamento não encontrada.",
 };
 
 /** Mensagens do Supabase Auth (signUp / signIn), que vêm em inglês. */

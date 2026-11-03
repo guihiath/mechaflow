@@ -874,6 +874,84 @@ export type Database = {
           },
         ]
       }
+      orcamento_versoes: {
+        // Versao congelada (sem custo). So INSERT por RPC; imutavel por trigger. Mecanico: 0 linhas.
+        Row: {
+          conteudo: Json
+          congelada_em: string
+          congelada_por: string | null
+          hash_conteudo: string
+          id: string
+          numero: number
+          oficina_id: string
+          origem: Database["public"]["Enums"]["origem_versao_orcamento"]
+          os_id: string
+          subtotal_pecas_centavos: number
+          subtotal_servicos_centavos: number
+          total_centavos: number
+        }
+        Insert: Record<string, never>
+        Update: Record<string, never>
+        Relationships: []
+      }
+      orcamento_links: {
+        // token_hash fora do GRANT: nem o balcao le. So revogar muda a linha (trigger).
+        Row: {
+          chave_idempotencia: string
+          criado_em: string
+          criado_por: string | null
+          expira_em: string
+          id: string
+          oficina_id: string
+          os_id: string
+          revogado_em: string | null
+          revogado_motivo: Database["public"]["Enums"]["motivo_revogacao_link"] | null
+          revogado_por: string | null
+          versao_id: string
+        }
+        Insert: Record<string, never>
+        Update: Record<string, never>
+        Relationships: []
+      }
+      orcamento_respostas: {
+        // Prova. So INSERT por RPC; a unica mudanca aceita e marcar desfeita uma vez.
+        Row: {
+          aprovou: boolean
+          canal: Database["public"]["Enums"]["canal_resposta"]
+          desfeita_em: string | null
+          desfeita_por: string | null
+          desfeita_por_nome: string | null
+          hash_resposta: string
+          hash_versao: string
+          id: string
+          link_id: string | null
+          motivo: string | null
+          oficina_id: string
+          os_id: string
+          registrada_por: string | null
+          respondente_nome: string | null
+          respondido_em: string
+          valor_centavos: number
+          versao_id: string
+        }
+        Insert: Record<string, never>
+        Update: Record<string, never>
+        Relationships: []
+      }
+      orcamento_resposta_rede: {
+        // IP e navegador. Nao usar em tela (decisao do CEO). Some depois de apagar_em.
+        Row: {
+          apagar_em: string
+          ip: string | null
+          ip_fonte: string | null
+          oficina_id: string
+          resposta_id: string
+          user_agent: string | null
+        }
+        Insert: Record<string, never>
+        Update: Record<string, never>
+        Relationships: []
+      }
       os_comercial: {
         Row: {
           atualizado_em: string
@@ -887,6 +965,7 @@ export type Database = {
           orcamento_aprovacao_canal: Database["public"]["Enums"]["canal_resposta"] | null
           orcamento_aprovacao_registrada_por: string | null
           orcamento_aprovado_por_nome: string | null
+          orcamento_versao_vigente_id: string | null
           os_id: string
           pagamento_registrado_por: string | null
           pago_em: string | null
@@ -1365,6 +1444,76 @@ export type Database = {
       }
     }
     Views: {
+      vw_orcamento_situacao: {
+        // Situacao atual por OS que ja teve versao. Mecanico: 0 linhas. link_situacao: ver SituacaoLinkOrcamento.
+        Row: {
+          itens_travados: boolean | null
+          link_criado_em: string | null
+          link_criado_por_nome: string | null
+          link_expira_em: string | null
+          link_id: string | null
+          link_revogado_em: string | null
+          link_revogado_motivo: Database["public"]["Enums"]["motivo_revogacao_link"] | null
+          link_revogado_por_nome: string | null
+          link_situacao: SituacaoLinkOrcamento | null
+          oficina_id: string | null
+          os_id: string | null
+          respondido: boolean | null
+          respondido_em: string | null
+          resposta_aprovou: boolean | null
+          resposta_canal: Database["public"]["Enums"]["canal_resposta"] | null
+          resposta_desfeita_em: string | null
+          resposta_desfeita_por_nome: string | null
+          resposta_id: string | null
+          resposta_motivo: string | null
+          resposta_nome: string | null
+          versao_id: string | null
+          versao_numero: number | null
+          versao_total_centavos: number | null
+        }
+        Relationships: []
+      }
+      vw_orcamento_versoes: {
+        // Consulta da versao pelo login, sem token. Mecanico: 0 linhas.
+        Row: {
+          codigo_conferencia: string | null
+          congelada_em: string | null
+          congelada_por_nome: string | null
+          conteudo: Json | null
+          hash_conteudo: string | null
+          id: string | null
+          numero: number | null
+          oficina_id: string | null
+          origem: Database["public"]["Enums"]["origem_versao_orcamento"] | null
+          os_id: string | null
+          subtotal_pecas_centavos: number | null
+          subtotal_servicos_centavos: number | null
+          total_centavos: number | null
+        }
+        Relationships: []
+      }
+      vw_orcamento_provas: {
+        // Uma linha por resposta. Sem IP nem navegador. Mecanico: 0 linhas.
+        Row: {
+          aprovou: boolean | null
+          canal: Database["public"]["Enums"]["canal_resposta"] | null
+          codigo_conferencia: string | null
+          desfeita_em: string | null
+          desfeita_por_nome: string | null
+          hash_resposta: string | null
+          id: string | null
+          motivo: string | null
+          oficina_id: string | null
+          os_id: string | null
+          registrada_por_nome: string | null
+          respondente_nome: string | null
+          respondido_em: string | null
+          valor_centavos: number | null
+          versao_id: string | null
+          versao_numero: number | null
+        }
+        Relationships: []
+      }
       vw_vistorias: {
         // km/horimetro: da OS em rascunho, copia da conclusao depois. pode_*: regra de quem consulta.
         Row: {
@@ -1466,6 +1615,11 @@ export type Database = {
         // itens_apos_aprovacao e observacoes (Fase 3) vem NULL. qtd_fotos: todos.
         // Atendente: custo_total_centavos NULL.
         Row: {
+          // Fase 6 (mecanico: NULL)
+          orcamento_itens_travados: boolean | null
+          orcamento_link_situacao: SituacaoLinkOrcamento | null
+          orcamento_respondido: boolean | null
+          orcamento_respondido_em: string | null
           // Fase 4: vistoria de entrada (NULL = "Sem vistoria")
           vistoria_entrada_id: string | null
           vistoria_entrada_status: Database["public"]["Enums"]["status_vistoria"] | null
@@ -1658,6 +1812,55 @@ export type Database = {
       }
     }
     Functions: {
+      alterar_orcamento: { Args: { p_os_id: string }; Returns: undefined }
+      cancelar_link_orcamento: { Args: { p_os_id: string }; Returns: boolean }
+      conferir_orcamento: { Args: { p_versao_id: string }; Returns: boolean }
+      enviar_orcamento: {
+        Args: {
+          p_chave_idempotencia: string
+          p_condicoes_pagamento?: string | null
+          p_os_id: string
+          p_prazo_estimado?: string | null
+          p_total_conferido_centavos: number
+        }
+        Returns: {
+          expira_em: string
+          ja_existia: boolean
+          token: string
+          versao_numero: number
+        }[]
+      }
+      previa_orcamento: {
+        Args: {
+          p_condicoes_pagamento?: string | null
+          p_os_id: string
+          p_prazo_estimado?: string | null
+        }
+        Returns: Json // PreviaOrcamento
+      }
+      reenviar_orcamento: {
+        Args: { p_chave_idempotencia: string; p_os_id: string }
+        Returns: {
+          expira_em: string
+          ja_existia: boolean
+          token: string
+          versao_numero: number
+        }[]
+      }
+      // Publicas: so anon. Chamar com cliente SEM sessao.
+      responder_orcamento: {
+        Args: {
+          p_aprovou: boolean
+          p_motivo?: string | null
+          p_nome?: string | null
+          p_token: string
+        }
+        Returns: Json // RespostaOrcamentoPublica
+      }
+      ver_orcamento: {
+        Args: { p_token: string }
+        Returns: Json // OrcamentoPublico
+      }
       anular_vistoria: {
         Args: {
           p_motivo: string
@@ -2034,6 +2237,15 @@ export type Database = {
       }
     }
     Enums: {
+      motivo_revogacao_link:
+        | "substituido"
+        | "alterado"
+        | "manual"
+        | "cancelada"
+        | "modo_direto"
+        | "desfeito"
+        | "resposta_manual"
+      origem_versao_orcamento: "link" | "manual"
       lado_avaria: "frente" | "traseira" | "lateral_esquerda" | "lateral_direita" | "cabine" | "outro"
       motivo_sem_assinatura: "motorista_ausente" | "recusou"
       nivel_combustivel: "reserva" | "um_quarto" | "meio" | "tres_quartos" | "cheio"
@@ -2167,6 +2379,8 @@ export type Enums<
 export const Constants = {
   public: {
     Enums: {
+      motivo_revogacao_link: ["substituido", "alterado", "manual", "cancelada", "modo_direto", "desfeito", "resposta_manual"],
+      origem_versao_orcamento: ["link", "manual"],
       lado_avaria: ["frente", "traseira", "lateral_esquerda", "lateral_direita", "cabine", "outro"],
       motivo_sem_assinatura: ["motorista_ausente", "recusou"],
       nivel_combustivel: ["reserva", "um_quarto", "meio", "tres_quartos", "cheio"],
@@ -2194,3 +2408,68 @@ export const Constants = {
     },
   },
 } as const
+
+// Fase 6: contratos das RPCs que devolvem JSON (docs/ARQUITETURA.md, 13.6).
+// Situacoes SEM acesso: a RPC devolve so { situacao }, nenhum outro campo.
+export type SituacaoSemAcessoOrcamento =
+  | "vencido"
+  | "substituido"
+  | "atualizado"
+  | "encerrado"
+  | "nao_encontrado"
+  | "limite"
+
+export type SituacaoLinkOrcamento = "aberto" | "aprovado" | "recusado" | SituacaoSemAcessoOrcamento
+
+export type ItemDocumentoOrcamento = {
+  tipo: "servico" | "peca"
+  descricao: string
+  quantidade: number
+  unidade: string
+  preco_unitario_centavos: number | null // null so na previa (item sem preco)
+  subtotal_centavos: number | null
+}
+
+export type DocumentoOrcamento = {
+  oficina_nome: string
+  oficina_telefone: string | null // so digitos; vazio e caso valido
+  os_numero: number
+  veiculo_placa: string
+  veiculo_marca: string | null
+  veiculo_modelo: string | null
+  cliente_nome: string | null
+  itens: ItemDocumentoOrcamento[]
+  subtotal_servicos_centavos: number
+  subtotal_pecas_centavos: number
+  total_centavos: number
+  prazo_estimado: string | null
+  condicoes_pagamento: string | null
+}
+
+export type RespostaPublica = {
+  tipo: "aprovou" | "recusou"
+  nome: string | null
+  respondido_em: string
+}
+
+export type OrcamentoPublico =
+  | { situacao: SituacaoSemAcessoOrcamento }
+  | {
+      situacao: "aberto" | "aprovado" | "recusado"
+      expira_em: string
+      documento: DocumentoOrcamento
+      resposta: RespostaPublica | null
+    }
+
+export type ErroRespostaPublica =
+  | "resposta_obrigatoria"
+  | "nome_obrigatorio"
+  | "nome_grande_demais"
+  | "motivo_grande_demais"
+
+export type RespostaOrcamentoPublica =
+  | { situacao: SituacaoSemAcessoOrcamento }
+  | { situacao: "aberto"; erro: ErroRespostaPublica }
+  | { situacao: "aprovado" | "recusado"; aplicada: boolean; resposta: RespostaPublica }
+
+export type PreviaOrcamento = { documento: DocumentoOrcamento; expira_em: string }

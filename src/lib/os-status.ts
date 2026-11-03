@@ -9,6 +9,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { formatarDiaHora } from "@/lib/formato";
+import type { SituacaoLinkOrcamento } from "@/lib/supabase/database.types";
 
 /**
  * Status, modo e filtros da OS (DESIGN §2.3 e §10.1).
@@ -106,15 +107,25 @@ export const ROTULO_MODO_OS: Record<ModoOS, string> = {
  */
 export function proximoPasso(
   status: StatusOS,
-  dados: { entregueEm?: string | null; motivoCancelamento?: string | null } = {},
+  dados: {
+    entregueEm?: string | null;
+    motivoCancelamento?: string | null;
+    /** Fase 6 (DESIGN §13.8): situação do link e se a OS já tem itens. */
+    linkSituacao?: SituacaoLinkOrcamento | null;
+    temItens?: boolean;
+  } = {},
 ): string {
   switch (status) {
     case "aguardando_orcamento":
-      return "Monte o orçamento e registre a resposta do cliente.";
+      if (dados.linkSituacao === "recusado") return "Cliente recusou. Negocie, ajuste e envie de novo, ou cancele a OS.";
+      return dados.temItens ? "Confira os itens e envie o orçamento ao cliente." : "Monte o orçamento e registre a resposta do cliente.";
     case "orcamento_enviado":
+      if (dados.linkSituacao === "aberto") return "Link gerado. Esperando o cliente responder.";
+      if (dados.linkSituacao === "vencido") return "O link venceu sem resposta. Envie outro ou fale com o cliente.";
+      if (dados.linkSituacao === "encerrado") return "O link foi cancelado. Envie outro ou fale com o cliente.";
       return "Esperando o cliente responder.";
     case "aprovada":
-      return "Cliente aprovou. Pode começar o serviço.";
+      return dados.linkSituacao === "aprovado" ? "Cliente aprovou pelo link. Pode começar o serviço." : "Cliente aprovou. Pode começar o serviço.";
     case "em_andamento":
       return "Serviço em andamento.";
     case "pronta":

@@ -1,4 +1,4 @@
-import type { Database } from "@/lib/supabase/database.types";
+import type { Database, SituacaoLinkOrcamento } from "@/lib/supabase/database.types";
 
 /**
  * Formatacao para a TELA. No banco e no codigo: centavos (inteiro) e UTC.
@@ -134,6 +134,19 @@ export const ROTULO_MODO = {
   exige_orcamento: "Exige orçamento",
   servico_direto: "Serviço direto",
 } as const;
+
+/** Situação do link do orçamento na tela do balcão (DESIGN §13.11; ARQUITETURA 13.6). */
+export const ROTULO_SITUACAO_LINK: Record<SituacaoLinkOrcamento, string> = {
+  aberto: "Link ativo",
+  aprovado: "Cliente aprovou",
+  recusado: "Cliente recusou",
+  vencido: "Link vencido",
+  substituido: "Link substituído",
+  atualizado: "Orçamento alterado",
+  encerrado: "Link cancelado",
+  nao_encontrado: "Sem link",
+  limite: "Muitas tentativas",
+};
 
 export const ROTULO_TIPO_VEICULO = {
   caminhao: "Caminhão",
