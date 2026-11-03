@@ -52,6 +52,36 @@
   color-scheme: dark;
 }
 
+/*
+ * Orcamento para o cliente: sempre claro (DESIGN §13.1).
+ * - .papel-claro: area clara dentro do balcao em qualquer tema (previa e consulta da versao).
+ * - html com a pagina publica dentro: o <html> inteiro fica claro, inclusive antes do JavaScript
+ *   e por cima do que o script de tema do layout raiz decidir (modo escuro do celular, mf-tema salvo).
+ *   "only light" tambem impede o escurecimento forcado do Chrome.
+ * Mesmos valores do :root; vem depois do bloco escuro para ganhar dele. A rota publica sempre abre
+ * em carga completa, entao o :has() nao sofre com a pagina anterior escondida no DOM.
+ */
+.papel-claro,
+html:has([data-orcamento-publico]) {
+  --mf-fundo: #F2F0EB;
+  --mf-superficie: #FFFFFF;
+  --mf-superficie-2: #E6E3DC;
+  --mf-texto: #14161A;
+  --mf-texto-suave: #4A4F57;
+  --mf-borda: #6B6F76;
+  --mf-borda-sutil: #B9B4AA;
+  --mf-grafite: #14161A;
+  --mf-foco: #1D5FA8;
+
+  --mf-sucesso-texto: #1E7B34;
+  --mf-alerta-texto: #B54708;
+  --mf-erro-texto: #B42318;
+  --mf-info-texto: #1D5FA8;
+
+  --mf-status-cancelada-texto: #B42318;
+  color-scheme: only light;
+}
+
 @theme inline {
   /* Fontes (variaveis criadas pelo next/font em src/app/layout.tsx) */
   --font-sans: var(--font-barlow), ui-sans-serif, system-ui, sans-serif;

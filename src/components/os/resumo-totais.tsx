@@ -16,7 +16,10 @@ export function ResumoTotais({
   itensSemPreco = 0,
   custoPecasCentavos,
   children,
+  rotuloSecao = "Totais da OS",
 }: {
+  /** aria-label da seção (a página pública não fala "OS"; DESIGN §13.0). */
+  rotuloSecao?: string;
   servicosCentavos?: number | null;
   pecasCentavos?: number | null;
   totalCentavos?: number | null;
@@ -31,7 +34,7 @@ export function ResumoTotais({
   const pct = verCusto && totalCentavos > 0 ? Math.round((margem / totalCentavos) * 100) : null;
 
   return (
-    <section aria-label="Totais da OS" className="flex flex-col gap-2">
+    <section aria-label={rotuloSecao} className="flex flex-col gap-2">
       <dl className="flex flex-col gap-1">
         {typeof servicosCentavos === "number" && (
           <div className="flex items-baseline justify-end gap-4">
@@ -45,9 +48,10 @@ export function ResumoTotais({
             <dd className="min-w-32 text-right font-mono text-lg">{formatarCentavos(pecasCentavos)}</dd>
           </div>
         )}
-        <div className="mt-1 flex items-baseline justify-between gap-4 border-t-2 border-texto pt-2">
+        {/* Se não couber na mesma linha, o valor desce; nunca encolhe (DESIGN §13.17). */}
+        <div className="mt-1 flex flex-wrap items-baseline justify-between gap-x-4 border-t-2 border-texto pt-2">
           <dt className="font-display text-3xl font-bold">Total</dt>
-          <dd className="text-right font-mono text-[1.75rem] leading-9 font-semibold">{formatarCentavos(totalCentavos)}</dd>
+          <dd className="ml-auto text-right font-mono text-[1.75rem] leading-9 font-semibold [overflow-wrap:anywhere]">{formatarCentavos(totalCentavos)}</dd>
         </div>
       </dl>
 

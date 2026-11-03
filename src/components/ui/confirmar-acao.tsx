@@ -21,6 +21,9 @@ export function ConfirmarAcao({
   variante = "perigo",
   aoConcluir,
   aoMudarAberto,
+  texto,
+  rotuloVoltar = "Voltar sem mudar",
+  classeAbrir,
 }: {
   acao: () => Promise<EstadoAcao>;
   rotulo: string;
@@ -29,6 +32,11 @@ export function ConfirmarAcao({
   rotuloEnviando?: string;
   variante?: VarianteBotao;
   aoConcluir?: () => void;
+  /** Frase abaixo da pergunta. */
+  texto?: string;
+  rotuloVoltar?: string;
+  /** Troca o visual do botão que abre (ex.: ação fantasma; DESIGN §13.11). */
+  classeAbrir?: string;
   /** Avisa o pai quando a confirmacao abre/fecha (ex.: esconder o rodape da folha). */
   aoMudarAberto?: (aberto: boolean) => void;
 }) {
@@ -73,7 +81,11 @@ export function ConfirmarAcao({
   }
 
   if (!aberto) {
-    return (
+    return classeAbrir ? (
+      <button ref={abrir} type="button" className={classeAbrir} onClick={() => setAberto(true)}>
+        {rotulo}
+      </button>
+    ) : (
       <Botao ref={abrir} variante={variante === "perigo" ? "secundario" : variante} onClick={() => setAberto(true)}>
         {rotulo}
       </Botao>
@@ -91,9 +103,10 @@ export function ConfirmarAcao({
       <p id={idPergunta} className="text-lg font-bold">
         {pergunta}
       </p>
+      {texto && <p className="text-base text-texto-suave">{texto}</p>}
       {erro && <CaixaMensagem tipo="erro">{erro}</CaixaMensagem>}
       <Botao variante="secundario" onClick={() => setAberto(false)} disabled={enviando}>
-        Voltar sem mudar
+        {rotuloVoltar}
       </Botao>
       <BotaoEnviar
         type="button"

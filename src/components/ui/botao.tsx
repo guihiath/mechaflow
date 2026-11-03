@@ -22,6 +22,10 @@ export function classesBotao(variante: VarianteBotao = "primario", extra?: strin
   return [base, variantes[variante], extra].filter(Boolean).join(" ");
 }
 
+/** Ação fantasma (DESIGN §13): texto sublinhado, 48 px de área de toque, sem caixa. */
+export const classesFantasma =
+  "inline-flex min-h-toque items-center gap-2 rounded-md px-1 text-left text-base font-bold text-texto underline underline-offset-4";
+
 /**
  * Botão de foto feito com `<label htmlFor>` + `<input type="file" className="sr-only">`:
  * o input invisível recebe o foco, então o anel (mesmo do `:focus-visible` do globals.css)
