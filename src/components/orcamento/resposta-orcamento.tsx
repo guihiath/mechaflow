@@ -27,11 +27,9 @@ const ALTURA_FLEXIVEL = "h-auto! min-h-toque-principal py-2";
 export function BotoesResposta({
   aoEscolher,
   desativado = false,
-  permitirRecusa = true,
 }: {
   aoEscolher?: (tipo: TipoResposta) => void;
   desativado?: boolean;
-  permitirRecusa?: boolean;
 }) {
   const tocar = (tipo: TipoResposta) => {
     if (!desativado) aoEscolher?.(tipo);
@@ -51,12 +49,10 @@ export function BotoesResposta({
           <ThumbsUp size={24} strokeWidth={2.25} aria-hidden />
           Aprovar orçamento
         </Botao>
-        {permitirRecusa && (
-          <Botao variante="secundario" className={ALTURA_FLEXIVEL} aria-disabled={desativado || undefined} onClick={() => tocar("recusou")}>
-            <ThumbsDown size={24} strokeWidth={2.25} aria-hidden />
-            Recusar orçamento
-          </Botao>
-        )}
+        <Botao variante="secundario" className={ALTURA_FLEXIVEL} aria-disabled={desativado || undefined} onClick={() => tocar("recusou")}>
+          <ThumbsDown size={24} strokeWidth={2.25} aria-hidden />
+          Recusar orçamento
+        </Botao>
       </div>
       {desativado && <p className="text-sm text-texto-suave">Na prévia, os botões não funcionam.</p>}
     </section>

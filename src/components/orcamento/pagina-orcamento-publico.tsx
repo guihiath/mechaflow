@@ -26,18 +26,15 @@ const ERRO_NOME = "Escreva seu nome para aprovar.";
 
 /**
  * Página pública: decide qual tela mostrar e guarda o digitado (DESIGN §13.2 a §13.6).
- * Sem Supabase: `responder` vem de fora (F6-B3: `responder_orcamento`, pelo navegador).
+ * Sem Supabase: `responder` vem de fora (a rota real chama `responder_orcamento` pelo navegador).
  * Repetir é seguro (a RPC é idempotente), então a falha oferece "Tentar de novo".
  */
 export function PaginaOrcamentoPublico({
   leitura,
   responder,
-  permitirRecusa = true,
 }: {
   leitura: LeituraOrcamento;
   responder: (pedido: PedidoRespostaCliente) => Promise<ResultadoRespostaCliente>;
-  /** A rota real passa `false` até o F6-B3 (PLANO 19.2: o F6-B2 é sem recusa). */
-  permitirRecusa?: boolean;
 }) {
   const [dados, setDados] = useState(leitura);
   const [passo, setPasso] = useState<TipoResposta | null>(null);
@@ -91,6 +88,7 @@ export function PaginaOrcamentoPublico({
   }, [aberto]);
 
   function abrirPasso(tipo: TipoResposta) {
+    if (dentroDaProtecao()) return;
     rolagemAntes.current = window.scrollY;
     liberadoEm.current = Date.now() + PROTECAO_TOQUE_MS;
     window.history.pushState({ ...window.history.state, [CHAVE_HISTORICO]: tipo }, "");
@@ -210,5 +208,5 @@ export function PaginaOrcamentoPublico({
     );
   }
 
-  return <DocumentoOrcamento documento={dados.documento} expiraEm={dados.expira_em} resposta={<BotoesResposta aoEscolher={abrirPasso} permitirRecusa={permitirRecusa} />} />;
+  return <DocumentoOrcamento documento={dados.documento} expiraEm={dados.expira_em} resposta={<BotoesResposta aoEscolher={abrirPasso} />} />;
 }

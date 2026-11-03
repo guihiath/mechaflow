@@ -186,7 +186,10 @@ export function leituraDoBanco(dado: unknown): LeituraOrcamento | null {
   if (dado.situacao !== "aberto" && dado.situacao !== "aprovado" && dado.situacao !== "recusado") return null;
   const documento = documentoDoBanco(dado.documento);
   if (!documento || typeof dado.expira_em !== "string") return null;
-  return { situacao: dado.situacao, expira_em: dado.expira_em, documento, resposta: respostaDoBanco(dado.resposta) };
+  const resposta = respostaDoBanco(dado.resposta);
+  // Respondido sem a resposta não pode cair na tela com os botões de novo.
+  if (dado.situacao !== "aberto" && !resposta) return null;
+  return { situacao: dado.situacao, expira_em: dado.expira_em, documento, resposta };
 }
 
 /** Resposta de `responder_orcamento` -> resultado da tela. Formato inesperado conta como erro do servidor. */
