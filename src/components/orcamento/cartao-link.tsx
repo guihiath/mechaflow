@@ -5,6 +5,7 @@ import { AcaoBalcao, type GatilhoAcao } from "@/components/orcamento/acao-balcao
 import { classesFantasma } from "@/components/ui/botao";
 import { ConfirmarAcao } from "@/components/ui/confirmar-acao";
 import { Cartao, Etiqueta } from "@/components/ui/estados";
+import { CaixaMensagem } from "@/components/ui/formulario";
 import type { EstadoAcao } from "@/lib/acao";
 import { formatarData, formatarDiaHora } from "@/lib/formato";
 import { textoDiasRestantes } from "@/lib/orcamento";
@@ -57,6 +58,7 @@ export function CartaoLink({
               <p>Ainda sem resposta.</p>
               <p className="text-xs text-texto-suave">O sistema mostra quando o cliente responde, não quando ele abre.</p>
             </div>
+            {aoReenviar && <CaixaMensagem tipo="info">Se a mensagem não saiu, toque em Reenviar: isso gera um link novo e cancela o anterior.</CaixaMensagem>}
             <div className="flex flex-col gap-1">
               {aoReenviar && (
                 <AcaoBalcao gatilho={aoReenviar} estilo="secundario" className="mb-1">

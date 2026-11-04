@@ -7,6 +7,7 @@ import { exigirContexto } from "@/lib/dal";
 import { STATUS_ABERTOS } from "@/lib/os-status";
 import { createClient } from "@/lib/supabase/server";
 import { ChaveVistoria } from "./chave-vistoria";
+import { DadosOficina } from "./dados-oficina";
 
 export const metadata: Metadata = { title: "Configurações" };
 
@@ -28,7 +29,7 @@ async function Conteudo() {
   const ctx = await exigirContexto(["dono"]);
   const supabase = await createClient();
   const [oficinaR, semVistoriaR, modeloR] = await Promise.all([
-    supabase.from("oficinas").select("vistoria_obrigatoria").eq("id", ctx.oficina_id).single(),
+    supabase.from("oficinas").select("nome, telefone, vistoria_obrigatoria").eq("id", ctx.oficina_id).single(),
     supabase
       .from("vw_os")
       .select("id", { count: "exact", head: true })
@@ -50,12 +51,20 @@ async function Conteudo() {
   }
 
   return (
-    <section aria-labelledby="titulo-vistoria" className="flex flex-col gap-4">
-      <h2 id="titulo-vistoria" className="text-2xl">
-        Vistoria de entrada
-      </h2>
-      <ChaveVistoria obrigatoria={oficinaR.data.vistoria_obrigatoria} osSemVistoria={semVistoriaR.count ?? 0} />
-      <LinhaLinkChecklist ativos={ativos} href="/configuracoes/checklist" />
-    </section>
+    <>
+      <section aria-labelledby="titulo-oficina" className="flex flex-col gap-4">
+        <h2 id="titulo-oficina" className="text-2xl">
+          Dados da oficina
+        </h2>
+        <DadosOficina nome={oficinaR.data.nome} telefone={oficinaR.data.telefone} />
+      </section>
+      <section aria-labelledby="titulo-vistoria" className="flex flex-col gap-4">
+        <h2 id="titulo-vistoria" className="text-2xl">
+          Vistoria de entrada
+        </h2>
+        <ChaveVistoria obrigatoria={oficinaR.data.vistoria_obrigatoria} osSemVistoria={semVistoriaR.count ?? 0} />
+        <LinhaLinkChecklist ativos={ativos} href="/configuracoes/checklist" />
+      </section>
+    </>
   );
 }

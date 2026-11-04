@@ -17,6 +17,7 @@ import {
 } from "react";
 import { Camera, Check, CircleAlert, CircleCheckBig, ClipboardCheck, ClipboardX, Images, Play, Plus, Search, ThumbsDown, ThumbsUp, TriangleAlert } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { alterarOrcamento, cancelarLinkOrcamento } from "@/acoes/orcamento";
 import { iniciarVistoria } from "@/acoes/vistoria";
 import {
   adicionarItemOS,
@@ -46,6 +47,8 @@ import {
   EtiquetaVoceLancou,
 } from "@/components/os/etiquetas-fase3";
 import { EsconderNavegacao } from "@/components/layout/marcador-pagina";
+import { CartaoLink, type SituacaoCartaoLink } from "@/components/orcamento/cartao-link";
+import { RecusaDestaque } from "@/components/orcamento/prova-orcamento";
 import { EtiquetaSemPreco } from "@/components/os/badge-status";
 import { BarraAcoesMecanico, BarraAcoesOS, classesBotaoBarra } from "@/components/os/barra-acoes-os";
 import { LinhaItemOS, ListaItensOS } from "@/components/os/linha-item-os";
@@ -70,6 +73,7 @@ import {
   unidadeFracionada,
   type FormaPagamento,
 } from "@/lib/os";
+import { apagarLinkLocal } from "@/lib/orcamento-link-local";
 import { rotuloStatus, type ModoOS, type StatusOS, type TipoItemOS } from "@/lib/os-status";
 
 // =================================================================== tipos
@@ -158,6 +162,10 @@ export type DadosPainel = {
    * Em "em andamento"/"pronta" o primário vira "Fazer vistoria" (DESIGN §12.2 c, F4-B5).
    */
   vistoriaBloqueia?: { emAndamento: boolean } | null;
+  /** Só dono/atendente. `orcamento_enviado` com versão congelada: itens travados (DESIGN §13.10). */
+  itensTravados?: boolean;
+  /** Só dono/atendente, com itens travados: o link da versão está valendo? */
+  linkAtivo?: boolean;
 };
 
 type FolhaAberta =
@@ -173,7 +181,8 @@ type FolhaAberta =
   | { tipo: "mecanico" }
   | { tipo: "comecar" }
   | { tipo: "pagamento" }
-  | { tipo: "modo" };
+  | { tipo: "modo" }
+  | { tipo: "alterar" };
 
 /** Folha "Editar item" em sequencia: "precos" passa pelos sem preco; "conferir", pelos do mecanico nao conferidos. */
 type ModoFila = "precos" | "conferir";
@@ -459,6 +468,7 @@ export function PainelOS({ os, children }: { os: DadosPainel; children: ReactNod
       {folha?.tipo === "comecar" && <FolhaMecanico aoFechar={fechar} comecar aoComecar={() => aposStatus("aprovada", "em_andamento")} />}
       {folha?.tipo === "pagamento" && <FolhaPagamento aoFechar={fechar} />}
       {folha?.tipo === "modo" && <FolhaModo aoFechar={fechar} />}
+      {folha?.tipo === "alterar" && <FolhaAlterar aoFechar={fechar} />}
     </ContextoOS>
   );
 }
@@ -508,14 +518,33 @@ export function BarraOS({ proximoPasso }: { proximoPasso?: string }) {
               Adicionar serviço ou peça
             </Botao>
           );
+        } else if ((os.itensSemPreco ?? 0) > 0) {
+          // Nada de "Enviar" com item sem preço: o primário leva ao que destrava (DESIGN §13.8).
+          primario = <Botao onClick={definirPrecos}>Definir preços ({os.itensSemPreco})</Botao>;
+          secundario = add;
         } else {
-          primario = <Botao onClick={() => abrir({ tipo: "resposta" })}>{REGISTRAR_RESPOSTA}</Botao>;
+          primario = <BotaoLink href={`/os/${os.id}/enviar`}>Enviar orçamento</BotaoLink>;
           secundario = add;
         }
         break;
       case "orcamento_enviado":
-        primario = <Botao onClick={() => abrir({ tipo: "resposta" })}>{REGISTRAR_RESPOSTA}</Botao>;
-        secundario = add;
+        if (os.itensTravados) {
+          // Link vencido ou cancelado: o que resolve é mandar outro. Ativo: esperar ou registrar à mão.
+          primario = os.linkAtivo ? (
+            <Botao onClick={() => abrir({ tipo: "resposta" })}>{REGISTRAR_RESPOSTA}</Botao>
+          ) : (
+            <BotaoLink href={`/os/${os.id}/enviar`}>Reenviar link</BotaoLink>
+          );
+          secundario = (
+            <Botao variante="secundario" aria-label="Alterar orçamento" onClick={() => abrir({ tipo: "alterar" })}>
+              Alterar
+            </Botao>
+          );
+        } else {
+          // OS antiga, enviada antes do link: sem trava.
+          primario = <Botao onClick={() => abrir({ tipo: "resposta" })}>{REGISTRAR_RESPOSTA}</Botao>;
+          secundario = add;
+        }
         break;
       case "aprovada":
         primario = (
@@ -813,19 +842,45 @@ export function BotaoTrocarMecanico() {
   );
 }
 
-/** "Já mandei o orçamento ao cliente" (aguardando_orcamento com itens). */
-export function BotaoJaMandei() {
-  const { passo, ocupado } = useOS();
+/** "Registrar resposta do cliente", abaixo dos totais antes do envio (DESIGN §13.8). */
+export function BotaoRegistrarResposta() {
+  const { abrir } = useOS();
   return (
     <button
       type="button"
-      disabled={ocupado}
-      onClick={() => passo("aguardando_orcamento", "orcamento_enviado")}
-      className="inline-flex min-h-toque items-center self-start text-base font-bold text-info-texto underline underline-offset-4 disabled:opacity-60"
+      onClick={() => abrir({ tipo: "resposta" })}
+      className="inline-flex min-h-toque items-center self-start text-base font-bold text-info-texto underline underline-offset-4"
     >
-      Já mandei o orçamento ao cliente
+      Registrar resposta do cliente
     </button>
   );
+}
+
+/** Situação do link no detalhe (DESIGN §13.11), com as ações ligadas à folha e às rotas da OS. */
+export function CartaoLinkOS({ dados }: { dados: SituacaoCartaoLink }) {
+  const { os, abrir } = useOS();
+  const versao = "versao" in dados ? dados.versao : null;
+  return (
+    <CartaoLink
+      osNumero={os.numero}
+      dados={dados}
+      aoReenviar={`/os/${os.id}/enviar`}
+      aoEnviarWhatsApp={`/os/${os.id}/enviar`}
+      aoVerComoCliente={versao ? `/os/${os.id}/orcamento/${versao}` : undefined}
+      aoRegistrarResposta={() => abrir({ tipo: "resposta" })}
+      aoCancelarLink={async () => {
+        const r = await cancelarLinkOrcamento(os.id);
+        if (!r?.erro) apagarLinkLocal(os.id);
+        return r;
+      }}
+    />
+  );
+}
+
+/** Recusa pelo link em destaque, com "Cliente aceitou?" ligado à folha (DESIGN §13.13). */
+export function RecusaDestaqueOS(props: { motivo: string | null; respondidoEm: string; versao: number; telefoneCliente: string | null }) {
+  const { abrir } = useOS();
+  return <RecusaDestaque {...props} aoRegistrarResposta={() => abrir({ tipo: "resposta" })} />;
 }
 
 /** "Voltar para em andamento" (OS pronta por engano, depois dos 6 s do Desfazer). */
@@ -910,7 +965,8 @@ const primeiroNome = (nome: string) => nome.trim().split(/\s+/)[0] || nome;
 export function AvisoItensMecanico() {
   const { os } = useOS();
   const pendentes = os.itens.filter((i) => i.lancadoPorNome && !i.conferido);
-  if (!pendentes.length || os.status === "entregue" || os.status === "cancelada") return null;
+  // Com itens travados, conferir não salvaria nada: o caminho é "Alterar" (DESIGN §13.10).
+  if (!pendentes.length || os.itensTravados || os.status === "entregue" || os.status === "cancelada") return null;
   const nomes = [...new Set(pendentes.map((i) => primeiroNome(i.lancadoPorNome ?? "")))];
   const quem = nomes.length === 1 ? nomes[0] : `${nomes.slice(0, -1).join(", ")} e ${nomes[nomes.length - 1]}`;
   const n = pendentes.length;
@@ -1822,6 +1878,59 @@ function FormItemMecanico({
   );
 }
 
+// =================================================================== folha: alterar orcamento
+
+/** "Alterar orçamento" (DESIGN §13.10): o link para de valer e os itens voltam a ser editáveis. */
+function FolhaAlterar({ aoFechar }: { aoFechar: () => void }) {
+  const { os, mostrarErro, mostrarSucesso } = useOS();
+  const [enviando, iniciar] = useTransition();
+  const [erro, setErro] = useState<string>();
+
+  function confirmar() {
+    if (enviando) return;
+    setErro(undefined);
+    iniciar(async () => {
+      try {
+        const r = await alterarOrcamento(os.id);
+        if (r?.erro) {
+          // A OS mudou por baixo da folha (cliente respondeu): o recado fica acima da barra.
+          if (r.dados?.fechar) {
+            mostrarErro(r.erro);
+            aoFechar();
+          } else setErro(r.erro);
+          return;
+        }
+        apagarLinkLocal(os.id);
+        mostrarSucesso("Pode alterar os itens. Depois, envie de novo.");
+        aoFechar();
+      } catch {
+        setErro("Não foi possível alterar o orçamento. Confira a internet e tente de novo.");
+      }
+    });
+  }
+
+  return (
+    <Folha
+      aberta
+      aoFechar={aoFechar}
+      titulo={`Alterar o orçamento da OS #${os.numero}?`}
+      rodape={
+        <>
+          <Botao variante="secundario" onClick={aoFechar} disabled={enviando}>
+            Voltar sem alterar
+          </Botao>
+          <BotaoEnviar type="button" enviando={enviando} rotulo="Alterar orçamento" rotuloEnviando="Abrindo orçamento…" onClick={confirmar} />
+        </>
+      }
+    >
+      <div className="flex flex-col gap-3">
+        <p className="text-base">O link enviado para de valer agora. Quem abrir verá que o orçamento foi atualizado. Depois de alterar, é preciso enviar de novo.</p>
+        {erro && <CaixaMensagem tipo="erro">{erro}</CaixaMensagem>}
+      </div>
+    </Folha>
+  );
+}
+
 // =================================================================== folha: resposta do cliente
 
 function FolhaResposta({ aoFechar, aoAprovar }: { aoFechar: () => void; aoAprovar: () => void }) {
@@ -1878,6 +1987,7 @@ function FolhaResposta({ aoFechar, aoAprovar }: { aoFechar: () => void; aoAprova
         <input type="hidden" name="os_id" value={os.id} />
         <input type="hidden" name="de" value={os.status} />
         <p className="font-mono text-2xl">Total do orçamento: {formatarCentavos(os.totalCentavos ?? 0)}</p>
+        {os.linkAtivo && <CaixaMensagem tipo="info">Há um link ativo. Ao registrar a resposta aqui, ele para de valer.</CaixaMensagem>}
         {semPreco && (
           <CaixaMensagem tipo="alerta">
             {os.itensSemPreco === 1 ? "1 item está sem preço." : `${os.itensSemPreco} itens estão sem preço.`} Defina antes de registrar a

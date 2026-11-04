@@ -78,6 +78,11 @@ export const PRAZO_GUARDA_REDE = "12 meses";
 /** Atalho "Ir para a resposta" só com mais itens que isto (DESIGN §13.2). */
 export const ITENS_PARA_ATALHO = 8;
 
+/** Prazo e condições: o banco recusa mais que isto (`texto_orcamento_grande`). */
+export const TEXTO_ORCAMENTO_MAX = 120;
+export const SUGESTOES_PRAZO = ["Mesmo dia", "2 dias úteis", "5 dias úteis"] as const;
+export const SUGESTOES_CONDICOES = ["Pix", "Cartão", "Boleto", "30 dias"] as const;
+
 export const SUGESTOES_MOTIVO_CLIENTE = ["Achei caro", "Vou pensar", "Vou fazer em outro lugar", "Não quero o serviço"] as const;
 
 const horaSP = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" });
@@ -153,7 +158,7 @@ function respostaDoBanco(v: unknown): DadosRespostaCliente | null {
 }
 
 /** Lista fechada de ARQUITETURA 13.3, campo a campo: o que o banco mandar além disto não chega à página. */
-function documentoDoBanco(v: unknown): DadosDocumentoOrcamento | null {
+export function documentoDoBanco(v: unknown): DadosDocumentoOrcamento | null {
   if (!ehObjeto(v) || !Array.isArray(v.itens)) return null;
   return {
     oficina_nome: String(v.oficina_nome ?? ""),
@@ -177,6 +182,13 @@ function documentoDoBanco(v: unknown): DadosDocumentoOrcamento | null {
     prazo_estimado: textoOuNull(v.prazo_estimado),
     condicoes_pagamento: textoOuNull(v.condicoes_pagamento),
   };
+}
+
+/** Resposta de `previa_orcamento` -> o documento como ficaria agora. */
+export function previaDoBanco(dado: unknown): { documento: DadosDocumentoOrcamento; expira_em: string } | null {
+  if (!ehObjeto(dado) || typeof dado.expira_em !== "string") return null;
+  const documento = documentoDoBanco(dado.documento);
+  return documento ? { documento, expira_em: dado.expira_em } : null;
 }
 
 /** Resposta de `ver_orcamento` -> objeto da página. null = formato inesperado ("Erro ao abrir"). */
@@ -212,10 +224,15 @@ export function mensagemWhatsAppOrcamento(dados: {
   link: string;
   expiraEm: string;
   versao: number;
+  /** Link novo para a mesma versão (Reenviar). */
+  reenvio?: boolean;
 }): string {
   const os = `OS #${dados.osNumero} (placa ${dados.placa})`;
-  const segunda =
-    dados.versao > 1 ? `O orçamento da ${os} foi atualizado. O link anterior não vale mais.` : `O orçamento da ${os} está pronto.`;
+  const segunda = dados.reenvio
+    ? `Segue o link novo do orçamento da ${os}. O anterior não vale mais.`
+    : dados.versao > 1
+      ? `O orçamento da ${os} foi atualizado. O link anterior não vale mais.`
+      : `O orçamento da ${os} está pronto.`;
   return [
     `Olá! Aqui é da ${dados.oficinaNome}.`,
     segunda,

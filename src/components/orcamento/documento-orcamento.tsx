@@ -93,14 +93,15 @@ export function CorpoDocumento({
   comAtalho = false,
 }: {
   documento: DadosDocumentoOrcamento;
-  expiraEm: string;
+  /** null: versão marcada à mão, que nunca teve link nem validade. */
+  expiraEm: string | null;
   /** Mostra "Ir para a resposta" quando há mais de 8 itens (só quando a resposta está na página). */
   comAtalho?: boolean;
 }) {
   const servicos = documento.itens.filter((i) => i.tipo === "servico");
   const pecas = documento.itens.filter((i) => i.tipo === "peca");
   const veiculo = [documento.veiculo_marca, documento.veiculo_modelo].filter(Boolean).join(" ");
-  const validade = `Vale até ${formatarData(expiraEm)}`;
+  const validade = expiraEm ? `Vale até ${formatarData(expiraEm)}` : null;
 
   return (
     <>
@@ -118,7 +119,7 @@ export function CorpoDocumento({
       <section aria-label="Total do orçamento" className="flex flex-col gap-0.5">
         <p className="text-base font-bold">Total</p>
         <p className="font-mono text-3xl font-semibold break-words">{formatarCentavos(documento.total_centavos)}</p>
-        <p className="text-base text-texto-suave">{validade}</p>
+        {validade && <p className="text-base text-texto-suave">{validade}</p>}
       </section>
 
       {comAtalho && documento.itens.length > ITENS_PARA_ATALHO && <AtalhoResposta quantidadeItens={documento.itens.length} />}
@@ -144,7 +145,7 @@ export function CorpoDocumento({
               </div>
             )}
           </dl>
-          <p className="text-base text-texto-suave">{validade}</p>
+          {validade && <p className="text-base text-texto-suave">{validade}</p>}
         </div>
       )}
     </>
@@ -162,7 +163,7 @@ export function DocumentoOrcamento({
   resposta,
 }: {
   documento: DadosDocumentoOrcamento;
-  expiraEm: string;
+  expiraEm: string | null;
   variante?: "cliente" | "previa" | "consulta";
   /** O bloco "Sua resposta". */
   resposta?: ReactNode;

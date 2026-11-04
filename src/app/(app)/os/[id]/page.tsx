@@ -2,14 +2,14 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import { Phone } from "lucide-react";
+import { Lock, Phone } from "lucide-react";
 import { cancelarOS } from "@/acoes/os";
 import { Cabecalho } from "@/components/layout/cabecalho";
 import { EsconderNavegacao } from "@/components/layout/marcador-pagina";
 import { BadgeStatus, EtiquetaModo, EtiquetaPagamento, SemMecanico } from "@/components/os/badge-status";
 import { FotosDaOS } from "@/components/fotos/fotos-da-os";
 import type { SituacaoCartaoLink } from "@/components/orcamento/cartao-link";
-import { EnviarWhatsApp } from "@/components/orcamento/enviar-whatsapp";
+import { ProvaOrcamento, RespostasVersoes, type LinhaRespostaVersao } from "@/components/orcamento/prova-orcamento";
 import { AprovadoAgora } from "@/components/os/aprovado-agora";
 import { DetalheCarregando } from "@/components/os/detalhe-carregando";
 import { LinhaTempo } from "@/components/os/linha-tempo";
@@ -32,7 +32,6 @@ import {
   soDigitos,
 } from "@/lib/formato";
 import { podeEnviarFoto } from "@/lib/fotos/regras";
-import { numeroWhatsAppBrasil } from "@/lib/orcamento";
 import { CANAL_NA_FRASE, montarEventos, ROTULO_FORMA_PAGAMENTO } from "@/lib/os";
 import { ehStatusOS, osEncerrada, proximoPasso, type ModoOS, type StatusOS } from "@/lib/os-status";
 import { createClient } from "@/lib/supabase/server";
@@ -41,14 +40,16 @@ import {
   BarraOS,
   BotaoAdicionarItem,
   BotaoDefinirPrecos,
-  BotaoJaMandei,
   BotaoLancarItem,
   BotaoReabrir,
+  BotaoRegistrarResposta,
   BotaoTrocarMecanico,
   BotaoTrocarModo,
+  CartaoLinkOS,
   ListaItensEditavel,
   ListaItensMecanico,
   PainelOS,
+  RecusaDestaqueOS,
   type DadosPainel,
   type ItemMecanico,
 } from "./painel-os";
@@ -125,7 +126,7 @@ function resumoVistoria(v: Awaited<ReturnType<typeof lerVistoriaEntrada>>["data"
 }
 
 const COLUNAS_SITUACAO_LINK =
-  "link_situacao, link_criado_em, link_criado_por_nome, link_expira_em, link_revogado_em, link_revogado_motivo, link_revogado_por_nome, versao_numero";
+  "link_situacao, link_criado_em, link_criado_por_nome, link_expira_em, link_revogado_em, link_revogado_motivo, link_revogado_por_nome, versao_numero, respondido, resposta_aprovou, resposta_motivo, respondido_em";
 
 function lerSituacaoLink(supabase: Cliente, osId: string) {
   return supabase.from("vw_orcamento_situacao").select(COLUNAS_SITUACAO_LINK).eq("os_id", osId).maybeSingle();
@@ -149,6 +150,41 @@ function cartaoDoLink(s: Awaited<ReturnType<typeof lerSituacaoLink>>["data"]): S
     return { situacao: "cancelado", canceladoPor: s.link_revogado_por_nome, canceladoEm: s.link_revogado_em, versao: s.versao_numero };
   }
   return null;
+}
+
+const COLUNAS_PROVA =
+  "id, versao_id, versao_numero, canal, aprovou, respondente_nome, motivo, valor_centavos, codigo_conferencia, respondido_em, registrada_por_nome, desfeita_em, desfeita_por_nome";
+
+function lerProvas(supabase: Cliente, osId: string) {
+  return supabase.from("vw_orcamento_provas").select(COLUNAS_PROVA).eq("os_id", osId).order("respondido_em", { ascending: false });
+}
+
+function lerVersoes(supabase: Cliente, osId: string) {
+  return supabase.from("vw_orcamento_versoes").select("id, numero").eq("os_id", osId).order("numero", { ascending: false });
+}
+
+type Prova = NonNullable<Awaited<ReturnType<typeof lerProvas>>["data"]>[number];
+type VersaoResumo = NonNullable<Awaited<ReturnType<typeof lerVersoes>>["data"]>[number];
+
+/** "Ver respostas e versões" (DESIGN §13.12): versão mais nova primeiro; sem resposta, "Enviada". */
+function linhasRespostas(osId: string, versoes: VersaoResumo[], provas: Prova[]): LinhaRespostaVersao[] {
+  return versoes.flatMap((v): LinhaRespostaVersao[] => {
+    const numero = v.numero ?? 0;
+    const href = `/os/${osId}/orcamento/${numero}`;
+    const dela = provas.filter((p) => p.versao_id === v.id);
+    if (!dela.length) return [{ versao: numero, resposta: "enviada", href }];
+    return dela.map((p) => ({
+      versao: numero,
+      resposta: p.aprovou ? "aprovou" : "recusou",
+      canal: p.canal ?? undefined,
+      nome: p.respondente_nome,
+      em: p.respondido_em,
+      motivo: p.motivo,
+      desfeitaPor: p.desfeita_por_nome,
+      desfeitaEm: p.desfeita_em,
+      href,
+    }));
+  });
 }
 
 function Erro({ id, voltar }: { id: string; voltar: string }) {
@@ -179,7 +215,7 @@ function Info({ rotulo, children }: { rotulo: string; children: React.ReactNode 
 async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string; sp: Params }) {
   const supabase = await createClient();
   const ehDono = ctx.papel === "dono";
-  const [{ data: os, error }, itensR, histR, equipeR, andamentoR, vistoriaR, oficinaR, anuladasR, situacaoLinkR] = await Promise.all([
+  const [{ data: os, error }, itensR, histR, equipeR, andamentoR, vistoriaR, oficinaR, anuladasR, situacaoLinkR, provasR, versoesR] = await Promise.all([
     supabase.from("vw_os").select("*").eq("id", id).maybeSingle(),
     supabase.from("vw_os_itens").select("*").eq("os_id", id).order("criado_em"),
     supabase.from("vw_os_historico").select("id, evento, de_status, para_status, observacao, por_nome, em").eq("os_id", id).order("em"),
@@ -189,6 +225,8 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
     lerObrigatoria(supabase, ctx.oficina_id),
     lerAnuladas(supabase, id),
     lerSituacaoLink(supabase, id),
+    lerProvas(supabase, id),
+    lerVersoes(supabase, id),
   ]);
   if (error || itensR.error || histR.error) return <Erro id={id} voltar="/os" />;
   if (!os || !ehStatusOS(os.status)) notFound();
@@ -197,6 +235,14 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
   const modo = (os.modo ?? "com_orcamento") as ModoOS;
   const placa = formatarPlaca(os.placa);
   const encerrada = osEncerrada(status);
+  // Fase 6: a garantia da trava é o trigger; aqui é só para a tela não oferecer o que o banco recusa.
+  const itensTravados = Boolean(os.orcamento_itens_travados);
+  const cartaoLink: SituacaoCartaoLink | null =
+    modo === "com_orcamento" && status === "orcamento_enviado"
+      ? itensTravados
+        ? cartaoDoLink(situacaoLinkR.data)
+        : { situacao: "sem_link" }
+      : null;
   const obrigatoria = Boolean(oficinaR.data?.vistoria_obrigatoria);
   const itens = itensR.data ?? [];
   const contagem = new Map<string, number>();
@@ -246,6 +292,8 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
     // leva à vistoria (DESIGN §12.2 c; o banco bloqueia pronta e entregue, ARQUITETURA 12.5).
     vistoriaBloqueia:
       obrigatoria && !encerrada && vistoriaR.data?.status !== "concluida" ? { emAndamento: vistoriaR.data?.status === "rascunho" } : null,
+    itensTravados,
+    linkAtivo: itensTravados && cartaoLink?.situacao === "ativo",
   };
 
   const aberta = param(sp.aberta);
@@ -268,14 +316,13 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
     linkSituacao,
     temItens: itens.length > 0,
   });
-  // Enviar por WhatsApp (F6-B2). OS antiga em `orcamento_enviado`, sem versão, também pode gerar.
-  const itensTravados = Boolean(os.orcamento_itens_travados);
-  const podeGerarLink =
-    modo === "com_orcamento" &&
-    (status === "aguardando_orcamento" || (status === "orcamento_enviado" && !itensTravados)) &&
-    itens.length > 0 &&
-    semPreco === 0;
-  const cartaoLink = modo === "com_orcamento" && status === "orcamento_enviado" && itensTravados ? cartaoDoLink(situacaoLinkR.data) : null;
+  // A última resposta, se é a aprovação que está valendo. Aprovação de antes da Fase 6 não tem
+  // prova: continua no cartão antigo.
+  const provas = provasR.data ?? [];
+  const provaAtual = modo === "com_orcamento" && os.orcamento_aprovado_em && provas[0]?.aprovou && !provas[0].desfeita_em ? provas[0] : null;
+  const situacaoLink = situacaoLinkR.data;
+  const recusaAtual = status === "aguardando_orcamento" && situacaoLink?.respondido && situacaoLink.resposta_aprovou === false ? situacaoLink : null;
+  const linhasVersoes = linhasRespostas(id, versoesR.data ?? [], provas);
   const temFechamento = status === "entregue" || os.causa_encontrada || os.solucao_aplicada;
   const tel = formatarTelefone(os.cliente_telefone);
 
@@ -324,7 +371,7 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
     </Cartao>
   );
   const cartaoAutorizacao =
-    (modo === "direto" && os.autorizado_em && os.autorizado_por_nome) || (modo === "com_orcamento" && os.orcamento_aprovado_em) ? (
+    (modo === "direto" && os.autorizado_em && os.autorizado_por_nome) || (modo === "com_orcamento" && os.orcamento_aprovado_em && !provaAtual) ? (
       <>
         {modo === "direto" && os.autorizado_em && os.autorizado_por_nome && (
           <Cartao faixa="bg-info">
@@ -336,7 +383,7 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
             </p>
           </Cartao>
         )}
-        {modo === "com_orcamento" && os.orcamento_aprovado_em && (
+        {modo === "com_orcamento" && os.orcamento_aprovado_em && !provaAtual && (
           <Cartao faixa="bg-info">
             <p className="text-lg font-bold">
               Aprovado {os.orcamento_aprovado_por_nome ? `por ${os.orcamento_aprovado_por_nome}` : "pelo cliente"}
@@ -393,6 +440,16 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
               {status === "pronta" && <BotaoReabrir />}
             </div>
 
+            {/* Recusa pelo link: logo depois do topo, é o que o balcão precisa resolver (DESIGN §13.13) */}
+            {recusaAtual?.respondido_em && (
+              <RecusaDestaqueOS
+                motivo={recusaAtual.resposta_motivo}
+                respondidoEm={recusaAtual.respondido_em}
+                versao={recusaAtual.versao_numero ?? 0}
+                telefoneCliente={soDigitos(os.cliente_telefone) || null}
+              />
+            )}
+
             {/* Vistoria de entrada: alto na página, é o que se faz na chegada (DESIGN §12.2 b) */}
             <CartaoVistoriaOS
               osId={id}
@@ -404,23 +461,22 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
               botaoNaBarra={dados.vistoriaBloqueia != null && (status === "em_andamento" || status === "pronta")}
             />
 
-            {/* Link do orçamento: logo depois da vistoria (DESIGN §13.8). */}
-            {(podeGerarLink || cartaoLink) && (
-              <EnviarWhatsApp
-                osId={id}
+            {/* Link ou prova: logo depois da vistoria (DESIGN §13.8, §13.11, §13.12). */}
+            {cartaoLink && <CartaoLinkOS dados={cartaoLink} />}
+            {provaAtual?.respondido_em && provaAtual.canal && (
+              <ProvaOrcamento
                 osNumero={os.numero ?? 0}
-                placa={os.placa ?? ""}
-                oficinaNome={ctx.oficina_nome ?? ""}
-                clienteNome={os.cliente_nome ?? ""}
-                telefone={tel}
-                numeroWhatsApp={numeroWhatsAppBrasil(os.cliente_telefone)}
-                totalCentavos={os.total_centavos ?? 0}
-                qtdItens={itens.length}
-                podeGerar={podeGerarLink}
-                clienteRecusou={linkSituacao === "recusado"}
-                cartao={cartaoLink}
+                canal={provaAtual.canal}
+                nome={provaAtual.respondente_nome}
+                respondidoEm={provaAtual.respondido_em}
+                marcadoPor={provaAtual.registrada_por_nome}
+                versao={provaAtual.versao_numero ?? 0}
+                valorCentavos={provaAtual.valor_centavos ?? 0}
+                codigoConferencia={provaAtual.codigo_conferencia ?? ""}
+                aoVerAprovado={`/os/${id}/orcamento/${provaAtual.versao_numero}`}
               />
             )}
+            {(provas.length > 0 || linhasVersoes.length > 1) && <RespostasVersoes linhas={linhasVersoes} />}
 
             {/* Celular: aviso dos itens do mecanico logo abaixo do topo (DESIGN §11.9) */}
             <div className="lg:hidden">
@@ -452,8 +508,14 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
               <h2 id="titulo-itens" className="text-2xl">
                 Serviços e peças ({itens.length})
               </h2>
+              {itensTravados && (
+                <p className="flex items-start gap-1.5 text-[15px] font-bold">
+                  <Lock size={18} strokeWidth={2.25} aria-hidden className="mt-0.5 shrink-0" />
+                  Itens travados: este é o orçamento enviado ao cliente. Para mudar, toque em Alterar.
+                </p>
+              )}
               {itens.length ? (
-                <ListaItensEditavel editavel={!encerrada} mostrarCusto={ehDono} />
+                <ListaItensEditavel editavel={!encerrada && !itensTravados} mostrarCusto={ehDono} />
               ) : (
                 <div>
                   <p className="text-lg font-bold">Nenhum serviço ou peça ainda.</p>
@@ -462,7 +524,7 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
                   </p>
                 </div>
               )}
-              {!encerrada && <BotaoAdicionarItem />}
+              {!encerrada && !itensTravados && <BotaoAdicionarItem />}
             </section>
 
             <ResumoTotais
@@ -483,8 +545,20 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
                 />
               )}
             </ResumoTotais>
-            {semPreco > 0 && !encerrada && !temAvisoMecanico && <BotaoDefinirPrecos />}
-            {status === "aguardando_orcamento" && itens.length > 0 && <BotaoJaMandei />}
+            {semPreco > 0 && !encerrada && !itensTravados && !temAvisoMecanico && <BotaoDefinirPrecos />}
+            {status === "aguardando_orcamento" && itens.length > 0 && (
+              <div className="flex flex-col gap-1">
+                {semPreco === 0 && (
+                  <Link
+                    href={`/os/${id}/enviar?ver=1`}
+                    className="inline-flex min-h-toque items-center self-start text-base font-bold text-info-texto underline underline-offset-4"
+                  >
+                    Ver como o cliente vê
+                  </Link>
+                )}
+                <BotaoRegistrarResposta />
+              </div>
+            )}
 
             <FotosDaOS
               osId={id}

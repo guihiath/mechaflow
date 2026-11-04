@@ -2,9 +2,10 @@
 
 import { refresh } from "next/cache";
 import { contextoParaAcao } from "@/lib/dal";
-import type { EstadoAcao } from "@/lib/acao";
+import { erroCampos, temErros, texto, type EstadoAcao } from "@/lib/acao";
 import { normalizarNomeItem, trocasParaMover, validarNomeItem, type ItemChecklist } from "@/lib/checklist";
 import { traduzirErro } from "@/lib/erros";
+import { soDigitos } from "@/lib/formato";
 import { createClient } from "@/lib/supabase/server";
 
 const SEM_PERMISSAO = "Você não tem permissão para isso.";
@@ -22,6 +23,25 @@ export type ResultadoChecklist = {
 };
 
 type Cliente = Awaited<ReturnType<typeof createClient>>;
+
+/** "Dados da oficina" (DESIGN §13.18), só o dono. O que já foi enviado continua congelado. */
+export async function salvarDadosOficina(_anterior: EstadoAcao, dados: FormData): Promise<EstadoAcao> {
+  const ctx = await contextoParaAcao(["dono"]);
+  if (!ctx) return { erro: SEM_PERMISSAO };
+  const nome = texto(dados, "nome");
+  const telefone = soDigitos(texto(dados, "telefone"));
+  const campos = {
+    nome: nome.length < 2 ? "Informe o nome da oficina." : nome.length > 120 ? "Nome muito longo." : undefined,
+    telefone: telefone && (telefone.length < 10 || telefone.length > 13) ? "Telefone com DDD. Ex.: (11) 98888-7777" : undefined,
+  };
+  if (temErros(campos)) return erroCampos(campos);
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("oficinas").update({ nome, telefone: telefone || null }).eq("id", ctx.oficina_id).select("id");
+  if (error) return { erro: traduzir(error) };
+  if (!data?.length) return { erro: SEM_PERMISSAO };
+  refresh();
+  return { ok: true, mensagem: "Dados da oficina salvos." };
+}
 
 function traduzir(erro: Parameters<typeof traduzirErro>[0]): string {
   const t = traduzirErro(erro);
