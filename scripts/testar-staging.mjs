@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Teste de ponta a ponta das Fases 1, 2, 3 e 4 contra o Supabase STAGING (so dados ficticios).
+ * Teste de ponta a ponta das Fases 1, 2, 3, 4 e 6 contra o Supabase STAGING (so dados ficticios).
  * Fase 2 (OS): os dois modos ate "entregue", autorizacao, mecanico sem valores pela API
  * (tabelas e views), isolamento entre oficinas, idempotencia e numeracao com aberturas simultaneas.
  * Fase 3: itens lancados pelo mecanico (sem valores, status, "apos a aprovacao"), observacoes
@@ -12,22 +12,30 @@
  * obrigatoriedade, idempotencia com reenvio simultaneo e, com APP_URL, o PDF e as paginas.
  * Objetos da vistoria: NULL = nao informado, [] = "Nenhum objeto" (exige a migracao
  * 20261102000001_fase4_objetos_nao_informado no staging).
+ * Fase 6: orcamento por link com cliente anon de verdade (so a chave publishable): lista fechada,
+ * tokens, versao congelada, trava, prova imutavel, convivencia, concorrencia real, limite,
+ * isolamento, mecanico e, com APP_URL, cabecalhos e HTML da pagina publica e telas do balcao.
  *
  * Uso:
  *   node scripts/testar-staging.mjs                         # so testes sem login (anon)
- *   TESTE_EMAIL_DOMINIO=algum-dominio-com-mx.com node scripts/testar-staging.mjs
+ *   TESTE_EMAIL_DOMINIO=www.example.org node scripts/testar-staging.mjs
  *   APP_URL=http://localhost:3000 ...                       # tambem testa as paginas do app
+ *   TESTE_SO_FASE6=1 ...                                    # so a Fase 6, com 4 contas e 2 oficinas
+ *   TESTE_PLAYWRIGHT=/caminho/playwright/index.mjs ...      # com APP_URL: cliques no navegador
  *
  * Requisitos para o teste completo:
  *   - "Confirm email" DESLIGADO no staging (Auth > Sign In / Providers > Email).
- *   - Dominio de e-mail que o Supabase aceite (ele recusa .test e example.com).
+ *   - Dominio de e-mail reservado que o Supabase aceite (ele recusa .test e example.com; subdominio
+ *     de dominio reservado com endereco, como www.example.org, nao tem caixa de ninguem). Nao usar o
+ *     e-mail de uma pessoa: com a confirmacao desligada nada e enviado, mas as contas ficam no staging.
  *
  * Usa so a chave publishable do .env.local (nunca a secret). As senhas sao
  * aleatorias, geradas a cada execucao e nunca impressas nem salvas.
  * As contas criadas ficam no staging (sem chave secret nao da para apagar).
  */
-import { readFileSync } from "node:fs";
-import { randomBytes } from "node:crypto";
+import { readdirSync, readFileSync } from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
+import { pathToFileURL } from "node:url";
 import { crc32, deflateSync } from "node:zlib";
 import { createClient } from "@supabase/supabase-js";
 import { createServerClient } from "@supabase/ssr";
@@ -47,6 +55,7 @@ if (!URL_SB.includes("qjzhzyzmifashtvffxdx")) throw new Error("Este teste so rod
 // TESTE_EMAIL_BASE=fulano@gmail.com gera fulano+rotulo.rodada@gmail.com (com a confirmacao
 // desligada nenhum e-mail e enviado). Alternativa: TESTE_EMAIL_DOMINIO=dominio-com-mx.com
 const BASE = process.env.TESTE_EMAIL_BASE;
+if (BASE?.includes("hiath63")) throw new Error("Nao use o e-mail do Guilherme nas contas de teste: use TESTE_EMAIL_DOMINIO=www.example.org.");
 const DOMINIO = BASE ? BASE.split("@")[1] : process.env.TESTE_EMAIL_DOMINIO;
 const emailTeste = (rotulo) =>
   BASE ? BASE.replace("@", `+${rotulo}.${RODADA}@`) : `${rotulo}.${RODADA}@${DOMINIO}`;
@@ -248,6 +257,7 @@ async function testesCompletos() {
   await testesFase2({ donoA, mec, at, donoB, ofA: ofA.data, ofB: ofB.data, vei: vei.data, serv: serv.data, peca: peca.data });
   const { mec2 } = await testesFase3({ donoA, mec, at, donoB, ofA: ofA.data, vei: vei.data, serv: serv.data, peca: peca.data, pend: pend.data });
   await testesFase4({ donoA, mec, mec2, at, donoB, ofA: ofA.data, ofB: ofB.data, vei: vei.data });
+  await testesFase6({ donoA, mec, at, donoB, ofA: ofA.data, ofB: ofB.data });
 
   console.log("\n== Desativar mecanico ==");
   const desat = await donoA.sb.rpc("atualizar_membro", { p_perfil_id: mec.session.user.id, p_ativo: false });
@@ -1706,15 +1716,940 @@ async function testesFase4({ donoA, mec, mec2, at, donoB, ofA, ofB, vei }) {
   }
 }
 
+// ------------------------------------------------------------------ Fase 6: orcamento por link
+// Criterios "testar-staging" do PLANO 19.4. O cliente e `anon` de verdade: so a chave publishable,
+// sem sessao, um cliente novo por chamada (como dois aparelhos). A oficina e as contas sao as desta
+// rodada. Nunca abre wa.me. Sem chave secreta nao da para simular validade vencida: esse caso fica
+// no fase6_orcamento.sql (ver ARQUITETURA 13.14).
+const clienteAnon = (headers) =>
+  createClient(URL_SB, CHAVE, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    ...(headers ? { global: { headers } } : {}),
+  });
+const verLink = (token) => clienteAnon().rpc("ver_orcamento", { p_token: token });
+const responderLink = (token, aprovou, nome = null, motivo = null, headers) =>
+  clienteAnon(headers).rpc("responder_orcamento", { p_token: token, p_aprovou: aprovou, p_nome: nome, p_motivo: motivo });
+const chavesDe = (o) => Object.keys(o ?? {}).sort().join(",");
+const CHAVES_DOCUMENTO = "cliente_nome,condicoes_pagamento,itens,oficina_nome,oficina_telefone,os_numero,prazo_estimado,subtotal_pecas_centavos,subtotal_servicos_centavos,total_centavos,veiculo_marca,veiculo_modelo,veiculo_placa";
+const CHAVES_ITEM = "descricao,preco_unitario_centavos,quantidade,subtotal_centavos,tipo,unidade";
+const CHAVES_RESPOSTA = "nome,respondido_em,tipo";
+const SO_SITUACAO = (d, s) => chavesDe(d) === "situacao" && d?.situacao === s;
+const reais = (c) => new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 2 }).format(c / 100);
+const telFormatado = (t) => `(${t.slice(0, 2)}) ${t.slice(2, 7)}-${t.slice(7)}`;
+const LETRAS = "ABCDEFGHJKLMNPRSTUVWXYZ";
+const aleatorioDe = (s, n) => Array.from(randomBytes(n), (b) => s[b % s.length]).join("");
+const placaNova = () => `${aleatorioDe(LETRAS, 3)}${aleatorioDe("0123456789", 1)}${aleatorioDe(LETRAS, 1)}${aleatorioDe("0123456789", 2)}`;
+const digitos = (n) => aleatorioDe("0123456789", n);
+/** A janela do limite vira a cada 10 min: nao comecar a contar em cima da virada. */
+async function foraDaVirada() {
+  const resto = 600 - (Math.floor(Date.now() / 1000) % 600);
+  if (resto < 45) await esperar((resto + 2) * 1000);
+}
+
+// Valores longos e unicos: buscar no HTML nao pode bater por acaso em nome de arquivo ou id.
+const PRECO_SERV = 8642917;
+const PRECO_PECA = 3517391;
+const CUSTO_PECA = 7315927;
+const TOTAL_F6 = PRECO_SERV + 2 * PRECO_PECA;
+
+async function testesFase6({ donoA, mec, at, donoB, ofA }) {
+  const idMec = mec.session.user.id;
+  const respostasMec = [];
+  const guardaMec = (r) => (respostasMec.push(r?.data ?? null), r);
+  let seq = 0;
+
+  /** OS nova com cliente e placa proprios. `itens: false` abre sem item. */
+  async function novaOS({ sb = donoA.sb, itens = true, mecanico = idMec, modo = "com_orcamento" } = {}) {
+    const n = ++seq;
+    const marcas = {
+      n,
+      placa: placaNova(),
+      telefone: `119${digitos(8)}`,
+      documento: digitos(11),
+      cliente: `Cliente F6 ${RODADA} ${n}`,
+      sintoma: `SINTOMA-SECRETO-${RODADA}-${n}`,
+      observacao: `OBSERVACAO-INTERNA-${RODADA}-${n}`,
+      servico: `Servico F6 ${RODADA} ${n}`,
+      peca: `Peca F6 ${RODADA} ${n}`,
+    };
+    const ab = await sb
+      .rpc("abrir_os", {
+        p_chave_idempotencia: uuid(),
+        p_placa: marcas.placa,
+        p_cliente_nome: marcas.cliente,
+        p_cliente_telefone: marcas.telefone,
+        p_veiculo_tipo: "carreta",
+        p_veiculo_marca: "Scania",
+        p_veiculo_modelo: "R 450",
+        p_km: 100000 + n,
+        p_sintoma_relatado: marcas.sintoma,
+        p_modo: modo,
+        p_mecanico_id: mecanico,
+        p_observacoes: marcas.observacao,
+        ...(modo === "direto" ? { p_autorizado_por_nome: "Autorizador F6" } : {}),
+      })
+      .single();
+    if (ab.error) throw new Error(`abrir_os F6: ${ab.error.message}`);
+    const os = ab.data.os_id;
+    const cid = (await sb.from("vw_os").select("cliente_id").eq("id", os).single()).data?.cliente_id;
+    await sb.from("clientes").update({ documento: marcas.documento }).eq("id", cid);
+    if (itens) {
+      const a = await sb.rpc("adicionar_item_os", { p_chave_idempotencia: uuid(), p_os_id: os, p_tipo: "servico", p_descricao: marcas.servico, p_preco_unitario_centavos: PRECO_SERV });
+      const b = await sb.rpc("adicionar_item_os", { p_chave_idempotencia: uuid(), p_os_id: os, p_tipo: "peca", p_descricao: marcas.peca, p_quantidade: 2, p_preco_unitario_centavos: PRECO_PECA, p_custo_unitario_centavos: CUSTO_PECA });
+      if (a.error || b.error) throw new Error(`itens F6: ${msg(a)}/${msg(b)}`);
+      marcas.itemServico = a.data;
+      marcas.itemPeca = b.data;
+    }
+    return { id: os, numero: ab.data.numero, ...marcas };
+  }
+  const enviar = (sb, id, total = TOTAL_F6, chave = uuid(), extra = {}) =>
+    sb.rpc("enviar_orcamento", { p_os_id: id, p_chave_idempotencia: chave, p_total_conferido_centavos: total, ...extra }).single();
+  const reenviar = (sb, id, chave = uuid()) => sb.rpc("reenviar_orcamento", { p_os_id: id, p_chave_idempotencia: chave }).single();
+  /** OS nova ja enviada, com o token na mao. */
+  async function osComLink(opcoes) {
+    const os = await novaOS(opcoes);
+    const e = await enviar(donoA.sb, os.id);
+    if (e.error) throw new Error(`enviar F6: ${e.error.message}`);
+    return { ...os, token: e.data.token };
+  }
+  const vwOs = async (id, sb = donoA.sb) =>
+    (await sb.from("vw_os").select("status, modo, valor_aprovado_centavos, total_centavos, orcamento_aprovacao_canal, orcamento_aprovado_por_nome, orcamento_aprovacao_registrada_por_nome, orcamento_respondido, orcamento_respondido_em, orcamento_link_situacao, orcamento_itens_travados, itens_apos_aprovacao").eq("id", id).single()).data;
+  const provasDe = async (id, sb = donoA.sb) => (await sb.from("vw_orcamento_provas").select("*").eq("os_id", id).order("respondido_em")).data ?? [];
+  const versoesDe = async (id, sb = donoA.sb) => (await sb.from("vw_orcamento_versoes").select("*").eq("os_id", id).order("numero")).data ?? [];
+  const linksDe = async (id, sb = donoA.sb) => (await sb.from("orcamento_links").select("id, versao_id, expira_em, criado_em, revogado_em, revogado_motivo").eq("os_id", id).order("criado_em")).data ?? [];
+  const histDe = async (id, sb = donoA.sb) => (await sb.from("vw_os_historico").select("evento, de_status, para_status, observacao, por, por_nome, em").eq("os_id", id).order("em")).data ?? [];
+  /** Tudo que abrir o link nao pode mudar. */
+  const estadoDe = async (id) => JSON.stringify({ os: await vwOs(id), provas: await provasDe(id), versoes: await versoesDe(id), links: await linksDe(id), hist: await histDe(id) });
+
+  // ---------------------------------------------------------------- anon
+  console.log("\n== Fase 6: anon nao le nada do sistema ==");
+  const tabelas = objetosDaApi();
+  checar(`anon: lista de tabelas e views vem das migracoes (${tabelas.length})`, tabelas.length > 40 && tabelas.includes("orcamento_respostas") && tabelas.includes("vw_orcamento_provas"), String(tabelas.length));
+  const lidas = [];
+  for (const t of tabelas) {
+    const r = await clienteAnon().from(t).select("*").limit(1);
+    if ((r.data ?? []).length > 0) lidas.push(t);
+  }
+  checar("anon: 0 linhas em toda tabela e view das migracoes", lidas.length === 0, lidas.join(", "));
+  const insAnon = await clienteAnon().from("orcamento_respostas").insert({ aprovou: true });
+  checar("anon: nao grava resposta direto na tabela", Boolean(insAnon.error), insAnon.error?.code);
+  for (const [fn, args] of [
+    ["enviar_orcamento", { p_os_id: uuid(), p_chave_idempotencia: uuid(), p_total_conferido_centavos: 1 }],
+    ["reenviar_orcamento", { p_os_id: uuid(), p_chave_idempotencia: uuid() }],
+    ["cancelar_link_orcamento", { p_os_id: uuid() }],
+    ["alterar_orcamento", { p_os_id: uuid() }],
+    ["previa_orcamento", { p_os_id: uuid() }],
+    ["conferir_orcamento", { p_versao_id: uuid() }],
+    ["registrar_resposta_orcamento", { p_os_id: uuid(), p_de: "orcamento_enviado", p_aprovou: true, p_canal: "telefone" }],
+    ["mudar_status_os", { p_os_id: uuid(), p_de: "aprovada", p_para: "aguardando_orcamento" }],
+  ]) {
+    const r = await clienteAnon().rpc(fn, args);
+    checar(`anon: nao executa ${fn}`, Boolean(r.error) && r.data === null, r.error?.code ?? "sem erro");
+  }
+  const logadoVer = await donoA.sb.rpc("ver_orcamento", { p_token: "0".repeat(64) });
+  const logadoResp = await donoA.sb.rpc("responder_orcamento", { p_token: "0".repeat(64), p_aprovou: true, p_nome: "Dono" });
+  checar("logado: nao chama as RPCs publicas (42501)", logadoVer.error?.code === "42501" && logadoResp.error?.code === "42501", `${logadoVer.error?.code}/${logadoResp.error?.code}`);
+
+  // ---------------------------------------------------------------- envio
+  console.log("\n== Fase 6: envio ==");
+  const semItem = await novaOS({ itens: false });
+  const eSem = await enviar(donoA.sb, semItem.id, 0);
+  checar("nao envia orcamento sem item", msg(eSem) === "orcamento_sem_itens", msg(eSem));
+  const semPreco = await novaOS({ itens: false });
+  await donoA.sb.rpc("adicionar_item_os", { p_chave_idempotencia: uuid(), p_os_id: semPreco.id, p_tipo: "peca", p_descricao: "Sem preco F6" });
+  const eSemPreco = await enviar(at.sb, semPreco.id, 0);
+  checar("nao envia orcamento com item sem preco", msg(eSemPreco) === "os_itens_sem_preco", msg(eSemPreco));
+  const statusSem = await vwOs(semPreco.id);
+  checar("envio recusado nao muda a OS nem gera link", statusSem?.status === "aguardando_orcamento" && (await linksDe(semPreco.id)).length === 0 && (await versoesDe(semPreco.id)).length === 0);
+  const direta = await novaOS({ itens: false, modo: "direto" });
+  const eDireta = await enviar(donoA.sb, direta.id, 0);
+  checar("modo direto nao envia orcamento", msg(eDireta) === "transicao_invalida", msg(eDireta));
+
+  const A = await novaOS();
+  const eTotal = await enviar(donoA.sb, A.id, TOTAL_F6 + 1);
+  checar("total diferente do que a tela mostrou: orcamento_mudou, nada gerado", msg(eTotal) === "orcamento_mudou" && (await linksDe(A.id)).length === 0, msg(eTotal));
+  const eMec = guardaMec(await enviar(mec.sb, A.id));
+  checar("mecanico nao envia", msg(eMec) === "acesso_negado", msg(eMec));
+  const previa = await donoA.sb.rpc("previa_orcamento", { p_os_id: A.id });
+  checar("previa nao grava versao", previa.data?.documento?.total_centavos === TOTAL_F6 && (await versoesDe(A.id)).length === 0, msg(previa));
+  const eA = await enviar(at.sb, A.id, TOTAL_F6, uuid(), { p_prazo_estimado: "3 dias", p_condicoes_pagamento: "Pix" });
+  const tokenA = eA.data?.token;
+  checar("atendente envia: token de 64 hex, versao 1, OS em orcamento_enviado", /^[0-9a-f]{64}$/.test(tokenA ?? "") && eA.data?.versao_numero === 1 && eA.data?.ja_existia === false && (await vwOs(A.id))?.status === "orcamento_enviado", msg(eA));
+  const fimValidade = new Intl.DateTimeFormat("sv-SE", { timeZone: "America/Sao_Paulo", dateStyle: "short", timeStyle: "medium" }).format(new Date(eA.data?.expira_em));
+  const dia10 = new Intl.DateTimeFormat("sv-SE", { timeZone: "America/Sao_Paulo", dateStyle: "short" }).format(new Date(Date.now() + 10 * 86400000));
+  checar("validade: 23:59:59 do 10o dia no fuso da oficina", fimValidade === `${dia10} 23:59:59`, fimValidade);
+
+  // ---------------------------------------------------------------- lista fechada
+  console.log("\n== Fase 6: o link so mostra aquele orcamento ==");
+  const vA = await verLink(tokenA);
+  checar("anon: ver_orcamento responde sem login, situacao aberto", vA.data?.situacao === "aberto", msg(vA));
+  checar("anon: chaves da resposta exatamente as da lista", chavesDe(vA.data) === "documento,expira_em,resposta,situacao" && vA.data?.resposta === null, chavesDe(vA.data));
+  checar("anon: chaves do documento exatamente as da lista", chavesDe(vA.data?.documento) === CHAVES_DOCUMENTO, chavesDe(vA.data?.documento));
+  checar("anon: chaves de cada item exatamente as da lista", (vA.data?.documento?.itens ?? []).length === 2 && vA.data.documento.itens.every((i) => chavesDe(i) === CHAVES_ITEM), chavesDe(vA.data?.documento?.itens?.[0]));
+  const docA = vA.data?.documento;
+  checar("anon: documento certo (placa, cliente, subtotais, total, prazo, condicoes)", docA?.veiculo_placa === A.placa && docA?.cliente_nome === A.cliente && docA?.subtotal_servicos_centavos === PRECO_SERV && docA?.subtotal_pecas_centavos === 2 * PRECO_PECA && docA?.total_centavos === TOTAL_F6 && docA?.prazo_estimado === "3 dias" && docA?.condicoes_pagamento === "Pix", JSON.stringify(docA)?.slice(0, 200));
+  const jsonA = JSON.stringify(vA.data);
+  const proibidosA = proibidosDe(A, ofA);
+  const achadosA = proibidosA.filter((t) => jsonA.includes(t));
+  checar("anon: resposta sem custo, telefone, documento, sintoma, observacao, mecanico nem id interno", achadosA.length === 0, achadosA.join(", "));
+  checar("anon: resposta sem nome de chave proibido", !/custo|margem|documento_cliente|telefone_cliente|oficina_id|os_id|versao|hash|mecanico|sintoma|observac/i.test(Object.keys(vA.data ?? {}).concat(Object.keys(docA ?? {})).join(",")));
+
+  const B = await osComLink();
+  const zB = await novaOS({ sb: donoB.sb, itens: false, mecanico: null });
+  await donoB.sb.rpc("adicionar_item_os", { p_chave_idempotencia: uuid(), p_os_id: zB.id, p_tipo: "servico", p_descricao: zB.servico, p_preco_unitario_centavos: 123456 });
+  const eZ = await enviar(donoB.sb, zB.id, 123456);
+  const [vB, vZ] = await Promise.all([verLink(B.token), verLink(eZ.data?.token)]);
+  const [jB, jZ] = [JSON.stringify(vB.data), JSON.stringify(vZ.data)];
+  checar("token de outra OS da oficina traz so a dele", jB.includes(B.placa) && !jB.includes(A.placa) && !jB.includes(A.servico) && !jB.includes(A.cliente), B.placa);
+  checar("token de outra oficina traz so a dela", jZ.includes(zB.placa) && !jZ.includes(A.placa) && !jZ.includes(`Oficina Teste A`), zB.placa);
+  const hashToken = createHash("sha256").update(tokenA).digest("hex");
+  for (const [rot, tk] of [["inventado", "0".repeat(64)], ["aleatorio", randomBytes(32).toString("hex")], ["malformado", "x"], ["vazio", ""], ["com SQL", "' or '1'='1"], ["hash do token real", hashToken]]) {
+    const [v, r] = await Promise.all([verLink(tk), responderLink(tk, true, "Invasor Teste")]);
+    checar(`token ${rot}: nao_encontrado, so { situacao }, na leitura e na resposta`, SO_SITUACAO(v.data, "nao_encontrado") && SO_SITUACAO(r.data, "nao_encontrado"), `${JSON.stringify(v.data)} ${JSON.stringify(r.data)} ${msg(v)}`);
+  }
+  const linkCru = await donoA.sb.from("orcamento_links").select("token_hash").eq("os_id", A.id);
+  const linkTudo = await donoA.sb.from("orcamento_links").select("*").eq("os_id", A.id);
+  checar("dono nao le token_hash, nem por select *", Boolean(linkCru.error) && Boolean(linkTudo.error), `${linkCru.error?.code}/${linkTudo.error?.code}`);
+  const tudoA = JSON.stringify({ l: await linksDe(A.id), v: await versoesDe(A.id), h: await histDe(A.id) });
+  checar("o token nao aparece em nenhuma linha que o balcao le", !tudoA.includes(tokenA));
+  const peloGet = await fetch(`${URL_SB}/rest/v1/rpc/ver_orcamento?p_token=${tokenA}`, { headers: { apikey: CHAVE, Authorization: `Bearer ${CHAVE}` } });
+  const textoGet = await peloGet.text();
+  checar("PostgREST: ver_orcamento por GET falha e nao entrega dado", !peloGet.ok && !textoGet.includes(A.placa) && !textoGet.includes(A.servico), `${peloGet.status}`);
+
+  // ---------------------------------------------------------------- congelada + trava
+  console.log("\n== Fase 6: versao congelada e itens travados ==");
+  const servCat = await donoA.sb.from("catalogo_servicos").insert({ nome: `Servico catalogo F6 ${RODADA}` }).select("id").single();
+  await donoA.sb.from("catalogo_servicos_precos").upsert({ servico_id: servCat.data?.id, preco_padrao_centavos: 400000 });
+  const C = await novaOS({ itens: false });
+  await donoA.sb.rpc("adicionar_item_os", { p_chave_idempotencia: uuid(), p_os_id: C.id, p_tipo: "servico", p_servico_id: servCat.data?.id });
+  const eC = await enviar(donoA.sb, C.id, 400000);
+  const cAntes = (await verLink(eC.data?.token)).data?.documento;
+  const mudaCat = await donoA.sb.from("catalogo_servicos_precos").upsert({ servico_id: servCat.data?.id, preco_padrao_centavos: 999900 });
+  const cid = (await donoA.sb.from("vw_os").select("cliente_id").eq("id", C.id).single()).data?.cliente_id;
+  const mudaCli = await donoA.sb.from("clientes").update({ nome: `Nome novo F6 ${RODADA}` }).eq("id", cid);
+  const cDepois = (await verLink(eC.data?.token)).data?.documento;
+  checar("mudar catalogo e cliente depois do envio nao muda a pagina", !mudaCat.error && !mudaCli.error && Boolean(cAntes) && JSON.stringify(cAntes) === JSON.stringify(cDepois), `${msg(mudaCat)}/${msg(mudaCli)}`);
+
+  const custoDepois = await donoA.sb.from("os_itens_custos").upsert({ item_id: A.itemPeca, custo_unitario_centavos: CUSTO_PECA + 1 });
+  checar("custo continua livre para o dono e nao muda a pagina", !custoDepois.error && JSON.stringify((await verLink(tokenA)).data?.documento) === JSON.stringify(docA), msg(custoDepois));
+  for (const [rot, sb] of [["dono", donoA.sb], ["atendente", at.sb]]) {
+    const upd = await sb.from("os_itens").update({ descricao: "Mudou" }).eq("id", A.itemServico).select("id");
+    const prc = await sb.from("os_itens_precos").update({ preco_unitario_centavos: 1 }).eq("item_id", A.itemServico).select("item_id");
+    const del = await sb.from("os_itens").delete().eq("id", A.itemServico).select("id");
+    const delP = await sb.from("os_itens_precos").delete().eq("item_id", A.itemServico).select("item_id");
+    const add = await sb.rpc("adicionar_item_os", { p_chave_idempotencia: uuid(), p_os_id: A.id, p_tipo: "servico", p_descricao: "Novo", p_preco_unitario_centavos: 1 });
+    checar(`${rot}: escrita direta em os_itens e os_itens_precos e adicionar item: orcamento_travado`, [upd, prc, del, delP, add].every((r) => msg(r) === "orcamento_travado"), [upd, prc, del, delP, add].map(msg).join("/"));
+  }
+  const updMecTrava = guardaMec(await mec.sb.from("os_itens").update({ descricao: "Mudou" }).eq("id", A.itemServico).select("id"));
+  checar("mecanico: nao muda item travado", Boolean(updMecTrava.error) || (updMecTrava.data ?? []).length === 0, msg(updMecTrava));
+  const vTrav = await vwOs(A.id);
+  checar("vw_os: itens travados, total intacto, link aberto", vTrav?.orcamento_itens_travados === true && vTrav?.total_centavos === TOTAL_F6 && vTrav?.orcamento_link_situacao === "aberto", JSON.stringify(vTrav));
+
+  // ---------------------------------------------------------------- reenviar, cancelar, alterar
+  console.log("\n== Fase 6: reenviar, cancelar link, alterar ==");
+  const chaveR = uuid();
+  const r1 = await reenviar(donoA.sb, A.id, chaveR);
+  const velhoSub = await verLink(tokenA);
+  const respVelho = await responderLink(tokenA, true, "Cliente Velho");
+  checar("reenviar: mesma versao, token novo; o antigo vira substituido, so { situacao }", r1.data?.versao_numero === 1 && r1.data?.token !== tokenA && SO_SITUACAO(velhoSub.data, "substituido") && SO_SITUACAO(respVelho.data, "substituido"), `${JSON.stringify(velhoSub.data)} ${JSON.stringify(respVelho.data)}`);
+  checar("reenviar: resposta com o token antigo nao grava nada", (await provasDe(A.id)).length === 0 && (await vwOs(A.id))?.status === "orcamento_enviado");
+  const r1b = await reenviar(donoA.sb, A.id, chaveR);
+  const sub2 = await verLink(r1.data?.token);
+  const links2 = await linksDe(A.id);
+  checar("reenviar repetido (mesma chave): sem versao nova, token trocado, 1 link ativo", r1b.data?.ja_existia === true && SO_SITUACAO(sub2.data, "substituido") && (await verLink(r1b.data?.token)).data?.situacao === "aberto" && links2.filter((l) => !l.revogado_em).length === 1 && (await versoesDe(A.id)).length === 1, JSON.stringify(r1b.data && { ja: r1b.data.ja_existia }));
+  const tokenR = r1b.data?.token;
+  const canc = await at.sb.rpc("cancelar_link_orcamento", { p_os_id: A.id });
+  const vCanc = await verLink(tokenR);
+  const respCanc = await responderLink(tokenR, true, "Cliente Cancelado");
+  const vwCanc = await vwOs(A.id);
+  checar("cancelar link: encerrado, OS continua enviada e travada", canc.data === true && SO_SITUACAO(vCanc.data, "encerrado") && SO_SITUACAO(respCanc.data, "encerrado") && vwCanc?.status === "orcamento_enviado" && vwCanc?.orcamento_itens_travados === true, msg(canc));
+  const canc2 = await at.sb.rpc("cancelar_link_orcamento", { p_os_id: A.id });
+  checar("cancelar de novo: false (nao havia link ativo)", canc2.data === false, msg(canc2));
+  const delTrava = await donoA.sb.from("os_itens").delete().eq("id", A.itemServico).select("id");
+  checar("link cancelado: itens continuam travados", msg(delTrava) === "orcamento_travado", msg(delTrava));
+  const r2 = await reenviar(at.sb, A.id);
+  checar("reenviar depois de cancelar funciona, mesma versao", r2.data?.versao_numero === 1 && (await verLink(r2.data?.token)).data?.situacao === "aberto", msg(r2));
+
+  const paginaAberta = r2.data?.token;
+  const alt = await donoA.sb.rpc("alterar_orcamento", { p_os_id: A.id });
+  const vAlt = await verLink(paginaAberta);
+  const antesResp = await provasDe(A.id);
+  const respAlt = await responderLink(paginaAberta, true, "Cliente Pagina Velha");
+  const vwAlt = await vwOs(A.id);
+  checar("alterar: link antigo vira atualizado, so { situacao }", !alt.error && SO_SITUACAO(vAlt.data, "atualizado") && SO_SITUACAO(respAlt.data, "atualizado"), `${msg(alt)} ${JSON.stringify(respAlt.data)}`);
+  checar("pagina aberta na versao antiga: aviso e nada gravado", antesResp.length === 0 && (await provasDe(A.id)).length === 0 && vwAlt?.status === "aguardando_orcamento");
+  const alt2 = await donoA.sb.rpc("alterar_orcamento", { p_os_id: A.id });
+  checar("alterar de novo nao faz nada", !alt2.error && (await vwOs(A.id))?.status === "aguardando_orcamento", msg(alt2));
+  const editar = await donoA.sb.from("os_itens_precos").update({ preco_unitario_centavos: PRECO_SERV + 100 }).eq("item_id", A.itemServico).select("item_id");
+  const e2 = await enviar(donoA.sb, A.id, TOTAL_F6 + 100);
+  const v2 = await verLink(e2.data?.token);
+  const versoesA = await versoesDe(A.id);
+  checar("depois de alterar: itens liberados, novo envio = versao 2 com o valor novo", editar.data?.length === 1 && e2.data?.versao_numero === 2 && v2.data?.documento?.total_centavos === TOTAL_F6 + 100, `${msg(editar)}/${msg(e2)}`);
+  checar("versao 1 continua guardada com o valor antigo", versoesA.length === 2 && versoesA[0].total_centavos === TOTAL_F6 && versoesA[1].total_centavos === TOTAL_F6 + 100);
+  const repete = await enviar(donoA.sb, A.id, TOTAL_F6 + 100);
+  checar("enviar outra chave com versao vigente: orcamento_ja_enviado", msg(repete) === "orcamento_ja_enviado", msg(repete));
+  const tokenA2 = e2.data?.token;
+
+  // ---------------------------------------------------------------- aprovar
+  console.log("\n== Fase 6: aprovar pelo link ==");
+  for (const [rot, args, erro] of [
+    ["sem nome", [tokenA2, true, null], "nome_obrigatorio"],
+    ["com 1 letra", [tokenA2, true, "A"], "nome_obrigatorio"],
+    ["com 81 letras", [tokenA2, true, "A".repeat(81)], "nome_grande_demais"],
+  ]) {
+    const r = await responderLink(...args);
+    checar(`aprovar ${rot}: ${erro}, nada gravado`, r.data?.situacao === "aberto" && r.data?.erro === erro && (await provasDe(A.id)).length === 0, JSON.stringify(r.data));
+  }
+  const NOME_CLI = `Carlos Prova ${RODADA}`;
+  // Forjar o CF-Connecting-IP nem chega ao banco: a Cloudflare barra (403). Sem resposta gravada.
+  const IP_FORJADO = "203.0.113.77";
+  const forjaCf = await responderLink(tokenA2, true, NOME_CLI, null, { "CF-Connecting-IP": IP_FORJADO });
+  checar("forjar CF-Connecting-IP: barrado na borda (403), nada gravado", forjaCf.status === 403 && forjaCf.data === null && (await provasDe(A.id)).length === 0, `${forjaCf.status}`);
+  const XFF_FORJADO = "198.51.100.9";
+  const resp = await responderLink(tokenA2, true, NOME_CLI, null, { "X-Forwarded-For": XFF_FORJADO, "User-Agent": `NavegadorF6/${RODADA}` });
+  checar("anon aprova: aplicada, com a resposta", resp.data?.situacao === "aprovado" && resp.data?.aplicada === true && chavesDe(resp.data?.resposta) === CHAVES_RESPOSTA && resp.data?.resposta?.tipo === "aprovou" && resp.data?.resposta?.nome === NOME_CLI, JSON.stringify(resp.data));
+  const vwAp = await vwOs(A.id);
+  checar("OS aprovada, valor aprovado = total da versao, canal link, sem usuario", vwAp?.status === "aprovada" && vwAp?.valor_aprovado_centavos === TOTAL_F6 + 100 && vwAp?.orcamento_aprovacao_canal === "link" && vwAp?.orcamento_aprovado_por_nome === NOME_CLI && vwAp?.orcamento_aprovacao_registrada_por_nome === null, JSON.stringify(vwAp));
+  const provasA = await provasDe(A.id);
+  checar("1 prova: canal link, nome, valor, versao 2, sem usuario", provasA.length === 1 && provasA[0].canal === "link" && provasA[0].aprovou === true && provasA[0].respondente_nome === NOME_CLI && provasA[0].valor_centavos === TOTAL_F6 + 100 && provasA[0].versao_numero === 2 && provasA[0].registrada_por_nome === null, JSON.stringify(provasA[0]));
+  const confere = await at.sb.rpc("conferir_orcamento", { p_versao_id: versoesA[1].id });
+  checar("hash confere com o conteudo", confere.data === true, msg(confere));
+  const histAp = (await histDe(A.id)).filter((h) => h.evento === "aprovacao");
+  checar("historico: aprovacao sem usuario, texto do link para o balcao", histAp.length === 1 && histAp[0].por === null && histAp[0].observacao === `por link. Nome informado: ${NOME_CLI}` && histAp[0].para_status === "aprovada", JSON.stringify(histAp));
+  const histMec = guardaMec({ data: await histDe(A.id, mec.sb) }).data;
+  const apMec = histMec.filter((h) => h.evento === "aprovacao");
+  checar("historico do mecanico: aprovacao sem canal e sem nome; nada de evento do link com texto", apMec.length === 1 && apMec[0].observacao === null && !JSON.stringify(histMec).includes(NOME_CLI) && histMec.filter((h) => h.evento === "orcamento_link").every((h) => h.observacao === null), JSON.stringify(apMec));
+  const rede = await donoA.sb.from("orcamento_resposta_rede").select("ip, ip_fonte, user_agent").eq("resposta_id", provasA[0].id).maybeSingle();
+  console.log(`info    fonte do IP da prova: ${rede.data?.ip_fonte ?? "NULL"}; IP gravado ${rede.data?.ip ? "preenchido" : "NULL"}`);
+  checar("prova: IP pela Cloudflare; X-Forwarded-For forjado nao vale", rede.data?.ip_fonte === "cf-connecting-ip" && Boolean(rede.data?.ip) && rede.data?.ip !== XFF_FORJADO, `${rede.data?.ip_fonte} ${msg(rede)}`);
+  checar("prova: navegador gravado do cabecalho", rede.data?.user_agent === `NavegadorF6/${RODADA}`, rede.data?.user_agent);
+
+  const repetir = await responderLink(tokenA2, true, NOME_CLI);
+  checar("repetir a mesma resposta: sucesso, sem duplicar", repetir.data?.situacao === "aprovado" && repetir.data?.aplicada === false && (await provasDe(A.id)).length === 1, JSON.stringify(repetir.data));
+  const trocar = await responderLink(tokenA2, false, null, "Mudei de ideia");
+  checar("recusar depois de aprovar: vale a primeira", trocar.data?.situacao === "aprovado" && trocar.data?.aplicada === false && trocar.data?.resposta?.tipo === "aprovou" && (await vwOs(A.id))?.status === "aprovada", JSON.stringify(trocar.data));
+  const vAprov = await verLink(tokenA2);
+  checar("pagina depois de aprovar mostra o orcamento e a resposta", vAprov.data?.situacao === "aprovado" && vAprov.data?.documento?.total_centavos === TOTAL_F6 + 100 && chavesDe(vAprov.data?.resposta) === CHAVES_RESPOSTA, chavesDe(vAprov.data));
+  checar("respondidos: conta a OS aprovada pelo link", vwAp?.orcamento_respondido === true && Boolean(vwAp?.orcamento_respondido_em));
+
+  // ---------------------------------------------------------------- item depois da aprovacao
+  console.log("\n== Fase 6: item depois da aprovacao ==");
+  const ITEM_APOS = 4210873;
+  const depois = await at.sb.rpc("adicionar_item_os", { p_chave_idempotencia: uuid(), p_os_id: A.id, p_tipo: "servico", p_descricao: `Apos aprovacao F6 ${RODADA}`, p_preco_unitario_centavos: ITEM_APOS });
+  const marcado = (await donoA.sb.from("vw_os_itens").select("apos_aprovacao").eq("id", depois.data).single()).data;
+  const vwDep = await vwOs(A.id);
+  checar("item novo marcado 'apos a aprovacao'", !depois.error && marcado?.apos_aprovacao === true && vwDep?.itens_apos_aprovacao === 1, msg(depois));
+  checar("aprovado continua o total da versao; atual soma o item", vwDep?.status === "aprovada" && vwDep?.valor_aprovado_centavos === TOTAL_F6 + 100 && vwDep?.total_centavos === TOTAL_F6 + 100 + ITEM_APOS, JSON.stringify(vwDep));
+  const vDep = await versoesDe(A.id);
+  checar("versao aprovada nao muda; a pagina continua igual", JSON.stringify(vDep) === JSON.stringify(versoesA) && !JSON.stringify((await verLink(tokenA2)).data).includes("Apos aprovacao F6"));
+  const conf2 = await donoA.sb.rpc("conferir_orcamento", { p_versao_id: versoesA[1].id });
+  checar("hash continua conferindo depois do item novo", conf2.data === true, msg(conf2));
+
+  // ---------------------------------------------------------------- imutavel
+  console.log("\n== Fase 6: versao e prova nao mudam, para os 3 papeis ==");
+  const fotoProva = JSON.stringify(await provasDe(A.id));
+  const fotoVersao = JSON.stringify(await versoesDe(A.id));
+  for (const [rot, u] of [["dono", donoA], ["atendente", at], ["mecanico", mec]]) {
+    const tent = [
+      await u.sb.from("orcamento_versoes").update({ total_centavos: 1 }).eq("os_id", A.id).select("id"),
+      await u.sb.from("orcamento_versoes").delete().eq("os_id", A.id).select("id"),
+      await u.sb.from("orcamento_respostas").update({ aprovou: false, respondente_nome: "Outro" }).eq("os_id", A.id).select("id"),
+      await u.sb.from("orcamento_respostas").delete().eq("os_id", A.id).select("id"),
+      await u.sb.from("orcamento_links").update({ expira_em: "2099-01-01T00:00:00Z" }).eq("os_id", A.id).select("id"),
+      await u.sb.from("orcamento_links").delete().eq("os_id", A.id).select("id"),
+      await u.sb.from("orcamento_resposta_rede").delete().eq("resposta_id", provasA[0].id).select("resposta_id"),
+      await u.sb.from("orcamento_versoes").insert({ os_id: A.id, numero: 99 }).select("id"),
+    ];
+    const barrou = tent.every((r) => Boolean(r.error) || (r.data ?? []).length === 0);
+    checar(`${rot}: nao altera nem apaga versao, resposta, link ou rede`, barrou, tent.map((r) => r.error?.code ?? `${r.data?.length}`).join("/"));
+  }
+  checar("depois das tentativas: prova e versao iguais", JSON.stringify(await provasDe(A.id)) === fotoProva && JSON.stringify(await versoesDe(A.id)) === fotoVersao);
+
+  // ---------------------------------------------------------------- desfazer
+  console.log("\n== Fase 6: desfazer ==");
+  const desfMec = guardaMec(await mec.sb.rpc("mudar_status_os", { p_os_id: A.id, p_de: "aprovada", p_para: "aguardando_orcamento" }));
+  checar("mecanico nao desfaz a aprovacao", msg(desfMec) === "acesso_negado", msg(desfMec));
+  const desf = await at.sb.rpc("mudar_status_os", { p_os_id: A.id, p_de: "aprovada", p_para: "aguardando_orcamento" });
+  const vwDesf = await vwOs(A.id);
+  const prDesf = (await provasDe(A.id))[0];
+  checar("desfazer: volta para aguardando, limpa o estado atual", !desf.error && vwDesf?.status === "aguardando_orcamento" && vwDesf?.valor_aprovado_centavos === null && vwDesf?.orcamento_respondido === false, msg(desf));
+  checar("desfazer: a prova fica, marcada com quem e quando", prDesf?.respondente_nome === NOME_CLI && prDesf?.valor_centavos === TOTAL_F6 + 100 && Boolean(prDesf?.desfeita_em) && prDesf?.desfeita_por_nome === "Atendente Teste", JSON.stringify(prDesf));
+  const [vDesf, rDesf] = [await verLink(tokenA2), await responderLink(tokenA2, true, NOME_CLI)];
+  checar("desfazer: o link nao volta a valer (encerrado, so { situacao })", SO_SITUACAO(vDesf.data, "encerrado") && SO_SITUACAO(rDesf.data, "encerrado") && (await provasDe(A.id)).length === 1, `${JSON.stringify(vDesf.data)} ${JSON.stringify(rDesf.data)}`);
+  const motivoLink = (await linksDe(A.id)).at(-1)?.revogado_motivo;
+  checar("desfazer: motivo da revogacao = desfeito; historico evento desfazer", motivoLink === "desfeito" && (await histDe(A.id)).some((h) => h.evento === "desfazer" && h.de_status === "aprovada"), motivoLink);
+  const conf3 = await donoA.sb.rpc("conferir_orcamento", { p_versao_id: versoesA[1].id });
+  const desfRecolhe = await donoA.sb.from("orcamento_respostas").update({ desfeita_em: null }).eq("id", prDesf?.id).select("id");
+  checar("desfeita: hash confere e a marca nao sai", conf3.data === true && (Boolean(desfRecolhe.error) || (desfRecolhe.data ?? []).length === 0) && Boolean((await provasDe(A.id))[0]?.desfeita_em), `${msg(conf3)}/${desfRecolhe.error?.code}`);
+
+  // ---------------------------------------------------------------- recusar
+  console.log("\n== Fase 6: recusar pelo link ==");
+  const R = await osComLink();
+  const MOTIVO = `Achei caro ${RODADA}`;
+  const rRec = await responderLink(R.token, false, null, MOTIVO);
+  const vwRec = await vwOs(R.id);
+  checar("anon recusa sem nome: aplicada; nome nulo aceito", rRec.data?.situacao === "recusado" && rRec.data?.aplicada === true && rRec.data?.resposta?.tipo === "recusou" && rRec.data?.resposta?.nome === null, JSON.stringify(rRec.data));
+  checar("recusa nunca cancela: volta para aguardando, itens liberados, em respondidos", vwRec?.status === "aguardando_orcamento" && vwRec?.orcamento_itens_travados === false && vwRec?.orcamento_respondido === true && vwRec?.orcamento_link_situacao === "recusado", JSON.stringify(vwRec));
+  const histRec = (await histDe(R.id)).filter((h) => h.evento === "recusa");
+  checar("historico do balcao: recusa com o motivo, sem usuario", histRec.length === 1 && histRec[0].por === null && histRec[0].observacao === `Cliente recusou por link: ${MOTIVO}`, JSON.stringify(histRec));
+  const histRecMec = guardaMec({ data: await histDe(R.id, mec.sb) }).data.filter((h) => h.evento === "recusa");
+  checar("historico do mecanico: recusa sem o motivo", histRecMec.length === 1 && histRecMec[0].observacao === null, JSON.stringify(histRecMec));
+  const vRec = await verLink(R.token);
+  checar("pagina da recusa: o motivo nao volta", vRec.data?.situacao === "recusado" && chavesDe(vRec.data?.resposta) === CHAVES_RESPOSTA && !JSON.stringify(vRec.data).includes(MOTIVO), JSON.stringify(vRec.data?.resposta));
+  const rRec1 = await responderLink(R.token, true, "Mudei de Ideia");
+  checar("aprovar depois de recusar pelo link: vale a primeira", rRec1.data?.situacao === "recusado" && rRec1.data?.aplicada === false && (await vwOs(R.id))?.status === "aguardando_orcamento", JSON.stringify(rRec1.data));
+  const grande = await osComLink();
+  const rGrande = await responderLink(grande.token, false, null, "M".repeat(501));
+  checar("motivo com mais de 500: motivo_grande_demais, nada gravado", rGrande.data?.erro === "motivo_grande_demais" && (await provasDe(grande.id)).length === 0, JSON.stringify(rGrande.data));
+  const maoDepois = await at.sb.rpc("registrar_resposta_orcamento", { p_os_id: R.id, p_de: "aguardando_orcamento", p_aprovou: true, p_canal: "telefone", p_quem_respondeu: "Motorista" });
+  const vwMaoD = await vwOs(R.id);
+  const prR = await provasDe(R.id);
+  checar("recusa no link + aceite por telefone: aprovada, duas respostas guardadas, nao conta em respondidos", !maoDepois.error && vwMaoD?.status === "aprovada" && vwMaoD?.orcamento_respondido === false && prR.length === 2 && prR[0].canal === "link" && prR[1].canal === "telefone" && prR[1].registrada_por_nome === "Atendente Teste", `${msg(maoDepois)} ${JSON.stringify(vwMaoD)}`);
+  checar("link recusado e depois marcado a mao: encerrado", SO_SITUACAO((await verLink(R.token)).data, "encerrado"));
+
+  // ---------------------------------------------------------------- mao, cancelar, modo
+  console.log("\n== Fase 6: convivencia com a mao, cancelar e trocar modo ==");
+  const M = await osComLink();
+  const maoAp = await at.sb.rpc("registrar_resposta_orcamento", { p_os_id: M.id, p_de: "orcamento_enviado", p_aprovou: true, p_canal: "telefone", p_quem_respondeu: "Ricardo" });
+  const vwM = await vwOs(M.id);
+  const prM = await provasDe(M.id);
+  const hM = await histDe(M.id);
+  checar("a mao com link ativo: aprova, valor = versao, marcado por quem marcou", !maoAp.error && vwM?.status === "aprovada" && vwM?.valor_aprovado_centavos === TOTAL_F6 && vwM?.orcamento_aprovacao_canal === "telefone" && vwM?.orcamento_aprovacao_registrada_por_nome === "Atendente Teste" && vwM?.orcamento_respondido === false, msg(maoAp));
+  checar("a mao: prova com canal telefone, usa a versao enviada", prM.length === 1 && prM[0].canal === "telefone" && prM[0].versao_numero === 1 && prM[0].respondente_nome === "Ricardo" && (await versoesDe(M.id)).length === 1, JSON.stringify(prM[0]));
+  const [vM, rM] = [await verLink(M.token), await responderLink(M.token, true, "Cliente Tarde")];
+  checar("a mao: revoga o link (encerrado), nada gravado", SO_SITUACAO(vM.data, "encerrado") && SO_SITUACAO(rM.data, "encerrado") && (await provasDe(M.id)).length === 1 && (await linksDe(M.id))[0].revogado_motivo === "resposta_manual");
+  const hAprovM = hM.filter((h) => h.evento === "aprovacao");
+  const hAprovA = (await histDe(A.id)).filter((h) => h.evento === "aprovacao");
+  checar("historico distingue a mao (por quem marcou) do link (sem usuario)", hAprovM[0]?.observacao === "por telefone" && hAprovM[0]?.por_nome === "Atendente Teste" && hAprovA[0]?.por === null && hAprovA[0]?.observacao?.startsWith("por link"), JSON.stringify([hAprovM[0], hAprovA[0]]));
+  const MR = await osComLink();
+  const maoRec = await donoA.sb.rpc("registrar_resposta_orcamento", { p_os_id: MR.id, p_de: "orcamento_enviado", p_aprovou: false, p_canal: "whatsapp", p_motivo: "Vai pensar" });
+  checar("recusa a mao com link ativo: revoga, volta para aguardando, nao conta em respondidos", !maoRec.error && (await vwOs(MR.id))?.status === "aguardando_orcamento" && (await vwOs(MR.id))?.orcamento_respondido === false && SO_SITUACAO((await verLink(MR.token)).data, "encerrado") && (await provasDe(MR.id)).length === 1, msg(maoRec));
+  const AC = await osComLink();
+  const cancOS = await donoA.sb.rpc("mudar_status_os", { p_os_id: AC.id, p_de: "orcamento_enviado", p_para: "cancelada", p_motivo: "Cliente desistiu" });
+  const [vAC, rAC] = [await verLink(AC.token), await responderLink(AC.token, true, "Cliente Tarde")];
+  checar("cancelar a OS revoga o link (encerrado)", !cancOS.error && SO_SITUACAO(vAC.data, "encerrado") && SO_SITUACAO(rAC.data, "encerrado") && (await linksDe(AC.id))[0].revogado_motivo === "cancelada" && (await provasDe(AC.id)).length === 0, msg(cancOS));
+  const APr = await osComLink();
+  await responderLink(APr.token, true, "Cliente Prova");
+  const fotoAPr = JSON.stringify(await provasDe(APr.id));
+  const cancAPr = await donoA.sb.rpc("mudar_status_os", { p_os_id: APr.id, p_de: "aprovada", p_para: "cancelada", p_motivo: "Cliente desistiu" });
+  checar("cancelar OS aprovada nao apaga a prova", !cancAPr.error && JSON.stringify(await provasDe(APr.id)) === fotoAPr && SO_SITUACAO((await verLink(APr.token)).data, "encerrado"), msg(cancAPr));
+  const MD = await osComLink();
+  const modo = await at.sb.rpc("trocar_modo_os", { p_os_id: MD.id, p_modo: "direto", p_autorizado_por_nome: "Autorizador F6" });
+  const vwMD = await vwOs(MD.id);
+  checar("trocar para direto revoga o link (encerrado) e comeca o servico", !modo.error && vwMD?.status === "em_andamento" && vwMD?.modo === "direto" && SO_SITUACAO((await verLink(MD.token)).data, "encerrado") && (await linksDe(MD.id))[0].revogado_motivo === "modo_direto", msg(modo));
+  const ant = await novaOS();
+  const antE = await donoA.sb.rpc("mudar_status_os", { p_os_id: ant.id, p_de: "aguardando_orcamento", p_para: "orcamento_enviado" });
+  const antA = await at.sb.rpc("registrar_resposta_orcamento", { p_os_id: ant.id, p_de: "orcamento_enviado", p_aprovou: true, p_canal: "presencial" });
+  const verAnt = await versoesDe(ant.id);
+  checar("OS antiga sem link aprova a mao e congela uma versao manual", !antE.error && !antA.error && (await vwOs(ant.id))?.status === "aprovada" && verAnt.length === 1 && verAnt[0].origem === "manual", `${msg(antE)}/${msg(antA)}`);
+
+  // ---------------------------------------------------------------- respondidos e mecanico comeca
+  const respondidos = await donoA.sb.from("vw_os").select("id, orcamento_respondido_em").eq("orcamento_respondido", true).order("orcamento_respondido_em");
+  const O = await osComLink();
+  const contaAntes = respondidos.data?.length ?? 0;
+  await responderLink(O.token, true, "Cliente Comeca");
+  const contaDepois = (await donoA.sb.from("vw_os").select("id", { count: "exact", head: true }).eq("orcamento_respondido", true)).count;
+  const comeca = guardaMec(await mec.sb.rpc("mudar_status_os", { p_os_id: O.id, p_de: "aprovada", p_para: "em_andamento" }));
+  const contaFim = (await donoA.sb.from("vw_os").select("id", { count: "exact", head: true }).eq("orcamento_respondido", true)).count;
+  checar("respondidos: entra ao responder, sai quando o mecanico comeca", contaDepois === contaAntes + 1 && !comeca.error && contaFim === contaAntes, `${contaAntes} -> ${contaDepois} -> ${contaFim} ${msg(comeca)}`);
+  const atResp = await at.sb.from("vw_os").select("id", { count: "exact", head: true }).eq("orcamento_respondido", true);
+  checar("atendente tambem conta os respondidos", atResp.count === contaFim, String(atResp.count));
+
+  // ---------------------------------------------------------------- concorrencia
+  console.log("\n== Fase 6: concorrencia real (conexoes separadas) ==");
+  const RODADAS = 3;
+  let vencedorLink = 0;
+  let vencedorMao = 0;
+  for (let i = 1; i <= RODADAS; i++) {
+    const c1 = await osComLink();
+    const [a1, a2] = await Promise.all([responderLink(c1.token, true, "Cliente Um"), responderLink(c1.token, true, "Cliente Dois")]);
+    const pr1 = await provasDe(c1.id);
+    const apl1 = [a1, a2].filter((r) => r.data?.aplicada === true).length;
+    const nomesIguais = a1.data?.resposta?.nome === a2.data?.resposta?.nome && a1.data?.resposta?.nome === pr1[0]?.respondente_nome;
+    checar(`rodada ${i}: duas aprovacoes juntas gravam 1, as duas veem a mesma`, apl1 === 1 && pr1.length === 1 && a1.data?.situacao === "aprovado" && a2.data?.situacao === "aprovado" && nomesIguais && (await histDe(c1.id)).filter((h) => h.evento === "aprovacao").length === 1, JSON.stringify([a1.data ?? msg(a1), a2.data ?? msg(a2)]).slice(0, 220));
+
+    const c2 = await osComLink();
+    const [b1, b2] = await Promise.all([responderLink(c2.token, true, "Cliente Um"), responderLink(c2.token, false, null, "Nao quero")]);
+    const pr2 = await provasDe(c2.id);
+    const st2 = (await vwOs(c2.id))?.status;
+    const apl2 = [b1, b2].filter((r) => r.data?.aplicada === true).length;
+    const coerente = pr2.length === 1 && ((pr2[0].aprovou && st2 === "aprovada") || (!pr2[0].aprovou && st2 === "aguardando_orcamento")) && b1.data?.resposta?.tipo === b2.data?.resposta?.tipo;
+    checar(`rodada ${i}: aprovar x recusar grava so 1, status coerente`, apl2 === 1 && coerente, `${st2} ${JSON.stringify([b1.data?.situacao, b2.data?.situacao])}`);
+
+    const c3 = await osComLink();
+    const [l3, m3] = await Promise.all([
+      responderLink(c3.token, true, "Cliente Link"),
+      at.sb.rpc("registrar_resposta_orcamento", { p_os_id: c3.id, p_de: "orcamento_enviado", p_aprovou: true, p_canal: "telefone", p_quem_respondeu: "Cliente Mao" }),
+    ]);
+    const pr3 = await provasDe(c3.id);
+    const ganhouLink = l3.data?.aplicada === true;
+    const ganhouMao = !m3.error && l3.data?.situacao === "encerrado";
+    if (ganhouLink) vencedorLink++;
+    if (ganhouMao) vencedorMao++;
+    const aviso = !ganhouLink || msg(m3) === "cliente_ja_respondeu";
+    checar(`rodada ${i}: link x mao grava so 1; quem perde recebe o aviso certo`, pr3.length === 1 && (ganhouLink !== ganhouMao) && aviso && (await vwOs(c3.id))?.status === "aprovada" && pr3[0].canal === (ganhouLink ? "link" : "telefone"), `${JSON.stringify(l3.data)} ${msg(m3)}`);
+
+    const c4 = await novaOS();
+    const chave = uuid();
+    const [e1, e2b] = await Promise.all([enviar(donoA.sb, c4.id, TOTAL_F6, chave), enviar(createClient(URL_SB, CHAVE, { auth: { persistSession: false, autoRefreshToken: false }, global: { headers: { Authorization: `Bearer ${donoA.session.access_token}` } } }), c4.id, TOTAL_F6, chave)]);
+    const links4 = await linksDe(c4.id);
+    const [t1, t2] = await Promise.all([verLink(e1.data?.token), verLink(e2b.data?.token)]);
+    const sits = [t1.data?.situacao, t2.data?.situacao].sort().join(",");
+    const hist4 = (await histDe(c4.id)).filter((h) => h.evento === "orcamento_link");
+    checar(`rodada ${i}: toque duplo no balcao = 1 versao, 1 link ativo, 1 evento, vale so o ultimo token`, !e1.error && !e2b.error && (await versoesDe(c4.id)).length === 1 && links4.filter((l) => !l.revogado_em).length === 1 && sits === "aberto,substituido" && hist4.length === 1 && [e1, e2b].filter((r) => r.data?.ja_existia === false).length === 1, `${msg(e1)}/${msg(e2b)} ${sits} ${hist4.length}`);
+
+    const c5 = await novaOS();
+    const [e51, e52] = await Promise.all([enviar(donoA.sb, c5.id), enviar(at.sb, c5.id)]);
+    checar(`rodada ${i}: dois atendentes, chaves diferentes: um envia, o outro recebe orcamento_ja_enviado`, [e51, e52].filter((r) => !r.error).length === 1 && [e51, e52].filter((r) => msg(r) === "orcamento_ja_enviado").length === 1 && (await versoesDe(c5.id)).length === 1, `${msg(e51)}/${msg(e52)}`);
+
+    const c6 = await osComLink();
+    const [l6, alt6] = await Promise.all([responderLink(c6.token, true, "Cliente Link"), donoA.sb.rpc("alterar_orcamento", { p_os_id: c6.id })]);
+    const pr6 = await provasDe(c6.id);
+    const st6 = (await vwOs(c6.id))?.status;
+    const ok6 = (l6.data?.aplicada === true && msg(alt6) === "cliente_ja_respondeu" && st6 === "aprovada" && pr6.length === 1) || (l6.data?.situacao === "atualizado" && !alt6.error && st6 === "aguardando_orcamento" && pr6.length === 0);
+    checar(`rodada ${i}: responder x alterar: uma das duas, nunca as duas`, ok6, `${JSON.stringify(l6.data?.situacao)} ${msg(alt6)} ${st6}`);
+  }
+  console.log(`info    link x mao, quem ganhou em ${RODADAS} rodadas: link ${vencedorLink}, mao ${vencedorMao}`);
+
+  // ---------------------------------------------------------------- limite
+  console.log("\n== Fase 6: limite de tentativas ==");
+  await foraDaVirada();
+  const L = await osComLink();
+  let normal = 0;
+  for (let i = 0; i < 10; i++) if ((await verLink(L.token)).data?.situacao === "aberto") normal++;
+  checar("cliente normal abre o link 10 vezes sem bloqueio", normal === 10, String(normal));
+  let abertas = normal;
+  for (let f = 0; f < 11; f++) {
+    const lote = await Promise.all(Array.from({ length: 10 }, () => verLink(L.token)));
+    abertas += lote.filter((r) => r.data?.situacao === "aberto").length;
+  }
+  const excesso = await verLink(L.token);
+  checar("120 leituras passam; a 121a recebe limite, so { situacao }", abertas === 120 && SO_SITUACAO(excesso.data, "limite"), `${abertas} ${JSON.stringify(excesso.data)}`);
+  const naoDerruba = await responderLink(L.token, true, "A");
+  checar("limite de leitura nao bloqueia a resposta (contagens separadas)", naoDerruba.data?.erro === "nome_obrigatorio", JSON.stringify(naoDerruba.data));
+  let tent = 1;
+  for (let f = 0; f < 3; f++) {
+    const n = f === 2 ? 9 : 10;
+    const lote = await Promise.all(Array.from({ length: n }, () => responderLink(L.token, true, "A")));
+    tent += lote.filter((r) => r.data?.erro === "nome_obrigatorio").length;
+  }
+  const excR = await responderLink(L.token, true, "Cliente Normal");
+  checar("30 tentativas de resposta passam; a 31a recebe limite e nada grava", tent === 30 && SO_SITUACAO(excR.data, "limite") && (await provasDe(L.id)).length === 0 && (await vwOs(L.id))?.status === "orcamento_enviado", `${tent} ${JSON.stringify(excR.data)}`);
+  const Lnovo = await reenviar(donoA.sb, L.id);
+  checar("o limite e por link: link novo abre normal", (await verLink(Lnovo.data?.token)).data?.situacao === "aberto", msg(Lnovo));
+
+  // ---------------------------------------------------------------- isolamento
+  console.log("\n== Fase 6: oficina B e mecanico ==");
+  const Iso = await osComLink();
+  await responderLink(Iso.token, true, "Cliente Isolado");
+  const fotoIso = await estadoDe(Iso.id);
+  const verIso = (await versoesDe(Iso.id))[0];
+  for (const t of ["orcamento_versoes", "orcamento_respostas", "vw_orcamento_versoes", "vw_orcamento_provas", "vw_orcamento_situacao", "orcamento_links", "vw_os_historico"]) {
+    const r = await donoB.sb.from(t).select(t === "orcamento_links" ? "id" : "*").eq("os_id", Iso.id);
+    checar(`dono B: 0 linhas da A em ${t}, com o id na mao`, !r.error && (r.data ?? []).length === 0, r.error?.code ?? `${r.data?.length}`);
+  }
+  const redeB = await donoB.sb.from("orcamento_resposta_rede").select("ip").eq("oficina_id", ofA);
+  checar("dono B: 0 linhas de IP da A", (redeB.data ?? []).length === 0, redeB.error?.code ?? `${redeB.data?.length}`);
+  for (const [fn, args] of [
+    ["enviar_orcamento", { p_os_id: Iso.id, p_chave_idempotencia: uuid(), p_total_conferido_centavos: TOTAL_F6 }],
+    ["reenviar_orcamento", { p_os_id: Iso.id, p_chave_idempotencia: uuid() }],
+    ["cancelar_link_orcamento", { p_os_id: Iso.id }],
+    ["alterar_orcamento", { p_os_id: Iso.id }],
+    ["previa_orcamento", { p_os_id: Iso.id }],
+    ["registrar_resposta_orcamento", { p_os_id: Iso.id, p_de: "aprovada", p_aprovou: false, p_canal: "telefone" }],
+    ["mudar_status_os", { p_os_id: Iso.id, p_de: "aprovada", p_para: "aguardando_orcamento" }],
+    ["trocar_modo_os", { p_os_id: Iso.id, p_modo: "direto", p_autorizado_por_nome: "Invasor" }],
+  ]) {
+    const r = await donoB.sb.rpc(fn, args);
+    checar(`dono B: ${fn} na OS da A = os_nao_encontrada`, msg(r) === "os_nao_encontrada", msg(r));
+  }
+  const confB = await donoB.sb.rpc("conferir_orcamento", { p_versao_id: verIso?.id });
+  checar("dono B: conferir_orcamento da A = versao_nao_encontrada", msg(confB) === "versao_nao_encontrada", msg(confB));
+  const editB = await donoB.sb.from("orcamento_respostas").update({ respondente_nome: "B" }).eq("os_id", Iso.id).select("id");
+  checar("dono B: nao altera a prova da A", Boolean(editB.error) || (editB.data ?? []).length === 0, editB.error?.code);
+  checar("OS da A intacta depois das tentativas da B", (await estadoDe(Iso.id)) === fotoIso);
+
+  for (const t of ["orcamento_versoes", "orcamento_links", "orcamento_respostas", "orcamento_resposta_rede", "vw_orcamento_versoes", "vw_orcamento_provas", "vw_orcamento_situacao"]) {
+    const r = guardaMec(await mec.sb.from(t).select(t === "orcamento_links" ? "id" : t === "orcamento_resposta_rede" ? "resposta_id" : "*"));
+    checar(`mecanico: 0 linhas em ${t}`, (r.data ?? []).length === 0, r.error?.code ?? `${r.data?.length}`);
+  }
+  const vwM2 = guardaMec(await mec.sb.from("vw_os").select("*").eq("id", Iso.id).maybeSingle()).data;
+  const vazouF6 = [...COLUNAS_PROIBIDAS_MECANICO, "orcamento_link_situacao", "orcamento_itens_travados", "orcamento_respondido", "orcamento_respondido_em"].filter((c) => vwM2 && vwM2[c] !== null && vwM2[c] !== undefined);
+  checar("mecanico: vw_os sem valor nem nada do link", Boolean(vwM2) && vazouF6.length === 0, vazouF6.join(", ") || (vwM2 ? "" : "sem linha"));
+  for (const [fn, args] of [
+    ["reenviar_orcamento", { p_os_id: Iso.id, p_chave_idempotencia: uuid() }],
+    ["cancelar_link_orcamento", { p_os_id: Iso.id }],
+    ["alterar_orcamento", { p_os_id: Iso.id }],
+    ["previa_orcamento", { p_os_id: Iso.id }],
+    ["conferir_orcamento", { p_versao_id: verIso?.id }],
+    ["registrar_resposta_orcamento", { p_os_id: Iso.id, p_de: "aprovada", p_aprovou: false, p_canal: "telefone" }],
+  ]) {
+    const r = guardaMec(await mec.sb.rpc(fn, args));
+    checar(`mecanico: ${fn} = acesso_negado`, msg(r) === "acesso_negado", msg(r));
+  }
+  const itensAt = await at.sb.from("vw_os_itens").select("custo_unitario_centavos").eq("os_id", Iso.id);
+  const verAt = JSON.stringify(await versoesDe(Iso.id, at.sb));
+  checar("atendente: le a versao, sem custo; custo do item NULL", verAt.includes(Iso.servico) && !verAt.includes(String(CUSTO_PECA)) && !/custo/i.test(verAt) && (itensAt.data ?? []).length === 2 && itensAt.data.every((i) => i.custo_unitario_centavos === null));
+  const itensMecF6 = guardaMec(await mec.sb.from("vw_os_itens").select("*").eq("os_id", Iso.id));
+  const vazF6 = valoresVazados(respostasMec);
+  const jMec = JSON.stringify(respostasMec);
+  const numerosF6 = [PRECO_SERV, PRECO_PECA, CUSTO_PECA, TOTAL_F6, ITEM_APOS, tokenA2, NOME_CLI].filter((v) => jMec.includes(String(v)));
+  checar(`mecanico: ${respostasMec.length} respostas da Fase 6 sem nenhum valor, link ou token`, itensMecF6.data?.length === 2 && vazF6.length === 0 && numerosF6.length === 0, [...vazF6.slice(0, 5), ...numerosF6].join(", "));
+
+  // ---------------------------------------------------------------- APP_URL
+  if (!APP_URL) return;
+  await testesFase6Paginas({ donoA, at, mec, ofA, osComLink, vwOs, provasDe, linksDe, estadoDe, A, B, R, M, Iso, NOME_CLI, MOTIVO, ITEM_APOS, MD, AC });
+}
+
+/** Tabelas e views publicas criadas pelas migracoes (a API so serve o schema public). */
+function objetosDaApi() {
+  const pasta = new URL("../supabase/migrations/", import.meta.url);
+  const nomes = new Set();
+  for (const a of readdirSync(pasta).filter((f) => f.endsWith(".sql"))) {
+    const sql = readFileSync(new URL(a, pasta), "utf8");
+    for (const m of sql.matchAll(/create\s+(?:or\s+replace\s+)?(?:table|view)\s+(?:if\s+not\s+exists\s+)?public\.([a-z0-9_]+)/gi)) nomes.add(m[1]);
+    for (const m of sql.matchAll(/drop\s+(?:table|view)\s+(?:if\s+exists\s+)?public\.([a-z0-9_]+)/gi)) nomes.delete(m[1]);
+  }
+  return [...nomes].sort();
+}
+
+/** O que nunca pode sair na pagina publica da OS `os`. */
+function proibidosDe(os, oficinaId) {
+  return [
+    String(CUSTO_PECA), reais(CUSTO_PECA), String(CUSTO_PECA + 1), reais(CUSTO_PECA + 1),
+    os.telefone, telFormatado(os.telefone), os.documento, os.sintoma, os.observacao,
+    "Mecânico Teste", os.id, oficinaId, "custo_", "margem", "hash_", "token_hash", "os_id", "oficina_id", "mecanico",
+  ];
+}
+
+// ------------------------------------------------------------------ Fase 6 com APP_URL
+async function testesFase6Paginas(c) {
+  const { donoA, at, mec, ofA, osComLink, vwOs, estadoDe, A, B, R, M, Iso, NOME_CLI, MOTIVO, ITEM_APOS, MD, AC } = c;
+  console.log(`\n== Fase 6: pagina publica (${APP_URL}) ==`);
+  const abrir = async (token, opcoes = {}) => {
+    const r = await fetch(`${APP_URL}/orcamento/${token}`, { redirect: "manual", ...opcoes });
+    return { status: r.status, h: r.headers, html: await r.text() };
+  };
+  const P = await osComLink();
+  const antes = await estadoDe(P.id);
+  const pg = await abrir(P.token);
+  const cab = (r, nome) => r.h.get(nome) ?? "";
+  checar("pagina: abre sem login (200), mostra o orcamento", pg.status === 200 && pg.html.includes(P.placa) && pg.html.includes(P.servico) && pg.html.includes(reais(TOTAL_F6)), `status ${pg.status}`);
+  const cabecalhosOk = (r) => /noindex/.test(cab(r, "x-robots-tag")) && /no-store/.test(cab(r, "cache-control")) && cab(r, "referrer-policy") === "no-referrer" && !r.h.has("set-cookie");
+  const detCab = (r) => ["x-robots-tag", "cache-control", "referrer-policy", "set-cookie"].map((n) => `${n}=${cab(r, n)}`).join(" | ");
+  checar("pagina: noindex, no-store, no-referrer, sem cookie", cabecalhosOk(pg), detCab(pg));
+  checar("pagina: meta noindex no HTML", /<meta[^>]+name="robots"[^>]+noindex/.test(pg.html));
+
+  const head = /<head[^>]*>([\s\S]*?)<\/head>/.exec(pg.html)?.[1] ?? "";
+  const titulos = [...pg.html.matchAll(/<title[^>]*>([^<]*)<\/title>/g)].map((m) => m[1]);
+  checar("pagina: <title> fixo", titulos.length >= 1 && titulos.every((t) => t === "Orçamento para sua aprovação"), titulos.join(" | "));
+  const metas = [...pg.html.matchAll(/<meta[^>]+(?:property|name)="(og:[^"]+|twitter:[^"]+|description)"[^>]*>/g)].map((m) => m[0]);
+  const noHead = [P.placa, P.cliente, P.servico, reais(TOTAL_F6), "Oficina Teste", "Scania", `#${P.numero}`].filter((t) => head.includes(t) || metas.join("").includes(t));
+  checar("pagina: <head> e previa sem nome, placa, valor nem oficina", head.length > 0 && noHead.length === 0, noHead.join(", ") || `${metas.length} metas`);
+  checar("pagina: previa com texto fixo", metas.some((m) => m.includes("og:title") && m.includes("Orçamento para sua aprovação")) && metas.some((m) => m.includes("og:description") && m.includes("Toque para ver o orçamento e responder.")), metas.join(" ").slice(0, 200));
+
+  const origem = new URL(APP_URL).origin;
+  const scripts = [...pg.html.matchAll(/<script[^>]+src="([^"]+)"/g)].map((m) => m[1]);
+  const fora = scripts.filter((s) => { try { return new URL(s, APP_URL).origin !== origem; } catch { return true; } });
+  checar(`pagina: ${scripts.length} scripts, todos do proprio app`, scripts.length > 0 && fora.length === 0, fora.join(", "));
+  checar("pagina: sem analytics nem service worker", !/googletagmanager|google-analytics|gtag\(|segment\.|hotjar|clarity\.ms|sentry|vercel-insights|vitals\.vercel|manifest\.webmanifest|service-worker/i.test(pg.html));
+
+  const P2 = await osComLink();
+  const proibidos = [...proibidosDe(P, ofA), P2.placa, P2.servico, P2.peca, P2.cliente, P2.telefone, P2.documento, Iso.placa, Iso.servico, A.placa, A.servico];
+  const achados = proibidos.filter((t) => pg.html.includes(t));
+  checar("HTML publico: nada de custo, margem, telefone, documento, sintoma, observacao, mecanico, id, nem itens e placa de outra OS", achados.length === 0, achados.join(", "));
+
+  for (const [rot, op] of [
+    ["GET de novo", {}],
+    ["HEAD", { method: "HEAD" }],
+    ["HEAD com User-Agent do WhatsApp", { method: "HEAD", headers: { "user-agent": "WhatsApp/2.23.20.0" } }],
+    ["GET com User-Agent do WhatsApp", { headers: { "user-agent": "WhatsApp/2.23.20.0" } }],
+    ["GET com User-Agent do Facebook", { headers: { "user-agent": "facebookexternalhit/1.1" } }],
+  ]) {
+    const r = await abrir(P.token, op);
+    checar(`${rot}: 200 com os cabecalhos certos`, r.status === 200 && cabecalhosOk(r), `${r.status} ${detCab(r)}`);
+  }
+  checar("abrir o link (GET e HEAD, tambem como robo) nao muda nada", (await estadoDe(P.id)) === antes);
+
+  const [pg1, pg2] = [await abrir(P.token), await abrir(P2.token)];
+  const [pg1b] = [await abrir(P.token)];
+  checar("2 tokens em sequencia: cada um mostra so o seu (sem cache)", pg1.html.includes(P.placa) && !pg1.html.includes(P2.placa) && pg2.html.includes(P2.placa) && !pg2.html.includes(P.placa) && pg1b.html.includes(P.placa) && !pg1b.html.includes(P2.placa));
+
+  const semDado = (r, os) => [os.placa, os.cliente, os.servico, os.peca, reais(TOTAL_F6), "Oficina Teste A"].filter((t) => r.html.includes(t));
+  const estados = [
+    ["token inventado", "0".repeat(64), A],
+    ["substituido (token antigo da OS B)", null, B],
+    ["atualizado", null, A],
+    ["encerrado por marcar a mao", M.token, M],
+    ["encerrado por cancelar a OS", AC.token, AC],
+    ["encerrado por trocar o modo", MD.token, MD],
+  ];
+  const Sub = await osComLink();
+  const reSub = await donoA.sb.rpc("reenviar_orcamento", { p_os_id: Sub.id, p_chave_idempotencia: uuid() }).single();
+  estados[1] = ["substituido", Sub.token, Sub];
+  const Alt = await osComLink();
+  await donoA.sb.rpc("alterar_orcamento", { p_os_id: Alt.id });
+  estados[2] = ["atualizado", Alt.token, Alt];
+  for (const [rot, tk, os] of estados) {
+    const r = await abrir(tk);
+    const vaz = semDado(r, os);
+    checar(`pagina ${rot}: sem nenhum dado do orcamento`, r.status === 200 && vaz.length === 0 && cabecalhosOk(r), vaz.join(", ") || `${r.status}`);
+  }
+  checar("reenviar da OS do estado substituido funcionou", !reSub.error, msg(reSub));
+  const pRec = await abrir(R.token);
+  checar("pagina de link respondido e depois marcado a mao: sem dado nem motivo", !pRec.html.includes(R.placa) && !pRec.html.includes(MOTIVO));
+  const Ra = await osComLink();
+  const MOT2 = `Motivo pagina ${RODADA}`;
+  await responderLink(Ra.token, false, null, MOT2);
+  const pRa = await abrir(Ra.token);
+  checar("pagina recusada: mostra a recusa, nunca o motivo", pRa.status === 200 && pRa.html.includes(Ra.placa) && !pRa.html.includes(MOT2), `status ${pRa.status}`);
+  const Aa = await osComLink();
+  const NOME2 = `Nome Pagina ${RODADA}`;
+  await responderLink(Aa.token, true, NOME2);
+  const pAa = await abrir(Aa.token);
+  checar("pagina aprovada: mostra o orcamento e o nome informado", pAa.status === 200 && pAa.html.includes(Aa.placa) && pAa.html.includes(NOME2) && cabecalhosOk(pAa), `status ${pAa.status}`);
+
+  // ---------------------------------------------------------------- balcao
+  console.log("\n== Fase 6: telas do balcao ==");
+  const [ckDono, ckAt, ckMec] = await Promise.all([donoA, at, mec].map((u) => cookiesDaSessao(u.session)));
+  const qtdResp = (await donoA.sb.from("vw_os").select("id", { count: "exact", head: true }).eq("orcamento_respondido", true)).count;
+  const lista = await pagina("/os?status=respondidos", ckAt);
+  checar("/os?status=respondidos: lista quem respondeu e nao lista quem nao respondeu", lista.status === 200 && lista.html.includes(`/os/${Aa.id}`) && lista.html.includes(`/os/${Ra.id}`) && !lista.html.includes(`/os/${P.id}`) && !lista.html.includes(`/os/${M.id}`), `status ${lista.status}`);
+  checar("/os?status=respondidos: etiquetas 'Cliente aprovou' e 'Cliente recusou', 1 cartao por OS", lista.html.includes("Cliente aprovou") && lista.html.includes("Cliente recusou"));
+  const listaOs = await pagina("/os", ckDono);
+  const posChip = [listaOs.html.indexOf(">Abertas<"), listaOs.html.indexOf(">Respondidos<"), listaOs.html.indexOf(">Orçamento<")];
+  checar("/os: chip 'Respondidos' logo depois de 'Abertas', com a contagem", listaOs.status === 200 && posChip[0] > 0 && posChip[1] > posChip[0] && posChip[2] > posChip[1] && listaOs.html.includes("status=respondidos"), `${listaOs.status} ${posChip.join(",")} (qtd ${qtdResp})`);
+  const inicio = await pagina("/inicio", ckDono);
+  checar("/inicio: cartao de respondidos leva ao filtro", inicio.status === 200 && inicio.html.includes("clientes responderam") && inicio.html.includes("/os?status=respondidos"), `status ${inicio.status}`);
+
+  const dA = await pagina(`/os/${Aa.id}`, ckDono);
+  checar("detalhe aprovado no link: prova, nome informado, desfazer, linha do tempo", dA.status === 200 && dA.html.includes("Aprovado pelo cliente") && dA.html.includes("no link") && dA.html.includes(`Nome informado`) && dA.html.includes("Desfazer aprovação") && dA.html.includes(`Cliente aprovou pelo link · Nome informado: ${NOME2}`) && dA.html.includes("gerou o link (versão 1)"), `status ${dA.status}`);
+  const dM = await pagina(`/os/${M.id}`, ckDono);
+  checar("detalhe marcado a mao: 'Fulano marcou', nao 'pelo link'", dM.status === 200 && dM.html.includes("Atendente Teste marcou: cliente aprovou por telefone") && !dM.html.includes("Cliente aprovou pelo link") && dM.html.includes("Desfazer aprovação"), `status ${dM.status}`);
+  const dAdesf = await pagina(`/os/${A.id}`, ckDono);
+  checar("detalhe depois de desfazer: 'desfez a aprovacao', gerou, cancelou e alterou na linha do tempo", dAdesf.status === 200 && dAdesf.html.includes("Atendente Teste desfez a aprovação") && dAdesf.html.includes("gerou um link novo") && dAdesf.html.includes("cancelou o link") && dAdesf.html.includes("alterou o orçamento: link anterior cancelado") && dAdesf.html.includes(`Cliente aprovou pelo link · Nome informado: ${NOME_CLI}`), `status ${dAdesf.status}`);
+  const dR = await pagina(`/os/${Ra.id}`, ckAt);
+  checar("detalhe recusado no link: destaque, motivo e linha do tempo", dR.status === 200 && dR.html.includes("Cliente recusou pelo link") && dR.html.includes(MOT2) && dR.html.includes(`Cliente recusou pelo link: ${MOT2}`), `status ${dR.status}`);
+  const Ap = await osComLink();
+  await responderLink(Ap.token, true, "Cliente Item");
+  await at.sb.rpc("adicionar_item_os", { p_chave_idempotencia: uuid(), p_os_id: Ap.id, p_tipo: "servico", p_descricao: `Item Depois ${RODADA}`, p_preco_unitario_centavos: ITEM_APOS });
+  const dAp = await pagina(`/os/${Ap.id}`, ckDono);
+  checar("detalhe com item depois da aprovacao: 'Após a aprovação', aprovado x atual", dAp.status === 200 && /Após a aprovação/i.test(dAp.html) && dAp.html.includes(reais(TOTAL_F6)) && dAp.html.includes(reais(TOTAL_F6 + ITEM_APOS)), `status ${dAp.status}`);
+  const listaAp = await pagina("/os?status=respondidos", ckDono);
+  checar("/os: OS acima do aprovado continua com a etiqueta", listaAp.html.includes(`/os/${Ap.id}`) && /Acima do aprovado/i.test(listaAp.html));
+  const atAp = await pagina(`/os/${Ap.id}`, ckAt);
+  checar("atendente: detalhe sem custo", atAp.status === 200 && !atAp.html.includes(String(CUSTO_PECA)) && !atAp.html.includes(reais(CUSTO_PECA)) && !atAp.html.includes("Só você vê"), `status ${atAp.status}`);
+
+  // ---------------------------------------------------------------- mecanico
+  console.log("\n== Fase 6: telas do mecanico ==");
+  const lancar = await mec.sb.rpc("adicionar_item_os", { p_chave_idempotencia: uuid(), p_os_id: Ap.id, p_tipo: "servico", p_descricao: `Lancado F6 ${RODADA}` });
+  checar("mecanico lanca item na OS aprovada pelo link", !lancar.error, msg(lancar));
+  const proibidosMec = (os, extras = []) => [
+    "R$", reais(PRECO_SERV), String(PRECO_SERV), reais(PRECO_PECA), String(PRECO_PECA), reais(CUSTO_PECA), String(CUSTO_PECA), reais(TOTAL_F6), String(TOTAL_F6), reais(ITEM_APOS), String(ITEM_APOS),
+    os.token, `/orcamento/${os.token}`, "/enviar", "Nome informado", "Link ativo", "Enviar orçamento", "Alterar orçamento", "Cancelar link", "Código de conferência", "Valor aprovado", "pelo link", "gerou o link", os.telefone, telFormatado(os.telefone), os.documento, os.observacao, ...extras,
+  ].filter(Boolean);
+  const achar = (html, lista) => lista.filter((t) => html.includes(t)).concat(/centavos/i.test(html) ? ["centavos"] : []);
+  const mAp = await pagina(`/os/${Ap.id}`, ckMec);
+  const vzAp = achar(mAp.html, proibidosMec(Ap, ["Cliente Item"]));
+  checar("mecanico: detalhe da OS aprovada pelo link sem valor, link, token, nome ou prova no HTML", mAp.status === 200 && mAp.html.includes(Ap.placa) && mAp.html.includes("Cliente aprovou.") && vzAp.length === 0, vzAp.join(", ") || `status ${mAp.status}`);
+  // `podeAlterar` e permissao, sem valor: o que nao pode vazar e valor, link e token.
+  checar("mecanico: a chave sem valor podeAlterar pode ir no payload e nao reprova", mAp.html.includes("podeAlterar") && vzAp.length === 0, `tem podeAlterar: ${mAp.html.includes("podeAlterar")}`);
+  const Ar = await osComLink();
+  const MOT3 = `Motivo mecanico ${RODADA}`;
+  await responderLink(Ar.token, false, null, MOT3);
+  const mAr = await pagina(`/os/${Ar.id}`, ckMec);
+  const vzAr = achar(mAr.html, proibidosMec(Ar, [MOT3]));
+  checar("mecanico: OS recusada pelo link com o texto fixo, sem motivo nem valor", mAr.status === 200 && mAr.html.includes("Cliente recusou o orçamento.") && vzAr.length === 0, vzAr.join(", ") || `status ${mAr.status}`);
+  const Am = await osComLink();
+  const mAm = await pagina(`/os/${Am.id}`, ckMec);
+  const vzAm = achar(mAm.html, proibidosMec(Am));
+  checar("mecanico: OS com link ativo sem cartao do link, sem valor, sem token", mAm.status === 200 && mAm.html.includes(Am.placa) && vzAm.length === 0, vzAm.join(", ") || `status ${mAm.status}`);
+  const naoAcha = (r, os) => (r.status === 404 || r.status === 200) && r.html.includes("OS não encontrada") && !r.html.includes(os.placa) && !r.html.includes(os.servico) && !r.html.includes(reais(TOTAL_F6));
+  for (const [rot, cam] of [["/enviar", `/os/${Am.id}/enviar`], ["/orcamento/1", `/os/${Am.id}/orcamento/1`]]) {
+    const r = await pagina(cam, ckMec);
+    checar(`mecanico: ${rot} cai no nao encontrado, sem dado`, naoAcha(r, Am) && !r.html.includes("R$"), `status ${r.status}${r.local ? ` -> ${r.local}` : ""}`);
+  }
+  const minhas = await pagina("/minhas-os", ckMec);
+  const vzMin = achar(minhas.html, ["R$", String(TOTAL_F6), reais(TOTAL_F6), "Cliente aprovou", "Cliente recusou", "Link vencido", "Respondidos"]);
+  checar("mecanico: /minhas-os sem valor nem etiqueta do link", minhas.status === 200 && minhas.html.includes(Am.placa) && vzMin.length === 0, vzMin.join(", ") || `status ${minhas.status}`);
+  const pgMecLista = await pagina("/os?status=respondidos", ckMec);
+  checar("mecanico: /os?status=respondidos manda para /minhas-os", pgMecLista.html.includes("/minhas-os") || Boolean(pgMecLista.local?.includes("/minhas-os")), `status ${pgMecLista.status}`);
+  const pgAnonOs = await pagina(`/os/${Ap.id}`, null);
+  checar("sem login: /os/[id] vai para o login, sem dado", (pgAnonOs.status === 307 || pgAnonOs.status === 308) && pgAnonOs.local?.includes("/login"), `${pgAnonOs.status} ${pgAnonOs.local}`);
+
+  await testesFase6Navegador({ ckDono, osComLink, vwOs, provasDe: c.provasDe, linksDe: c.linksDe, P });
+}
+
+// ------------------------------------------------------------------ Fase 6 no navegador (opcional)
+// TESTE_PLAYWRIGHT=caminho/para/playwright/index.mjs: clica no que so existe no navegador.
+// Usa so as contas e OS desta rodada. Nao abre wa.me.
+async function testesFase6Navegador({ ckDono, osComLink, vwOs, provasDe, linksDe, P }) {
+  const caminho = process.env.TESTE_PLAYWRIGHT;
+  if (!caminho) {
+    console.log("\nPULADO  cliques no navegador: defina TESTE_PLAYWRIGHT (caminho do playwright/index.mjs).");
+    return;
+  }
+  console.log("\n== Fase 6: cliques no navegador (Chromium 390 px) ==");
+  const { chromium } = await import(pathToFileURL(caminho).href);
+  const nav = await chromium.launch();
+  const url = new URL(APP_URL);
+  const cookies = ckDono.split("; ").map((par) => {
+    const i = par.indexOf("=");
+    return { name: par.slice(0, i), value: par.slice(i + 1), domain: url.hostname, path: "/" };
+  });
+  const ctx = await nav.newContext({ viewport: { width: 390, height: 844 }, locale: "pt-BR", timezoneId: "America/Sao_Paulo" });
+  await ctx.addCookies(cookies);
+  const pg = await ctx.newPage();
+  const esperaStatus = async (id, status) => {
+    for (let i = 0; i < 40; i++) {
+      if ((await vwOs(id))?.status === status) return true;
+      await esperar(250);
+    }
+    return false;
+  };
+  const passo = async (nome, f) => {
+    try {
+      await f();
+    } catch (e) {
+      checar(nome, false, `erro: ${String(e.message).split("\n")[0]}`);
+    }
+  };
+  try {
+    // Link ativo: a confirmacao de cancelar, a de trocar o modo e a folha avisam.
+    const Lk = await osComLink();
+    await passo("navegador: cancelar OS com link ativo", async () => {
+      await pg.goto(`${APP_URL}/os/${Lk.id}`, { waitUntil: "networkidle" });
+      await pg.getByRole("button", { name: "Cancelar OS", exact: true }).click();
+      const dlg = pg.getByRole("alertdialog");
+      await dlg.waitFor();
+      checar("navegador: cancelar OS com link ativo ganha a linha do link", await dlg.getByText("O link enviado ao cliente para de valer.").isVisible());
+      await dlg.getByRole("button", { name: "Voltar sem cancelar" }).click();
+    });
+    await passo("navegador: trocar modo com link ativo", async () => {
+      await pg.getByRole("button", { name: "Trocar para serviço direto" }).click();
+      const aviso = pg.getByText("O link enviado ao cliente para de valer.");
+      await aviso.waitFor();
+      checar("navegador: trocar para direto com link ativo ganha a linha do link", await aviso.isVisible());
+      await pg.reload({ waitUntil: "networkidle" });
+    });
+    // Aprovacao a mao com link ativo + "Desfazer" do aviso de 6 s: volta para aguardando.
+    await passo("navegador: aprovar a mao com link ativo", async () => {
+      await pg.getByRole("button", { name: /Registrar resposta/ }).first().click();
+      await pg.getByText("Há um link ativo. Ao registrar a resposta aqui, ele para de valer.").waitFor();
+      checar("navegador: folha da resposta avisa do link ativo", true);
+      await pg.locator("label", { hasText: /^\s*Aprovou\s*$/ }).click();
+      await pg.locator("label", { hasText: /^\s*Telefone\s*$/ }).click();
+      await pg.getByRole("button", { name: "Marcar como aprovado" }).click();
+      checar("navegador: marcar a mao aprova a OS", await esperaStatus(Lk.id, "aprovada"));
+      await pg.getByRole("button", { name: "Desfazer", exact: true }).click();
+      checar("navegador: 'Desfazer' de 6 s volta para Aguardando orcamento (nunca Orcamento enviado)", await esperaStatus(Lk.id, "aguardando_orcamento"), (await vwOs(Lk.id))?.status);
+      const prova = (await provasDe(Lk.id))[0];
+      checar("navegador: a mao desfeita continua guardada; link revogado", Boolean(prova?.desfeita_em) && Boolean((await linksDe(Lk.id))[0].revogado_em));
+    });
+    // Aprovacao no link + "Desfazer aprovacao" do cartao da prova.
+    const Dp = await osComLink();
+    await responderLink(Dp.token, true, "Cliente Navegador");
+    await passo("navegador: desfazer aprovacao no cartao", async () => {
+      await pg.goto(`${APP_URL}/os/${Dp.id}`, { waitUntil: "networkidle" });
+      await pg.getByText("Aprovado pelo cliente no link").waitFor();
+      await pg.getByRole("button", { name: "Desfazer aprovação" }).click();
+      const dlg = pg.getByRole("alertdialog");
+      await dlg.getByText(/o link não volta a valer/).waitFor();
+      await dlg.getByRole("button", { name: "Desfazer aprovação" }).click();
+      checar("navegador: 'Desfazer aprovação' volta para Aguardando orcamento", await esperaStatus(Dp.id, "aguardando_orcamento"), (await vwOs(Dp.id))?.status);
+      await pg.getByRole("button", { name: /Ver respostas e versões/ }).click();
+      await pg.getByText(/Desfeita por/).waitFor();
+      checar("navegador: 'Ver respostas e versões' mostra a resposta desfeita", true);
+      const hist = pg.getByRole("region", { name: "Histórico" });
+      await hist.getByText(/desfez a aprovação/).waitFor();
+      checar("navegador: linha do tempo mostra quem desfez", true);
+    });
+    // Link x mao: o cliente responde com a folha aberta.
+    const Co = await osComLink();
+    await passo("navegador: cliente responde com a folha aberta", async () => {
+      await pg.goto(`${APP_URL}/os/${Co.id}`, { waitUntil: "networkidle" });
+      await pg.getByRole("button", { name: /Registrar resposta/ }).first().click();
+      await pg.locator("label", { hasText: /^\s*Recusou\s*$/ }).click();
+      await pg.locator("label", { hasText: /^\s*Telefone\s*$/ }).click();
+      await responderLink(Co.token, true, "Cliente Rapido");
+      await pg.getByRole("button", { name: "Registrar recusa e refazer" }).click();
+      await pg.getByText(/O cliente acabou de responder pelo link: aprovou em/).waitFor();
+      const provas = await provasDe(Co.id);
+      checar("navegador: folha fecha e diz que o cliente aprovou; nada a mais gravado", (await vwOs(Co.id))?.status === "aprovada" && provas.length === 1 && provas[0].canal === "link" && !(await pg.getByRole("button", { name: "Registrar recusa e refazer" }).isVisible()));
+    });
+    // Recusa pelo link: cancelar ja vem com o motivo marcado.
+    const Rc = await osComLink();
+    await responderLink(Rc.token, false, null, "Caro demais");
+    await passo("navegador: cancelar depois da recusa", async () => {
+      await pg.goto(`${APP_URL}/os/${Rc.id}`, { waitUntil: "networkidle" });
+      await pg.getByRole("button", { name: "Cancelar OS", exact: true }).click();
+      const dlg = pg.getByRole("alertdialog");
+      await dlg.waitFor();
+      checar("navegador: depois da recusa, cancelar ja vem com 'Orçamento recusado'", await dlg.getByRole("radio", { name: "Orçamento recusado" }).isChecked());
+      checar("navegador: sem link ativo, sem a linha do link", !(await dlg.getByText("O link enviado ao cliente para de valer.").isVisible()));
+    });
+    // Chip e cartao levam ao filtro.
+    await passo("navegador: filtro de respondidos", async () => {
+      await pg.goto(`${APP_URL}/os`, { waitUntil: "networkidle" });
+      const chip = pg.getByRole("link", { name: /^Respondidos \(\d+\)$/ });
+      const caixa = await chip.boundingBox();
+      checar("navegador: chip 'Respondidos' dentro da tela em 390 px, 48 px de altura", Boolean(caixa) && caixa.x + caixa.width <= 390 && caixa.height >= 48, JSON.stringify(caixa));
+      await chip.click();
+      await pg.waitForURL(/status=respondidos/);
+      await pg.getByRole("link", { name: /cliente recusou pelo link/ }).first().waitFor();
+      checar("navegador: filtro abre e o cartao anuncia a resposta", true);
+      await pg.goto(`${APP_URL}/inicio`, { waitUntil: "networkidle" });
+      await pg.getByRole("link", { name: /clientes responderam/ }).click();
+      await pg.waitForURL(/status=respondidos/);
+      checar("navegador: cartao do /inicio leva ao filtro", true);
+    });
+    // Pagina publica: o que o navegador carrega de verdade, e GET sem efeito com JavaScript ligado.
+    await passo("navegador: pagina publica", async () => {
+      const pubCtx = await nav.newContext({ viewport: { width: 360, height: 740 }, locale: "pt-BR" });
+      const pub = await pubCtx.newPage();
+      const hosts = new Set();
+      pub.on("request", (r) => hosts.add(new URL(r.url()).host));
+      await pub.goto(`${APP_URL}/orcamento/${P.token}`, { waitUntil: "networkidle" });
+      checar("navegador: pagina publica so carrega do proprio app, sem terceiros", hosts.size === 1 && hosts.has(url.host), [...hosts].join(", "));
+      const provasAntes = await provasDe(P.id);
+      checar("navegador: abrir com JavaScript nao responde nada", provasAntes.length === 0 && (await vwOs(P.id))?.status === "orcamento_enviado");
+      const sw = await pub.evaluate(async () => (await navigator.serviceWorker?.getRegistrations?.())?.length ?? 0);
+      checar("navegador: pagina publica nao registra service worker", sw === 0, String(sw));
+      await pubCtx.close();
+    });
+  } finally {
+    await nav.close();
+  }
+}
+
+/** So a Fase 6 (TESTE_SO_FASE6=1): cria o minimo de contas, para nao gastar uma rodada inteira. */
+async function testesSoFase6() {
+  console.log("\n== Preparo so da Fase 6 ==");
+  const donoA = await criarConta("dono.f6");
+  const ofA = await donoA.sb.rpc("criar_oficina", { p_nome_oficina: `Oficina Teste A ${RODADA}`, p_nome_dono: "Dono Teste A", p_versao_termos: TERMOS, p_telefone: "(11) 98888-7777" });
+  const convM = await donoA.sb.rpc("criar_convite", { p_papel: "mecanico" }).single();
+  const convA = await donoA.sb.rpc("criar_convite", { p_papel: "atendente" }).single();
+  const mec = await criarConta("mecanico.f6");
+  const at = await criarConta("atendente.f6");
+  await mec.sb.rpc("aceitar_convite", { p_token: convM.data?.token, p_nome: "Mecânico Teste", p_versao_termos: TERMOS });
+  await at.sb.rpc("aceitar_convite", { p_token: convA.data?.token, p_nome: "Atendente Teste", p_versao_termos: TERMOS });
+  const donoB = await criarConta("dono.f6.b");
+  const ofB = await donoB.sb.rpc("criar_oficina", { p_nome_oficina: `Oficina Teste B ${RODADA}`, p_nome_dono: "Dono Teste B", p_versao_termos: TERMOS });
+  checar("preparo: 2 oficinas e 4 contas da rodada", typeof ofA.data === "string" && typeof ofB.data === "string", `${msg(ofA)}/${msg(ofB)}`);
+  await testesFase6({ donoA, mec, at, donoB, ofA: ofA.data, ofB: ofB.data });
+  console.log(`\ninfo    contas criadas nesta rodada: *.${RODADA}@${DOMINIO} (ficam no staging)`);
+}
+
 // ------------------------------------------------------------------ main
 const autoconfirm = await testesAnon();
 if (!DOMINIO) {
-  console.log("\nPULADO  fluxo com login: defina TESTE_EMAIL_DOMINIO (dominio com MX; o Supabase recusa .test e example.com).");
+  console.log("\nPULADO  fluxo com login: defina TESTE_EMAIL_DOMINIO=www.example.org (o Supabase recusa .test e example.com).");
 } else if (!autoconfirm) {
   console.log("\nPULADO  fluxo com login: a confirmacao de e-mail esta LIGADA no staging. Desligue em Auth > Providers > Email > Confirm email.");
 } else {
   try {
-    await testesCompletos();
+    if (process.env.TESTE_SO_FASE6) await testesSoFase6();
+    else await testesCompletos();
   } catch (e) {
     falhou++;
     console.log(`FALHOU  erro inesperado: ${e.message}`);
