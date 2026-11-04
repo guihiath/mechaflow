@@ -134,6 +134,7 @@ export function ConfirmarComMotivo({
   rotulo = "Cancelar OS",
   pergunta,
   texto = "Ela sai da lista de abertas e não pode ser reaberta. Para atender de novo, abra outra OS.",
+  aviso,
   motivos = MOTIVOS_CANCELAMENTO,
   rotuloConfirmar,
   rotuloEnviando = "Cancelando…",
@@ -151,6 +152,8 @@ export function ConfirmarComMotivo({
   /** Ex.: "Cancelar a OS #1042 (ABC1D23)?" */
   pergunta: string;
   texto?: string;
+  /** Linha a mais, em destaque, abaixo do texto (ex.: "O link enviado ao cliente para de valer."). */
+  aviso?: string;
   /** O ultimo item abre o campo "Qual o motivo?". */
   motivos?: readonly string[];
   /** Ex.: "Cancelar OS #1042" */
@@ -254,6 +257,7 @@ export function ConfirmarComMotivo({
           {pergunta}
         </p>
         {texto && <p className="text-base text-texto-suave">{texto}</p>}
+        {aviso && <p className="text-base font-bold">{aviso}</p>}
       </div>
 
       {motivos.length === 1 ? (

@@ -392,7 +392,8 @@ export function PainelOS({ os, children }: { os: DadosPainel; children: ReactNod
 
   async function aoDesfazer(d: Desfazer) {
     try {
-      const r = await mudarStatusOS(os.id, d.para, d.de);
+      // Aprovação desfeita volta sempre para "Aguardando orçamento" (ARQUITETURA 13.7): o link não volta a valer.
+      const r = await mudarStatusOS(os.id, d.para, d.para === "aprovada" ? "aguardando_orcamento" : d.de);
       if (r?.erro) setErro(r.erro);
     } catch {
       setErro("Não foi possível desfazer. Confira a internet e tente de novo.");
@@ -1934,7 +1935,7 @@ function FolhaAlterar({ aoFechar }: { aoFechar: () => void }) {
 // =================================================================== folha: resposta do cliente
 
 function FolhaResposta({ aoFechar, aoAprovar }: { aoFechar: () => void; aoAprovar: () => void }) {
-  const { os } = useOS();
+  const { os, mostrarErro } = useOS();
   const r = useRascunho(
     "resposta",
     { resposta: "", canal: "", quem: os.clienteNome, motivo: "", depois: "refazer" },
@@ -1952,6 +1953,11 @@ function FolhaResposta({ aoFechar, aoAprovar }: { aoFechar: () => void; aoAprova
     r.limpar();
     if (res?.mensagem === "aprovou") aoAprovar();
     else aoFechar();
+  }, (res) => {
+    // O cliente respondeu pelo link enquanto a folha estava aberta: vale a resposta dele (DESIGN §13.11).
+    r.limpar();
+    mostrarErro(res?.erro ?? "");
+    aoFechar();
   });
   const semPreco = (os.itensSemPreco ?? 0) > 0;
   const rotulo =
@@ -2368,6 +2374,7 @@ function FolhaModo({ aoFechar }: { aoFechar: () => void }) {
               <TriangleAlert size={18} strokeWidth={2.25} aria-hidden className="mt-0.5 shrink-0" />
               A OS passa para “Em andamento”.
             </p>
+            {os.linkAtivo && <CaixaMensagem tipo="info">O link enviado ao cliente para de valer.</CaixaMensagem>}
           </div>
         ) : (
           <p className="text-base">

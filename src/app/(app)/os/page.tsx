@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
-import { ClipboardList, Plus, TriangleAlert } from "lucide-react";
+import { ClipboardList, Plus, Reply, TriangleAlert } from "lucide-react";
 import { Cabecalho } from "@/components/layout/cabecalho";
 import { RodapeExtra } from "@/components/layout/marcador-pagina";
 import { BadgeStatus, EtiquetaPagamento, SemMecanico } from "@/components/os/badge-status";
 import { CartaoOS } from "@/components/os/cartao-os";
+import { EtiquetaLink } from "@/components/os/etiqueta-link";
 import { EtiquetaAcimaDoAprovado, EtiquetaSemPrecoContagem } from "@/components/os/etiquetas-fase3";
 import { BotaoLink } from "@/components/ui/botao";
 import { Busca } from "@/components/ui/busca";
@@ -22,7 +23,7 @@ import {
   param,
   placaValida,
 } from "@/lib/formato";
-import { FILTROS_OS, lerFiltroOS, STATUS_ABERTOS, type FiltroOS, type StatusOS } from "@/lib/os-status";
+import { etiquetaLinkOS, FILTROS_OS, lerFiltroOS, STATUS_ABERTOS, type FiltroOS, type StatusOS } from "@/lib/os-status";
 import { createClient } from "@/lib/supabase/server";
 
 export const metadata: Metadata = { title: "Ordens de serviço" };
@@ -32,6 +33,7 @@ const POR_PAGINA = 30;
 /** "12 OS abertas" / "1 OS pronta" (DESIGN §10.3, resumo da lista). */
 const RESUMO: Record<FiltroOS, [string, string]> = {
   abertas: ["aberta", "abertas"],
+  respondidos: ["respondida", "respondidas"],
   orcamento: ["em orçamento", "em orçamento"],
   aprovadas: ["aprovada", "aprovadas"],
   em_andamento: ["em andamento", "em andamento"],
@@ -91,11 +93,12 @@ async function Lista({ searchParams }: { searchParams: Promise<Params> }) {
   let consulta = supabase
     .from("vw_os")
     .select(
-      "id, numero, status, modo, placa, veiculo_marca, veiculo_modelo, cliente_nome, mecanico_nome, sintoma_relatado, atualizado_em, total_centavos, pago_em, itens_sem_preco, valor_aprovado_centavos, vistoria_entrada_status",
+      "id, numero, status, modo, placa, veiculo_marca, veiculo_modelo, cliente_nome, mecanico_nome, sintoma_relatado, atualizado_em, total_centavos, pago_em, itens_sem_preco, valor_aprovado_centavos, vistoria_entrada_status, orcamento_link_situacao, orcamento_respondido",
       { count: "exact" },
     )
     .in("status", [...filtro.status]);
   if (filtro.semPreco) consulta = consulta.gt("itens_sem_preco", 0);
+  if (filtro.respondidos) consulta = consulta.eq("orcamento_respondido", true);
 
   if (q) {
     const soNumero = q.replace(/^#/, "");
@@ -113,15 +116,20 @@ async function Lista({ searchParams }: { searchParams: Promise<Params> }) {
   consulta =
     filtro.valor === "prontas"
       ? consulta.order("pronta_em", { ascending: true, nullsFirst: false })
-      : consulta.order("atualizado_em", { ascending: false });
+      : filtro.respondidos
+        ? // Mais antiga primeiro: é quem está esperando há mais tempo (DESIGN §13.13).
+          consulta.order("orcamento_respondido_em", { ascending: true })
+        : consulta.order("atualizado_em", { ascending: false });
 
-  const [{ data: lista, count, error }, { data: abertas }, { count: qtdSemPreco }, oficinaR] = await Promise.all([
+  const [{ data: lista, count, error }, { data: abertas }, { count: qtdSemPreco }, oficinaR, { count: qtdRespondidos }] = await Promise.all([
     consulta.range(0, limite - 1),
     supabase.from("ordens_servico").select("status").in("status", [...STATUS_ABERTOS]).limit(5000),
     // Chip "Sem preço": OS abertas com item sem preco (contagem so para dono/atendente).
     supabase.from("vw_os").select("id", { count: "exact", head: true }).in("status", [...STATUS_ABERTOS]).gt("itens_sem_preco", 0),
     // "Sem vistoria" na lista só com a vistoria obrigatória (DESIGN §12.1).
     supabase.from("oficinas").select("vistoria_obrigatoria").eq("id", ctx.oficina_id).maybeSingle(),
+    // Chip "Respondidos": presente mesmo com 0 (DESIGN §13.13).
+    supabase.from("vw_os").select("id", { count: "exact", head: true }).eq("orcamento_respondido", true),
   ]);
   const obrigatoria = Boolean(oficinaR.data?.vistoria_obrigatoria);
 
@@ -142,12 +150,14 @@ async function Lista({ searchParams }: { searchParams: Promise<Params> }) {
       valor: f.valor,
       rotulo: f.rotulo,
       href: href({ status: f.valor === "abertas" ? (q ? "abertas" : undefined) : f.valor, pagina: undefined }),
-      icone: f.semPreco ? TriangleAlert : undefined,
+      icone: f.semPreco ? TriangleAlert : f.respondidos ? Reply : undefined,
       contagem: f.semPreco
         ? (qtdSemPreco ?? undefined)
-        : abertos && abertas
-          ? f.status.reduce((soma, s) => soma + (contagemStatus.get(s) ?? 0), 0)
-          : undefined,
+        : f.respondidos
+          ? (qtdRespondidos ?? undefined)
+          : abertos && abertas
+            ? f.status.reduce((soma, s) => soma + (contagemStatus.get(s) ?? 0), 0)
+            : undefined,
     };
   });
 
@@ -207,6 +217,7 @@ async function Lista({ searchParams }: { searchParams: Promise<Params> }) {
                     aReceber: o.status === "entregue" && !o.pago_em,
                     itensSemPreco: o.itens_sem_preco ?? 0,
                     acimaDoAprovado: acimaDoAprovado(o),
+                    link: etiquetaLinkOS(o),
                     vistoria: { estado: o.vistoria_entrada_status, obrigatoria },
                   }}
                 />
@@ -247,6 +258,7 @@ async function Lista({ searchParams }: { searchParams: Promise<Params> }) {
                     <td className="px-4">
                       <span className="flex flex-wrap items-center gap-2 py-2">
                         {o.status && <BadgeStatus status={o.status as StatusOS} />}
+                        {etiquetaLinkOS(o) && <EtiquetaLink tipo={etiquetaLinkOS(o)!} />}
                         <EtiquetaSemPrecoContagem quantidade={o.itens_sem_preco ?? 0} />
                         {acimaDoAprovado(o) && <EtiquetaAcimaDoAprovado />}
                         {o.status === "entregue" && !o.pago_em && <EtiquetaPagamento pago={false} />}
@@ -332,6 +344,16 @@ async function ListaVazia({
         icone={ClipboardList}
         titulo="Nenhuma OS sem preço."
         texto="Todos os itens das OS abertas têm preço."
+        acao={{ href: "/os?status=todas", rotulo: "Ver todas", variante: "secundario" }}
+      />
+    );
+  }
+  if (filtro.respondidos) {
+    return (
+      <EstadoVazio
+        icone={Reply}
+        titulo="Nenhuma resposta nova."
+        texto="Quando um cliente responder pelo link, a OS aparece aqui."
         acao={{ href: "/os?status=todas", rotulo: "Ver todas", variante: "secundario" }}
       />
     );

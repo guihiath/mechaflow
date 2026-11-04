@@ -129,10 +129,27 @@ function textoVistoria(obs: string, por: string | null, mecanico: boolean): stri
 }
 
 /**
+ * Evento `orcamento_link` (ARQUITETURA 13.7; DESIGN §13.13): o banco grava texto do sistema, aqui
+ * vira a frase com o nome de quem fez. Texto desconhecido: nada (nao mostra observacao crua).
+ */
+function textoEventoLink(obs: string, por: string | null): string | null {
+  const nome = por?.trim() || null;
+  const t = obs.trim();
+  const gerado = /^Link gerado \(versão (\d+)\)$/.exec(t);
+  if (gerado) return nome ? `${nome} gerou o link (versão ${gerado[1]})` : `Link gerado (versão ${gerado[1]})`;
+  if (/^Link novo gerado \(versão \d+\)$/.test(t)) return nome ? `${nome} gerou um link novo` : "Link novo gerado";
+  if (t === "Link cancelado") return nome ? `${nome} cancelou o link` : t;
+  if (t === "Orçamento alterado: link anterior cancelado") return nome ? `${nome} alterou o orçamento: link anterior cancelado` : t;
+  return null;
+}
+
+/**
  * Converte o historico do banco em eventos da LinhaTempo (mais recente primeiro).
  * O texto e montado aqui: a observacao crua do banco nao vai para o navegador.
- * Mecanico: eventos de pagamento ficam de fora (DESIGN §10.0 regra 4) e o texto livre
- * do balcao (motivo de recusa / cancelamento) vira texto fixo: pode conter valor (I5).
+ * Mecanico: eventos de pagamento e do link ficam de fora (DESIGN §10.0 regra 4 e §13.15) e o
+ * texto livre do balcao (motivo de recusa / cancelamento) vira texto fixo: pode conter valor (I5).
+ * Dono e atendente: a frase distingue a resposta do cliente no link da marcada por alguem da
+ * oficina, e ja traz o nome de quem fez (por isso `por` vai vazio nesses eventos).
  */
 export function montarEventos(linhas: LinhaHistorico[], papel: Papel): EventoOS[] {
   const eventos: EventoOS[] = [];
@@ -152,7 +169,10 @@ export function montarEventos(linhas: LinhaHistorico[], papel: Papel): EventoOS[
         if (para) eventos.push({ ...base, tipo: "status", status: para });
         break;
       case "desfazer":
-        if (para)
+        if (para && !mecanico && h.de_status === "aprovada") {
+          const quem = h.por_nome?.trim();
+          eventos.push({ ...base, por: null, tipo: "status", status: para, observacao: quem ? `${quem} desfez a aprovação` : "Aprovação desfeita" });
+        } else if (para)
           eventos.push({
             ...base,
             tipo: "status",
@@ -167,8 +187,20 @@ export function montarEventos(linhas: LinhaHistorico[], papel: Papel): EventoOS[
         } else eventos.push({ ...base, tipo: "status", status: "cancelada", observacao: obs ? `Motivo: ${obs}` : null });
         break;
       case "aprovacao": {
+        // Pelo link o mecanico recebe observacao vazia: "Cliente aprovou.", sem canal nem nome.
         const canal = CANAL_TEXTO[obs.replace(/^por /, "")] ?? "";
-        eventos.push({ ...base, tipo: "status", status: "aprovada", observacao: `Cliente aprovou ${canal}`.trim() + "." });
+        if (mecanico) {
+          eventos.push({ ...base, tipo: "status", status: "aprovada", observacao: `Cliente aprovou ${canal}`.trim() + "." });
+          break;
+        }
+        const noLink = /^por link\. Nome informado: ([\s\S]+)$/.exec(obs);
+        const quem = h.por_nome?.trim();
+        const observacao = noLink
+          ? `Cliente aprovou pelo link · Nome informado: ${noLink[1]}`
+          : quem
+            ? `${quem} marcou: cliente aprovou ${canal}`.trim()
+            : `Cliente aprovou ${canal}`.trim() + ".";
+        eventos.push({ ...base, por: null, tipo: "status", status: "aprovada", observacao });
         break;
       }
       case "recusa": {
@@ -180,9 +212,16 @@ export function montarEventos(linhas: LinhaHistorico[], papel: Papel): EventoOS[
         const m = /^Cliente recusou por (\w+)(?:: ([\s\S]*))?$/.exec(obs);
         const canal = m ? (CANAL_TEXTO[m[1]] ?? "") : "";
         const motivo = m?.[2] ? `: ${m[2]}` : "";
-        const texto = `Cliente recusou o orçamento ${canal}${motivo}`.replace(/\s+:/, ":").trim();
-        if (para === "cancelada") eventos.push({ ...base, tipo: "status", status: "cancelada", observacao: texto });
-        else eventos.push({ ...base, tipo: "texto", texto });
+        const quem = h.por_nome?.trim();
+        const texto = (m?.[1] !== "link" && quem ? `${quem} marcou: cliente recusou ${canal}${motivo}` : `Cliente recusou ${canal}${motivo}`).replace(/\s+:/, ":").trim();
+        if (para === "cancelada") eventos.push({ ...base, por: null, tipo: "status", status: "cancelada", observacao: texto });
+        else eventos.push({ ...base, por: null, tipo: "texto", texto });
+        break;
+      }
+      case "orcamento_link": {
+        if (mecanico) break;
+        const texto = textoEventoLink(obs, h.por_nome);
+        if (texto) eventos.push({ ...base, por: null, tipo: "texto", texto });
         break;
       }
       case "mecanico":

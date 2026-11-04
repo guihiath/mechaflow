@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { BookOpen, CircleCheckBig, Clock, Contact, PackageSearch, Plus, Truck, Users, Wrench, ThumbsUp } from "lucide-react";
 import { Cabecalho } from "@/components/layout/cabecalho";
 import { CartaoOSSemPreco } from "@/components/os/cartao-os-sem-preco";
+import { CartaoRespondidos } from "@/components/os/cartao-respondidos";
 import { BotaoLink } from "@/components/ui/botao";
 import { Cartao, ListaCarregando, Pagina } from "@/components/ui/estados";
 import { exigirContexto } from "@/lib/dal";
@@ -28,7 +29,7 @@ async function Painel() {
   const ctx = await exigirContexto(["dono"]);
   const supabase = await createClient();
 
-  const [clientes, veiculos, pendentes, equipe, abertas, semPreco] = await Promise.all([
+  const [clientes, veiculos, pendentes, equipe, abertas, semPreco, respondidos] = await Promise.all([
     supabase.from("clientes").select("id", { count: "exact", head: true }),
     supabase.from("veiculos").select("id", { count: "exact", head: true }),
     supabase
@@ -40,6 +41,8 @@ async function Painel() {
     supabase.from("ordens_servico").select("status").in("status", [...STATUS_ABERTOS]).limit(5000),
     // OS abertas com item sem preco (pendencia do balcao, DESIGN §11.10)
     supabase.from("vw_os").select("id", { count: "exact", head: true }).in("status", [...STATUS_ABERTOS]).gt("itens_sem_preco", 0),
+    // Respostas pelo link que esperam o balcão (DESIGN §13.13)
+    supabase.from("vw_os").select("numero, status").eq("orcamento_respondido", true).order("orcamento_respondido_em").limit(500),
   ]);
   const contar = (...st: string[]) => (abertas.data ?? []).filter((o) => st.includes(o.status)).length;
   const atalhosOS = [
@@ -70,6 +73,8 @@ async function Painel() {
         <Plus size={24} strokeWidth={2.25} aria-hidden />
         Abrir OS
       </BotaoLink>
+
+      <CartaoRespondidos respostas={respondidos.data ?? []} />
 
       <CartaoOSSemPreco quantidade={semPreco.count ?? 0} />
 

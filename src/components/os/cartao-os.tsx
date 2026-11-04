@@ -3,10 +3,11 @@ import { Camera } from "lucide-react";
 import { fotos as textoFotos } from "@/components/os/categorias-foto";
 import { BadgeStatus, EtiquetaPagamento, SemMecanico } from "@/components/os/badge-status";
 import { EtiquetaAcimaDoAprovado, EtiquetaSemPrecoContagem } from "@/components/os/etiquetas-fase3";
+import { EtiquetaLink, ROTULO_ETIQUETA_LINK } from "@/components/os/etiqueta-link";
 import { Cartao, ChipPlaca } from "@/components/ui/estados";
 import { EtiquetaVistoriaCartao, rotuloVistoriaCartao } from "@/components/vistoria/etiquetas-vistoria";
 import { formatarPlaca, formatarReaisInteiros, formatarTempoDesde, type StatusVistoria } from "@/lib/formato";
-import { INFO_STATUS, type StatusOS } from "@/lib/os-status";
+import { INFO_STATUS, type EtiquetaLinkOS, type StatusOS } from "@/lib/os-status";
 
 export type DadosCartaoOS = {
   /** Destino do toque (ex.: `/os/<id>`). */
@@ -29,6 +30,8 @@ export type DadosCartaoOS = {
   itensSemPreco?: number;
   /** Total atual acima do aprovado pelo cliente (so dono/atendente). */
   acimaDoAprovado?: boolean;
+  /** Fase 6 (so dono/atendente): "Cliente aprovou", "Cliente recusou" ou "Link vencido". */
+  link?: EtiquetaLinkOS | null;
   /** Mecanico (DESIGN §11.10): linha "5 fotos · 3 itens" no fim do cartao. */
   contagem?: { fotos: number; itens: number };
   /**
@@ -61,6 +64,7 @@ export function CartaoOS({
   const total = !semValores && typeof os.totalCentavos === "number" ? formatarReaisInteiros(os.totalCentavos) : "";
   const tempo = formatarTempoDesde(os.atualizadoEm, agora);
   const semPreco = !semValores ? (os.itensSemPreco ?? 0) : 0;
+  const link = !semValores ? (os.link ?? null) : null;
   const linhaContagem = os.contagem
     ? `${os.contagem.fotos > 0 ? textoFotos(os.contagem.fotos) : "Sem fotos"} · ${
         os.contagem.itens === 0 ? "Sem itens" : os.contagem.itens === 1 ? "1 item" : `${os.contagem.itens} itens`
@@ -74,6 +78,7 @@ export function CartaoOS({
     `placa ${placa}`,
     os.cliente,
     rotuloStatus,
+    link ? ROTULO_ETIQUETA_LINK[link] : null,
     semPreco > 0 ? (semPreco === 1 ? "1 item sem preço" : `${semPreco} itens sem preço`) : null,
     linhaContagem,
   ]
@@ -93,6 +98,7 @@ export function CartaoOS({
         <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
           <span className="flex flex-wrap items-center gap-2">
             <BadgeStatus status={os.status} />
+            {link && <EtiquetaLink tipo={link} />}
             <EtiquetaSemPrecoContagem quantidade={semPreco} />
             {!semValores && os.acimaDoAprovado && <EtiquetaAcimaDoAprovado />}
             {!semValores && os.aReceber && <EtiquetaPagamento pago={false} />}

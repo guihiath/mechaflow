@@ -137,6 +137,18 @@ export function proximoPasso(
   }
 }
 
+/** Etiqueta do link na lista (DESIGN §13.13): resposta que espera o balcão, ou link vencido. */
+export type EtiquetaLinkOS = "aprovou" | "recusou" | "vencido";
+
+export function etiquetaLinkOS(o: {
+  status: string | null;
+  orcamento_respondido: boolean | null;
+  orcamento_link_situacao: SituacaoLinkOrcamento | null;
+}): EtiquetaLinkOS | null {
+  if (o.orcamento_respondido) return o.status === "aprovada" ? "aprovou" : "recusou";
+  return o.status === "orcamento_enviado" && o.orcamento_link_situacao === "vencido" ? "vencido" : null;
+}
+
 /** Itens so podem ser editados de aguardando_orcamento ate pronta (DESIGN §10.5). */
 export function itensEditaveis(status: StatusOS): boolean {
   return status !== "entregue" && status !== "cancelada";
@@ -150,6 +162,7 @@ export function osEncerrada(status: StatusOS): boolean {
 
 export type FiltroOS =
   | "abertas"
+  | "respondidos"
   | "orcamento"
   | "aprovadas"
   | "em_andamento"
@@ -171,8 +184,11 @@ export const FILTROS_OS: {
   rotuloVazio: string;
   status: readonly StatusOS[];
   semPreco?: boolean;
+  respondidos?: boolean;
 }[] = [
   { valor: "abertas", rotulo: "Abertas", rotuloVazio: "aberta", status: STATUS_ABERTOS },
+  // Posição fixa, logo depois de "Abertas" (DESIGN §13.13). `vw_os.orcamento_respondido` decide.
+  { valor: "respondidos", rotulo: "Respondidos", rotuloVazio: "respondida", status: ["aguardando_orcamento", "aprovada"], respondidos: true },
   { valor: "orcamento", rotulo: "Orçamento", rotuloVazio: "em orçamento", status: ["aguardando_orcamento", "orcamento_enviado"] },
   { valor: "aprovadas", rotulo: "Aprovadas", rotuloVazio: "aprovada", status: ["aprovada"] },
   { valor: "em_andamento", rotulo: "Em andamento", rotuloVazio: "em andamento", status: ["em_andamento"] },

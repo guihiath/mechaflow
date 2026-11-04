@@ -62,21 +62,26 @@ export function ProvaOrcamento({
         <p className="font-mono text-xs">Código de conferência: {codigoConferencia}</p>
         <div className="mt-1 flex flex-col gap-1">
           {aoVerAprovado && <AcaoBalcao gatilho={aoVerAprovado}>Ver o que foi aprovado</AcaoBalcao>}
-          {aoDesfazer && (
-            <ConfirmarAcao
-              acao={aoDesfazer}
-              rotulo="Desfazer aprovação"
-              classeAbrir={`${classesFantasma} self-start`}
-              pergunta={`Desfazer a aprovação da OS #${osNumero}?`}
-              texto="A OS volta para Aguardando orçamento. O registro continua guardado como desfeito e o link não volta a valer: para o cliente responder pelo link, é preciso enviar de novo."
-              rotuloVoltar="Voltar sem desfazer"
-              rotuloConfirmar="Desfazer aprovação"
-              rotuloEnviando="Desfazendo…"
-            />
-          )}
+          {aoDesfazer && <DesfazerAprovacao osNumero={osNumero} aoDesfazer={aoDesfazer} />}
         </div>
       </section>
     </Cartao>
+  );
+}
+
+/** "Desfazer aprovação" com confirmação (§13.12). Vale para link e para mão, com a OS em `aprovada`. */
+export function DesfazerAprovacao({ osNumero, aoDesfazer }: { osNumero: number; aoDesfazer: () => Promise<EstadoAcao> }) {
+  return (
+    <ConfirmarAcao
+      acao={aoDesfazer}
+      rotulo="Desfazer aprovação"
+      classeAbrir={`${classesFantasma} self-start`}
+      pergunta={`Desfazer a aprovação da OS #${osNumero}?`}
+      texto="A OS volta para Aguardando orçamento. O registro continua guardado como desfeito e o link não volta a valer: para o cliente responder pelo link, é preciso enviar de novo."
+      rotuloVoltar="Voltar sem desfazer"
+      rotuloConfirmar="Desfazer aprovação"
+      rotuloEnviando="Desfazendo…"
+    />
   );
 }
 

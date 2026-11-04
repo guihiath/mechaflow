@@ -3,13 +3,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { Lock, Phone } from "lucide-react";
-import { cancelarOS } from "@/acoes/os";
+import { cancelarOS, desfazerAprovacaoOS } from "@/acoes/os";
 import { Cabecalho } from "@/components/layout/cabecalho";
 import { EsconderNavegacao } from "@/components/layout/marcador-pagina";
 import { BadgeStatus, EtiquetaModo, EtiquetaPagamento, SemMecanico } from "@/components/os/badge-status";
 import { FotosDaOS } from "@/components/fotos/fotos-da-os";
 import type { SituacaoCartaoLink } from "@/components/orcamento/cartao-link";
-import { ProvaOrcamento, RespostasVersoes, type LinhaRespostaVersao } from "@/components/orcamento/prova-orcamento";
+import { DesfazerAprovacao, ProvaOrcamento, RespostasVersoes, type LinhaRespostaVersao } from "@/components/orcamento/prova-orcamento";
 import { AprovadoAgora } from "@/components/os/aprovado-agora";
 import { DetalheCarregando } from "@/components/os/detalhe-carregando";
 import { LinhaTempo } from "@/components/os/linha-tempo";
@@ -398,6 +398,8 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
               {formatarDiaHora(os.orcamento_aprovado_em)}
               {os.orcamento_aprovacao_registrada_por_nome && ` · marcado por ${os.orcamento_aprovacao_registrada_por_nome}`}
             </p>
+            {/* Aprovação de antes da Fase 6, sem prova: o caminho de desfazer é o mesmo (DESIGN §13.12). */}
+            {status === "aprovada" && <DesfazerAprovacao osNumero={os.numero ?? 0} aoDesfazer={desfazerAprovacaoOS.bind(null, id)} />}
           </Cartao>
         )}
       </>
@@ -474,6 +476,7 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
                 valorCentavos={provaAtual.valor_centavos ?? 0}
                 codigoConferencia={provaAtual.codigo_conferencia ?? ""}
                 aoVerAprovado={`/os/${id}/orcamento/${provaAtual.versao_numero}`}
+                aoDesfazer={status === "aprovada" ? desfazerAprovacaoOS.bind(null, id) : undefined}
               />
             )}
             {(provas.length > 0 || linhasVersoes.length > 1) && <RespostasVersoes linhas={linhasVersoes} />}
@@ -618,6 +621,8 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
               acao={cancelarOS.bind(null, id, status)}
               pergunta={`Cancelar a OS #${os.numero} (${placa})?`}
               rotuloConfirmar={`Cancelar OS #${os.numero}`}
+              aviso={dados.linkAtivo ? "O link enviado ao cliente para de valer." : undefined}
+              motivoInicial={recusaAtual ? "Orçamento recusado" : undefined}
             />
           </div>
         )}

@@ -6,6 +6,7 @@ import { erroCampos, temErros, texto, textoOuNull, type EstadoAcao } from "@/lib
 import { traduzirErro, type ErroSupabase } from "@/lib/erros";
 import { normalizarPlaca, REGEX_PLACA, reaisParaCentavos, soDigitos, textoParaQuantidade } from "@/lib/formato";
 import { ehCanalManual, ehFormaPagamento, hojeEmSaoPaulo, UNIDADES_ITEM, type UnidadeItem } from "@/lib/os";
+import { formatarDataEHora } from "@/lib/orcamento";
 import { ehStatusOS, rotuloStatus, type StatusOS } from "@/lib/os-status";
 import { createClient } from "@/lib/supabase/server";
 import { Constants, type Database } from "@/lib/supabase/database.types";
@@ -40,9 +41,16 @@ async function erroDaOS(supabase: Cliente, osId: string, error: ErroSupabase, ve
     const agora = ehStatusOS(data?.status) ? ` (agora: ${rotuloStatus(data.status)})` : "";
     return { erro: `Esta OS mudou enquanto você olhava${agora}. A tela foi atualizada.` };
   }
+  // Link x mao ao mesmo tempo: vale a primeira resposta. A folha fecha e o recado diz o que vale.
+  if (msg === "cliente_ja_respondeu") {
+    const { data } = await supabase.from("vw_orcamento_situacao").select("resposta_aprovou, respondido_em").eq("os_id", osId).maybeSingle();
+    refresh();
+    const resposta = data?.respondido_em ? `: ${data.resposta_aprovou ? "aprovou" : "recusou"} em ${formatarDataEHora(data.respondido_em)}` : "";
+    return { erro: `O cliente acabou de responder pelo link${resposta}. A tela foi atualizada.`, dados: { fechar: "1" } };
+  }
   // vistoria_obrigatoria (corrida: o dono ligou a chave com a tela aberta): a tela recarrega e o
   // primário vira "Fazer vistoria" (DESIGN §12.14; mensagem do banco por erros.ts).
-  if (msg === "os_fechada" || msg === "os_nao_encontrada" || msg === "vistoria_obrigatoria") refresh();
+  if (msg === "os_fechada" || msg === "os_nao_encontrada" || msg === "vistoria_obrigatoria" || msg === "troca_modo_nao_permitida") refresh();
   const traduzido = traduzirErro(error, "os");
   return { erro: traduzido === GENERICO ? falha(verbo) : traduzido };
 }
@@ -609,7 +617,6 @@ export async function removerItemMecanicoOS(osId: string, itemId: string): Promi
 // =========================================================== status
 
 const VERBO_STATUS: Partial<Record<StatusOS, string>> = {
-  orcamento_enviado: "marcar o orçamento como enviado",
   aguardando_orcamento: "desfazer",
   aprovada: "desfazer",
   em_andamento: "começar o serviço",
@@ -617,7 +624,9 @@ const VERBO_STATUS: Partial<Record<StatusOS, string>> = {
 };
 
 /**
- * Passos simples da maquina de status (enviar orcamento, comecar, desfazer).
+ * Passos simples da maquina de status (comecar, desfazer). O envio do orcamento e por link
+ * (`enviar_orcamento`), nunca por aqui. Desfazer a aprovacao volta sempre para "Aguardando
+ * orcamento" (ARQUITETURA 13.7), mesmo se a OS estava em "Orcamento enviado" antes.
  * O mecanico pode comecar/desfazer na OS dele; o banco confere (F2.3).
  */
 export async function mudarStatusOS(osId: string, de: StatusOS, para: StatusOS): Promise<EstadoAcao> {
@@ -625,11 +634,21 @@ export async function mudarStatusOS(osId: string, de: StatusOS, para: StatusOS):
   if (!UUID.test(osId) || !ehStatusOS(de) || !ehStatusOS(para) || para === "cancelada" || para === "entregue") {
     return SEM_PERMISSAO;
   }
+  const destino = de === "aprovada" && para === "orcamento_enviado" ? "aguardando_orcamento" : para;
+  if (destino === "orcamento_enviado") return SEM_PERMISSAO;
   const supabase = await createClient();
-  const { error } = await supabase.rpc("mudar_status_os", { p_os_id: osId, p_de: de, p_para: para });
-  if (error) return erroDaOS(supabase, osId, error, VERBO_STATUS[para] ?? "mudar o status");
+  const { error } = await supabase.rpc("mudar_status_os", { p_os_id: osId, p_de: de, p_para: destino });
+  if (error) return erroDaOS(supabase, osId, error, VERBO_STATUS[destino] ?? "mudar o status");
   refresh();
   return { ok: true };
+}
+
+/**
+ * "Desfazer aprovação" (DESIGN §13.12), pelo link ou a mao. A resposta fica guardada como
+ * desfeita, o link nao volta a valer e a OS volta para "Aguardando orcamento".
+ */
+export async function desfazerAprovacaoOS(osId: string): Promise<EstadoAcao> {
+  return (await contextoParaAcao(["dono", "atendente"])) ? mudarStatusOS(osId, "aprovada", "aguardando_orcamento") : SEM_PERMISSAO;
 }
 
 /** "Começar serviço" escolhendo quem faz (folha "Quem vai fazer?"). */
