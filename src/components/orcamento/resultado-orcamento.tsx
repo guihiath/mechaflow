@@ -1,9 +1,9 @@
 import { MessageCircle, Phone, ThumbsDown, ThumbsUp } from "lucide-react";
 import { AvisoPrivacidade } from "@/components/orcamento/aviso-privacidade";
 import { BlocoOficina, CorpoDocumento } from "@/components/orcamento/documento-orcamento";
-import { classesBotao, classesFantasma } from "@/components/ui/botao";
+import { ALTURA_FLEXIVEL, classesBotao, classesFantasma } from "@/components/ui/botao";
 import { CaixaMensagem } from "@/components/ui/formulario";
-import { formatarCentavos } from "@/lib/formato";
+import { ValorQuebravel } from "@/components/ui/valor-quebravel";
 import {
   formatarDataEHora,
   linkAvisarOficina,
@@ -51,7 +51,9 @@ export function ResultadoOrcamento({
             <p className="text-base break-words">
               Aprovado{resposta.nome ? ` por ${resposta.nome}` : ""} em {quando}.
             </p>
-            <p className="font-mono text-base font-semibold">Total aprovado: {formatarCentavos(documento.total_centavos)}</p>
+            <p className="font-mono text-base font-semibold">
+              Total aprovado: <ValorQuebravel centavos={documento.total_centavos} />
+            </p>
           </>
         ) : (
           <>
@@ -66,7 +68,7 @@ export function ResultadoOrcamento({
           Sua resposta já aparece no sistema da oficina.{avisar ? " Para agilizar, avise por lá:" : ""}
         </p>
         {avisar && (
-          <a href={avisar} target="_blank" rel="noopener noreferrer" className={classesBotao("primario")}>
+          <a href={avisar} target="_blank" rel="noopener noreferrer" className={classesBotao("primario", `${ALTURA_FLEXIVEL} text-center`)}>
             <MessageCircle size={24} strokeWidth={2.25} aria-hidden className="shrink-0" />
             Avisar a oficina no WhatsApp
           </a>

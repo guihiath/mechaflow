@@ -3,11 +3,12 @@
 import { useEffect, useRef, type FocusEvent, type KeyboardEvent, type RefObject } from "react";
 import { ArrowLeft, Check, ThumbsDown, ThumbsUp } from "lucide-react";
 import { ID_SUA_RESPOSTA } from "@/components/orcamento/atalho-resposta";
-import { Botao, classesFantasma } from "@/components/ui/botao";
+import { ALTURA_FLEXIVEL, Botao, classesFantasma } from "@/components/ui/botao";
 import { AreaTexto, Campo } from "@/components/ui/campo";
 import { CaixaErro, ChipPlaca } from "@/components/ui/estados";
 import { acrescentarTexto, SugestoesTexto } from "@/components/ui/sugestoes-texto";
-import { formatarCentavos, formatarNumeroOS, formatarPlaca } from "@/lib/formato";
+import { ValorQuebravel } from "@/components/ui/valor-quebravel";
+import { formatarNumeroOS, formatarPlaca } from "@/lib/formato";
 import {
   MOTIVO_CONTADOR_A_PARTIR,
   MOTIVO_MAX,
@@ -16,9 +17,6 @@ import {
   type DadosDocumentoOrcamento,
   type TipoResposta,
 } from "@/lib/orcamento";
-
-/** 56 px, e cresce em vez de cortar com texto a 200% (DESIGN §13.17). */
-const ALTURA_FLEXIVEL = "h-auto! min-h-toque-principal py-2";
 
 /**
  * "Sua resposta" (DESIGN §13.2): Aprovar em cima, Recusar embaixo, 24 px entre eles, sem barra
@@ -46,11 +44,11 @@ export function BotoesResposta({
       </noscript>
       <div data-so-com-js className="flex flex-col gap-6">
         <Botao className={ALTURA_FLEXIVEL} aria-disabled={desativado || undefined} onClick={() => tocar("aprovou")}>
-          <ThumbsUp size={24} strokeWidth={2.25} aria-hidden />
+          <ThumbsUp size={24} strokeWidth={2.25} aria-hidden className="shrink-0" />
           Aprovar orçamento
         </Botao>
         <Botao variante="secundario" className={ALTURA_FLEXIVEL} aria-disabled={desativado || undefined} onClick={() => tocar("recusou")}>
-          <ThumbsDown size={24} strokeWidth={2.25} aria-hidden />
+          <ThumbsDown size={24} strokeWidth={2.25} aria-hidden className="shrink-0" />
           Recusar orçamento
         </Botao>
       </div>
@@ -111,11 +109,14 @@ export function ConfirmarResposta({
   refNome: RefObject<HTMLInputElement | null>;
 }) {
   const aprovar = tipo === "aprovou";
-  const total = formatarCentavos(documento.total_centavos);
   const caixaFalha = useRef<HTMLDivElement>(null);
+  const blocoFalha = useRef<HTMLDivElement>(null);
 
+  // A caixa e "Tentar de novo" sobem juntos: o botão não fica abaixo da dobra (I6 do F6-R1).
   useEffect(() => {
-    if (falha) caixaFalha.current?.focus();
+    if (!falha) return;
+    caixaFalha.current?.focus({ preventScroll: true });
+    blocoFalha.current?.scrollIntoView({ block: "start" });
   }, [falha]);
 
   const tituloFalha =
@@ -125,15 +126,21 @@ export function ConfirmarResposta({
         ? "Sua aprovação ainda não foi confirmada."
         : "Sua recusa ainda não foi confirmada.";
 
-  const rotuloFinal = enviando
-    ? aprovar
-      ? "Enviando aprovação…"
-      : "Enviando recusa…"
-    : falha
-      ? "Tentar de novo"
-      : aprovar
-        ? `Aprovar ${total}`
-        : "Recusar orçamento";
+  const rotuloFinal = enviando ? (
+    aprovar ? (
+      "Enviando aprovação…"
+    ) : (
+      "Enviando recusa…"
+    )
+  ) : falha ? (
+    "Tentar de novo"
+  ) : aprovar ? (
+    <span>
+      Aprovar <ValorQuebravel centavos={documento.total_centavos} />
+    </span>
+  ) : (
+    "Recusar orçamento"
+  );
 
   return (
     <section className="flex flex-col gap-4">
@@ -154,7 +161,9 @@ export function ConfirmarResposta({
         {aprovar && (
           <p className="text-2xl">
             <span className="font-bold">Total: </span>
-            <span className="font-mono font-semibold whitespace-nowrap">{total}</span>
+            <span className="font-mono font-semibold">
+              <ValorQuebravel centavos={documento.total_centavos} />
+            </span>
           </p>
         )}
       </div>
@@ -185,16 +194,18 @@ export function ConfirmarResposta({
       ) : (
         <>
           <p className="text-base">A oficina recebe sua resposta e pode falar com você para combinar outro valor ou serviço.</p>
-          {!enviando && (
-            <SugestoesTexto
-              rotulo="Motivos prontos"
-              sugestoes={SUGESTOES_MOTIVO_CLIENTE}
-              aoEscolher={(s) => aoMudarMotivo(acrescentarTexto(motivo, s).slice(0, MOTIVO_MAX))}
-            />
-          )}
           <div className="flex flex-col gap-1">
             <AreaTexto
               rotulo="Quer dizer o motivo? (opcional)"
+              acimaDoCampo={
+                !enviando && (
+                  <SugestoesTexto
+                    rotulo="Motivos prontos"
+                    sugestoes={SUGESTOES_MOTIVO_CLIENTE}
+                    aoEscolher={(s) => aoMudarMotivo(acrescentarTexto(motivo, s).slice(0, MOTIVO_MAX))}
+                  />
+                )
+              }
               value={motivo}
               onChange={(e) => aoMudarMotivo(e.target.value)}
               onKeyDown={fecharTecladoNoEnter}
@@ -215,31 +226,33 @@ export function ConfirmarResposta({
         </>
       )}
 
-      {falha && (
-        <div ref={caixaFalha} tabIndex={-1}>
-          <CaixaErro titulo={tituloFalha} texto="Confira a internet e tente de novo. Não vai ficar repetida." />
-        </div>
-      )}
-
-      <div className="flex flex-col gap-3">
-        <Botao variante="secundario" className="h-auto! min-h-toque py-1" onClick={aoVoltar} disabled={enviando}>
-          Voltar sem responder
-        </Botao>
-        <Botao
-          variante={aprovar ? "primario" : "secundario"}
-          className={`${ALTURA_FLEXIVEL} ${aprovar ? "" : "border-texto!"}`}
-          onClick={aoEnviar}
-          disabled={enviando}
-          aria-busy={enviando || undefined}
-        >
-          {!enviando && !falha && aprovar && <Check size={24} strokeWidth={2.5} aria-hidden className="shrink-0" />}
-          {rotuloFinal}
-        </Botao>
-        {enviando && lento && (
-          <p role="status" className="text-base font-bold">
-            Internet lenta, ainda enviando. Não feche esta página.
-          </p>
+      <div ref={blocoFalha} className="flex scroll-mt-4 flex-col gap-4">
+        {falha && (
+          <div ref={caixaFalha} tabIndex={-1}>
+            <CaixaErro titulo={tituloFalha} texto="Confira a internet e tente de novo. Pode tocar de novo: não fica registrado duas vezes." />
+          </div>
         )}
+
+        <div className="flex flex-col gap-3">
+          <Botao variante="secundario" className="h-auto! min-h-toque py-1" onClick={aoVoltar} disabled={enviando}>
+            Voltar sem responder
+          </Botao>
+          <Botao
+            variante={aprovar ? "primario" : "secundario"}
+            className={`${ALTURA_FLEXIVEL} ${aprovar ? "" : "border-texto!"}`}
+            onClick={aoEnviar}
+            disabled={enviando}
+            aria-busy={enviando || undefined}
+          >
+            {!enviando && !falha && aprovar && <Check size={24} strokeWidth={2.5} aria-hidden className="shrink-0" />}
+            {rotuloFinal}
+          </Botao>
+          {enviando && lento && (
+            <p role="status" className="text-base font-bold">
+              Internet lenta, ainda enviando. Não feche esta página.
+            </p>
+          )}
+        </div>
       </div>
     </section>
   );

@@ -58,22 +58,33 @@ export function EstadoLinkPublico({ motivo }: { motivo: SituacaoSemAcesso | "err
   );
 }
 
-/** Carregando (DESIGN §13.5): skeleton neutro, sem nenhum dado. */
+/**
+ * Carregando (DESIGN §13.5): skeleton neutro, sem nenhum dado.
+ * Sem JavaScript o conteúdo em streaming nunca entra na tela: troca o "Abrindo" por um aviso.
+ */
 export function CarregandoOrcamento() {
   return (
-    <div aria-busy="true" className="flex flex-col gap-5">
-      <p role="status" className="text-base text-texto-suave">
-        Abrindo orçamento…
-      </p>
-      <div className="flex animate-pulse flex-col gap-5" aria-hidden>
-        <div className="h-8 w-3/4 rounded-sm bg-superficie-2" />
-        <div className="h-16 w-1/2 rounded-sm bg-superficie-2" />
-        <div className="flex flex-col gap-3">
-          <div className="h-12 rounded-sm bg-superficie-2" />
-          <div className="h-12 rounded-sm bg-superficie-2" />
-          <div className="h-12 rounded-sm bg-superficie-2" />
+    <>
+      <noscript>
+        <p className="text-base font-bold">
+          Para ver e responder este orçamento, ative o JavaScript do navegador ou fale com a oficina na conversa em que recebeu o link.
+        </p>
+        <style dangerouslySetInnerHTML={{ __html: "[data-carregando]{display:none!important}" }} />
+      </noscript>
+      <div data-carregando aria-busy="true" className="flex flex-col gap-5">
+        <p role="status" className="text-base text-texto-suave">
+          Abrindo orçamento…
+        </p>
+        <div className="flex animate-pulse flex-col gap-5" aria-hidden>
+          <div className="h-8 w-3/4 rounded-sm bg-superficie-2" />
+          <div className="h-16 w-1/2 rounded-sm bg-superficie-2" />
+          <div className="flex flex-col gap-3">
+            <div className="h-12 rounded-sm bg-superficie-2" />
+            <div className="h-12 rounded-sm bg-superficie-2" />
+            <div className="h-12 rounded-sm bg-superficie-2" />
+          </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }

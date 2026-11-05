@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { TriangleAlert } from "lucide-react";
+import { ValorQuebravel } from "@/components/ui/valor-quebravel";
 import { formatarCentavos } from "@/lib/formato";
 
 /**
@@ -51,7 +52,9 @@ export function ResumoTotais({
         {/* Se não couber na mesma linha, o valor desce; nunca encolhe (DESIGN §13.17). */}
         <div className="mt-1 flex flex-wrap items-baseline justify-between gap-x-4 border-t-2 border-texto pt-2">
           <dt className="font-display text-3xl font-bold">Total</dt>
-          <dd className="ml-auto text-right font-mono text-[1.75rem] leading-9 font-semibold [overflow-wrap:anywhere]">{formatarCentavos(totalCentavos)}</dd>
+          <dd className="ml-auto min-w-0 text-right font-mono text-[1.75rem] leading-9 font-semibold">
+            <ValorQuebravel centavos={totalCentavos} />
+          </dd>
         </div>
       </dl>
 

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react";
 import { CircleCheckBig, Copy, Eye, Link2, MessageCircle, RefreshCw } from "lucide-react";
 import { gerarLinkOrcamento, reenviarLinkOrcamento } from "@/acoes/orcamento";
 import { AcaoBalcao } from "@/components/orcamento/acao-balcao";
@@ -82,6 +82,7 @@ export function TelaEnviarOrcamento({ dados }: { dados: DadosTelaEnviar }) {
   const emEnvio = useRef(false);
   const titulo = useRef<HTMLHeadingElement>(null);
   const campoLink = useRef<HTMLInputElement>(null);
+  const campoCondicoes = useRef<HTMLInputElement>(null);
 
   // Link guardado só vale enquanto o banco disser que ele é o da versão vigente: cliente respondeu,
   // alguém cancelou ou alterou, e o que está no aparelho já não serve para mandar a ninguém.
@@ -132,6 +133,19 @@ export function TelaEnviarOrcamento({ dados }: { dados: DadosTelaEnviar }) {
   function concluir() {
     apagarLinkLocal(osId);
     router.push(`/os/${osId}`);
+  }
+
+  /** "Seguinte" do teclado: prazo vai para condições, e condições fecha o teclado. Nada aqui gera o link. */
+  function aoEnterNoPrazo(e: KeyboardEvent<HTMLInputElement>) {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    campoCondicoes.current?.focus();
+  }
+
+  function aoEnterNasCondicoes(e: KeyboardEvent<HTMLInputElement>) {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    e.currentTarget.blur();
   }
 
   async function copiar(link: string) {
@@ -255,21 +269,33 @@ export function TelaEnviarOrcamento({ dados }: { dados: DadosTelaEnviar }) {
           )}
           <p className="text-sm text-texto-suave">Depois de sair daqui, este link não aparece mais. Para mandar de novo, use Reenviar.</p>
         </div>
-        <div className="flex flex-col gap-1">
-          <button type="button" onClick={concluir} className={`${classesFantasma} self-start`}>
-            Concluir
-          </button>
+        <div className="flex flex-col gap-3">
+          {/* Depois de abrir o WhatsApp, "Concluir" sobe para a barra: é onde a frase manda tocar. */}
+          {!local.abriu && (
+            <button type="button" onClick={concluir} className={`${classesFantasma} self-start`}>
+              Concluir
+            </button>
+          )}
           {/* Link gerado e mandado à pessoa errada: o reflexo é trocar, sem esperar os 15 min. */}
           <button type="button" onClick={() => apagarLinkLocal(osId)} className={`${classesFantasma} self-start`}>
             Trocar por um link novo
           </button>
         </div>
+        {/* Com "Concluir", a barra fica mais alta que a folga do layout: sem isto, cobre o fim da página. */}
+        {local.abriu && <div aria-hidden className="h-28 lg:hidden" />}
         <BarraAcoesOS
           acima={
             !EH_PRODUCAO || local.abriu ? (
               <div className="flex flex-col gap-1">
                 {!EH_PRODUCAO && <p className="text-sm font-bold">Ambiente de teste: confira se o número é o seu.</p>}
-                {local.abriu && <p className="text-base">A mensagem saiu? Toque em Concluir.</p>}
+                {local.abriu && (
+                  <>
+                    <p className="text-base">A mensagem saiu? Toque em Concluir.</p>
+                    <Botao variante="secundario" className="mt-1 h-toque!" onClick={concluir}>
+                      Concluir
+                    </Botao>
+                  </>
+                )}
               </div>
             ) : undefined
           }
@@ -332,25 +358,33 @@ export function TelaEnviarOrcamento({ dados }: { dados: DadosTelaEnviar }) {
           </Link>
         </div>
       )}
+      {/* Prazo é uma escolha só: o chip troca o texto. Condições somam ("Pix, 30 dias"). */}
+      <Campo
+        rotulo="Prazo estimado"
+        opcional
+        acimaDoCampo={<SugestoesTexto rotulo="Prazos prontos" sugestoes={SUGESTOES_PRAZO} semIcone aoEscolher={setPrazo} />}
+        value={prazo}
+        onChange={(e) => setPrazo(e.target.value)}
+        onKeyDown={aoEnterNoPrazo}
+        maxLength={TEXTO_ORCAMENTO_MAX}
+        autoComplete="off"
+        enterKeyHint="next"
+      />
       <div className="flex flex-col gap-2">
-        <SugestoesTexto
-          rotulo="Prazos prontos"
-          sugestoes={SUGESTOES_PRAZO}
-          aoEscolher={(s) => setPrazo((v) => acrescentarTexto(v, s).slice(0, TEXTO_ORCAMENTO_MAX))}
-        />
-        <Campo rotulo="Prazo estimado" opcional value={prazo} onChange={(e) => setPrazo(e.target.value)} maxLength={TEXTO_ORCAMENTO_MAX} autoComplete="off" enterKeyHint="next" />
-      </div>
-      <div className="flex flex-col gap-2">
-        <SugestoesTexto
-          rotulo="Condições prontas"
-          sugestoes={SUGESTOES_CONDICOES}
-          aoEscolher={(s) => setCondicoes((v) => acrescentarTexto(v, s).slice(0, TEXTO_ORCAMENTO_MAX))}
-        />
         <Campo
+          ref={campoCondicoes}
           rotulo="Condições de pagamento"
           opcional
+          acimaDoCampo={
+            <SugestoesTexto
+              rotulo="Condições prontas"
+              sugestoes={SUGESTOES_CONDICOES}
+              aoEscolher={(s) => setCondicoes((v) => acrescentarTexto(v, s).slice(0, TEXTO_ORCAMENTO_MAX))}
+            />
+          }
           value={condicoes}
           onChange={(e) => setCondicoes(e.target.value)}
+          onKeyDown={aoEnterNasCondicoes}
           maxLength={TEXTO_ORCAMENTO_MAX}
           autoComplete="off"
           enterKeyHint="done"

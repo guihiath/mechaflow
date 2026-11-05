@@ -97,9 +97,12 @@ async function cookiesDaSessao(session) {
   return [...jar].map(([k, v]) => `${k}=${v}`).join("; ");
 }
 
+/** `ValorQuebravel` separa o valor no HTML (`<wbr>` e marcadores do React): procurar pelo texto como a tela mostra, tambem nas buscas do que NAO pode aparecer. */
+const semMarcasDeValor = (html) => html.replace(/<wbr\s*\/?>|<!-- -->/g, "");
+
 async function pagina(caminho, cookie) {
   const r = await fetch(`${APP_URL}${caminho}`, { headers: cookie ? { cookie } : {}, redirect: "manual" });
-  return { status: r.status, local: r.headers.get("location"), html: r.status === 200 ? await r.text() : "" };
+  return { status: r.status, local: r.headers.get("location"), html: r.status === 200 ? semMarcasDeValor(await r.text()) : "" };
 }
 
 // ------------------------------------------------------------------ 1. sem login
@@ -2328,7 +2331,7 @@ async function testesFase6Paginas(c) {
   console.log(`\n== Fase 6: pagina publica (${APP_URL}) ==`);
   const abrir = async (token, opcoes = {}) => {
     const r = await fetch(`${APP_URL}/orcamento/${token}`, { redirect: "manual", ...opcoes });
-    return { status: r.status, h: r.headers, html: await r.text() };
+    return { status: r.status, h: r.headers, html: semMarcasDeValor(await r.text()) };
   };
   const P = await osComLink();
   const antes = await estadoDe(P.id);

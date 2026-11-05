@@ -404,6 +404,41 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
         )}
       </>
     ) : null;
+  const linkAntesDaVistoria = status === "orcamento_enviado" || status === "aprovada";
+  // O bloco tem lugar fixo no JSX; só a vistoria troca de posição em volta dele. Assim, ao mudar de
+  // status, ele não é recriado ("Ver respostas e versões" não fecha) e a ordem de leitura e de foco
+  // segue a ordem na tela. A vistoria não guarda nada que valha manter nessa troca.
+  const cartaoVistoria = (
+    <CartaoVistoriaOS
+      osId={id}
+      vistoria={resumoVistoria(vistoriaR.data)}
+      podeFazer={!encerrada}
+      encerrada={encerrada}
+      obrigatoria={obrigatoria}
+      anuladas={idsAnuladas(anuladasR)}
+      botaoNaBarra={dados.vistoriaBloqueia != null && (status === "em_andamento" || status === "pronta")}
+    />
+  );
+  const blocoLinkProva = (
+    <>
+      {cartaoLink && <CartaoLinkOS dados={cartaoLink} />}
+      {provaAtual?.respondido_em && provaAtual.canal && (
+        <ProvaOrcamento
+          osNumero={os.numero ?? 0}
+          canal={provaAtual.canal}
+          nome={provaAtual.respondente_nome}
+          respondidoEm={provaAtual.respondido_em}
+          marcadoPor={provaAtual.registrada_por_nome}
+          versao={provaAtual.versao_numero ?? 0}
+          valorCentavos={provaAtual.valor_centavos ?? 0}
+          codigoConferencia={provaAtual.codigo_conferencia ?? ""}
+          aoVerAprovado={`/os/${id}/orcamento/${provaAtual.versao_numero}`}
+          aoDesfazer={status === "aprovada" ? desfazerAprovacaoOS.bind(null, id) : undefined}
+        />
+      )}
+      {(provas.length > 0 || linhasVersoes.length > 1) && <RespostasVersoes linhas={linhasVersoes} />}
+    </>
+  );
 
   return (
     <PainelOS os={dados}>
@@ -453,33 +488,12 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
             )}
 
             {/* Vistoria de entrada: alto na página, é o que se faz na chegada (DESIGN §12.2 b) */}
-            <CartaoVistoriaOS
-              osId={id}
-              vistoria={resumoVistoria(vistoriaR.data)}
-              podeFazer={!encerrada}
-              encerrada={encerrada}
-              obrigatoria={obrigatoria}
-              anuladas={idsAnuladas(anuladasR)}
-              botaoNaBarra={dados.vistoriaBloqueia != null && (status === "em_andamento" || status === "pronta")}
-            />
+            {!linkAntesDaVistoria && cartaoVistoria}
 
-            {/* Link ou prova: logo depois da vistoria (DESIGN §13.8, §13.11, §13.12). */}
-            {cartaoLink && <CartaoLinkOS dados={cartaoLink} />}
-            {provaAtual?.respondido_em && provaAtual.canal && (
-              <ProvaOrcamento
-                osNumero={os.numero ?? 0}
-                canal={provaAtual.canal}
-                nome={provaAtual.respondente_nome}
-                respondidoEm={provaAtual.respondido_em}
-                marcadoPor={provaAtual.registrada_por_nome}
-                versao={provaAtual.versao_numero ?? 0}
-                valorCentavos={provaAtual.valor_centavos ?? 0}
-                codigoConferencia={provaAtual.codigo_conferencia ?? ""}
-                aoVerAprovado={`/os/${id}/orcamento/${provaAtual.versao_numero}`}
-                aoDesfazer={status === "aprovada" ? desfazerAprovacaoOS.bind(null, id) : undefined}
-              />
-            )}
-            {(provas.length > 0 || linhasVersoes.length > 1) && <RespostasVersoes linhas={linhasVersoes} />}
+            {/* Link ou prova (DESIGN §13.8, §13.11, §13.12). Depois do envio o assunto é a resposta do cliente: vem antes da vistoria (D4 do F6-R1). */}
+            {blocoLinkProva}
+
+            {linkAntesDaVistoria && cartaoVistoria}
 
             {/* Celular: aviso dos itens do mecanico logo abaixo do topo (DESIGN §11.9) */}
             <div className="lg:hidden">

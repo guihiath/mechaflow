@@ -135,7 +135,8 @@ export function ChipPlaca({ placa, grande }: { placa: string; grande?: boolean }
   return (
     <span
       className={`inline-flex items-center rounded-sm border-2 border-[#14161A] bg-white px-2 font-mono uppercase tracking-[0.08em] text-[#14161A] ${
-        grande ? "text-4xl" : "text-2xl"
+        // 24 px em tela comum; só encolhe quando a tela não comportaria (texto a 200%).
+        grande ? "text-4xl" : "text-[min(1.5rem,10vw)] leading-[1.25]"
       }`}
     >
       {placa}

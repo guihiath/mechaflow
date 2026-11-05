@@ -177,10 +177,13 @@ async function Lista({ searchParams }: { searchParams: Promise<Params> }) {
             extras={{ status: statusParam || undefined }}
           />
         </div>
-        <BotaoLink href="/os/nova" className="hidden lg:inline-flex lg:w-auto">
-          <Plus size={24} strokeWidth={2.25} aria-hidden />
-          Abrir OS
-        </BotaoLink>
+        {/* O `inline-flex` do botão vence `hidden` na mesma classe: quem esconde é o invólucro. */}
+        <div className="hidden lg:block">
+          <BotaoLink href="/os/nova" className="lg:w-auto">
+            <Plus size={24} strokeWidth={2.25} aria-hidden />
+            Abrir OS
+          </BotaoLink>
+        </div>
       </div>
 
       <FiltroChips opcoes={chips} ativo={filtro.valor} />
@@ -226,7 +229,7 @@ async function Lista({ searchParams }: { searchParams: Promise<Params> }) {
           </ul>
 
           {/* Desktop: tabela, linha inteira clicavel (link na celula do numero cobre a linha) */}
-          <div className="hidden overflow-hidden rounded-lg border border-borda-sutil bg-superficie lg:block">
+          <div className="hidden overflow-x-auto rounded-lg border border-borda-sutil bg-superficie lg:block">
             <table className="w-full border-collapse text-left">
               <thead className="bg-superficie-2 text-sm font-bold text-texto-suave">
                 <tr>

@@ -20,20 +20,25 @@ type Base = {
   opcional?: boolean;
 };
 
+/** Só em `Campo` e `AreaTexto`: fica entre o rótulo e o campo, para ler rótulo → sugestões → campo. */
+type ComAcimaDoCampo = { acimaDoCampo?: ReactNode };
+
 function Moldura({
   id,
   rotulo,
   ajuda,
   erro,
   opcional,
+  acimaDoCampo,
   children,
-}: Base & { id: string; children: ReactNode }) {
+}: Base & ComAcimaDoCampo & { id: string; children: ReactNode }) {
   return (
     <div className="flex flex-col gap-1.5">
       <label htmlFor={id} className="text-sm font-bold text-texto">
         {rotulo}
         {opcional && <span className="font-medium text-texto-suave"> (opcional)</span>}
       </label>
+      {acimaDoCampo}
       {children}
       {ajuda && !erro && (
         <p id={`${id}-ajuda`} className="text-sm text-texto-suave">
@@ -65,23 +70,23 @@ function useCampo(nome: string | undefined, erroProp?: string, ajuda?: ReactNode
   };
 }
 
-type CampoProps = Base & Omit<ComponentProps<"input">, "id">;
+type CampoProps = Base & ComAcimaDoCampo & Omit<ComponentProps<"input">, "id">;
 
-export function Campo({ rotulo, ajuda, erro: erroProp, opcional, className, ...props }: CampoProps) {
+export function Campo({ rotulo, ajuda, erro: erroProp, opcional, acimaDoCampo, className, ...props }: CampoProps) {
   const { id, erro, aria, borda } = useCampo(props.name, erroProp, ajuda);
   return (
-    <Moldura id={id} rotulo={rotulo} ajuda={ajuda} erro={erro} opcional={opcional}>
+    <Moldura id={id} rotulo={rotulo} ajuda={ajuda} erro={erro} opcional={opcional} acimaDoCampo={acimaDoCampo}>
       <input id={id} {...aria} className={`${classeEntrada} ${borda} ${className ?? ""}`} {...props} />
     </Moldura>
   );
 }
 
-type AreaProps = Base & Omit<ComponentProps<"textarea">, "id">;
+type AreaProps = Base & ComAcimaDoCampo & Omit<ComponentProps<"textarea">, "id">;
 
-export function AreaTexto({ rotulo, ajuda, erro: erroProp, opcional, ...props }: AreaProps) {
+export function AreaTexto({ rotulo, ajuda, erro: erroProp, opcional, acimaDoCampo, ...props }: AreaProps) {
   const { id, erro, aria, borda } = useCampo(props.name, erroProp, ajuda);
   return (
-    <Moldura id={id} rotulo={rotulo} ajuda={ajuda} erro={erro} opcional={opcional}>
+    <Moldura id={id} rotulo={rotulo} ajuda={ajuda} erro={erro} opcional={opcional} acimaDoCampo={acimaDoCampo}>
       <textarea
         id={id}
         rows={3}

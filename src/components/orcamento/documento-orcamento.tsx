@@ -4,7 +4,8 @@ import { AtalhoResposta } from "@/components/orcamento/atalho-resposta";
 import { AvisoPrivacidade } from "@/components/orcamento/aviso-privacidade";
 import { ResumoTotais } from "@/components/os/resumo-totais";
 import { Cartao, ChipPlaca } from "@/components/ui/estados";
-import { formatarCentavos, formatarData, formatarNumeroOS, formatarPlaca } from "@/lib/formato";
+import { ValorQuebravel } from "@/components/ui/valor-quebravel";
+import { formatarData, formatarNumeroOS, formatarPlaca } from "@/lib/formato";
 import {
   formatarQuantidadeUnidade,
   formatarTelefoneOficina,
@@ -44,12 +45,19 @@ function LinhaItem({ item }: { item: DadosItemOrcamento }) {
       <div className="flex flex-wrap items-baseline justify-between gap-x-4">
         <span className="font-mono text-sm text-texto-suave">
           {formatarQuantidadeUnidade(item.quantidade, item.unidade)}
-          {!semPreco && ` × ${formatarCentavos(item.preco_unitario_centavos)}`}
+          {!semPreco && (
+            <>
+              {" × "}
+              <ValorQuebravel centavos={item.preco_unitario_centavos} />
+            </>
+          )}
         </span>
         {semPreco ? (
           <span className="ml-auto text-base font-bold whitespace-nowrap text-alerta-texto">Sem preço</span>
         ) : (
-          <span className="ml-auto font-mono text-base font-semibold whitespace-nowrap">{formatarCentavos(item.subtotal_centavos)}</span>
+          <span className="ml-auto text-right font-mono text-base font-semibold">
+            <ValorQuebravel centavos={item.subtotal_centavos} />
+          </span>
         )}
       </div>
     </li>
@@ -80,7 +88,9 @@ function GrupoItens({
       </ul>
       <p className="flex flex-wrap items-baseline justify-between gap-x-4 text-base font-bold">
         <span>{rotuloSubtotal}</span>
-        <span className="ml-auto font-mono font-semibold whitespace-nowrap">{formatarCentavos(subtotal)}</span>
+        <span className="ml-auto text-right font-mono font-semibold">
+          <ValorQuebravel centavos={subtotal} />
+        </span>
       </p>
     </section>
   );
@@ -118,7 +128,9 @@ export function CorpoDocumento({
 
       <section aria-label="Total do orçamento" className="flex flex-col gap-0.5">
         <p className="text-base font-bold">Total</p>
-        <p className="font-mono text-3xl font-semibold break-words">{formatarCentavos(documento.total_centavos)}</p>
+        <p className="font-mono text-3xl font-semibold">
+          <ValorQuebravel centavos={documento.total_centavos} />
+        </p>
         {validade && <p className="text-base text-texto-suave">{validade}</p>}
       </section>
 

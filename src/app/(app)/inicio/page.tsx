@@ -47,7 +47,7 @@ async function Painel() {
   const contar = (...st: string[]) => (abertas.data ?? []).filter((o) => st.includes(o.status)).length;
   const atalhosOS = [
     { href: "/os?status=prontas", titulo: "Prontas para entregar", valor: contar("pronta"), icone: CircleCheckBig },
-    { href: "/os?status=orcamento", titulo: "Esperando o cliente", valor: contar("aguardando_orcamento", "orcamento_enviado"), icone: Clock },
+    { href: "/os?status=orcamento", titulo: "Em orçamento", valor: contar("aguardando_orcamento", "orcamento_enviado"), icone: Clock },
     { href: "/os?status=aprovadas", titulo: "Liberadas para começar", valor: contar("aprovada"), icone: ThumbsUp },
     { href: "/os?status=em_andamento", titulo: "Em andamento", valor: contar("em_andamento"), icone: Wrench },
   ];

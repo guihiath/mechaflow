@@ -18,6 +18,9 @@ const variantes: Record<VarianteBotao, string> = {
   perigo: "bg-erro text-white active:opacity-90",
 };
 
+/** Botão de 56 px que cresce em vez de cortar com texto a 200% (DESIGN §13.17). */
+export const ALTURA_FLEXIVEL = "h-auto! min-h-toque-principal py-2";
+
 export function classesBotao(variante: VarianteBotao = "primario", extra?: string) {
   return [base, variantes[variante], extra].filter(Boolean).join(" ");
 }

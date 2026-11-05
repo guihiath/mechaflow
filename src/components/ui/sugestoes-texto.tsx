@@ -20,18 +20,21 @@ type Alvo = HTMLTextAreaElement | HTMLInputElement;
  *    controlado ou nao (dispara o evento `input`, entao o onChange do React roda).
  *  - `aoEscolher`: o pai cuida do valor (use `acrescentarTexto`).
  * Nao foca o campo depois (no celular o teclado subiria e cobriria a tela).
+ * `semIcone`: o pai troca o valor em vez de somar (o "+" prometeria somar).
  */
 export function SugestoesTexto({
   sugestoes,
   alvo,
   aoEscolher,
   rotulo = "Sugestões",
+  semIcone = false,
 }: {
   sugestoes: readonly string[];
   alvo?: RefObject<Alvo | null>;
   aoEscolher?: (sugestao: string) => void;
   /** Nome do grupo para leitor de tela. */
   rotulo?: string;
+  semIcone?: boolean;
 }) {
   function escolher(sugestao: string) {
     if (aoEscolher) {
@@ -56,7 +59,7 @@ export function SugestoesTexto({
           onClick={() => escolher(s)}
           className="inline-flex min-h-toque items-center gap-1 rounded-md border-2 border-borda bg-superficie px-3 text-base font-bold text-texto transition-colors active:bg-superficie-2"
         >
-          <Plus size={18} strokeWidth={2.5} aria-hidden className="shrink-0 text-texto-suave" />
+          {!semIcone && <Plus size={18} strokeWidth={2.5} aria-hidden className="shrink-0 text-texto-suave" />}
           {s}
         </button>
       ))}
