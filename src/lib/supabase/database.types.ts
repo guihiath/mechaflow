@@ -1,6 +1,7 @@
 // Tipos do banco no formato do `supabase gen types typescript`.
 // Escrito a mao a partir de supabase/migrations/20261028000001..4 (Fase 1).
 // Fase 4 (vistoria): migracoes 20261101000001..4.
+// Fase 7 (painel, historico, PDF): migracoes 20261104000001..4; contratos JSON no fim do arquivo.
 // Para regenerar: npx supabase gen types typescript --project-id qjzhzyzmifashtvffxdx > src/lib/supabase/database.types.ts
 
 export type Json =
@@ -1812,6 +1813,63 @@ export type Database = {
       }
     }
     Functions: {
+      // Fase 7 (docs/ARQUITETURA.md, 14). Oficina sempre da sessao; nenhuma recebe oficina.
+      painel_mes: {
+        Args: { p_ano: number; p_mes: number }
+        Returns: Json // PainelMes (so o dono)
+      }
+      painel_lista_os: {
+        Args: { p_ano: number; p_mes: number; p_recorte: string; p_chave?: string | null }
+        Returns: {
+          os_id: string
+          numero: number
+          placa: string
+          cliente_nome: string | null
+          entregue_em: string | null
+          pago_em: string | null
+          forma_pagamento: Database["public"]["Enums"]["forma_pagamento"] | null
+          valor_centavos: number
+          detalhe: string | null // fora_catalogo: descricoes digitadas
+        }[]
+      }
+      painel_hoje: {
+        Args: Record<PropertyKey, never>
+        Returns: Json // PainelHoje (so o dono)
+      }
+      contas_a_receber: {
+        Args: Record<PropertyKey, never>
+        Returns: {
+          os_id: string
+          numero: number
+          cliente_id: string
+          cliente_nome: string
+          cliente_telefone: string | null
+          placa: string
+          entregue_em: string
+          dias: number
+          forma_pagamento: Database["public"]["Enums"]["forma_pagamento"] | null
+          total_centavos: number
+          cliente_total_centavos: number
+          cliente_qtd_os: number
+        }[]
+      }
+      historico_placa: {
+        Args: {
+          p_placa: string
+          p_limite?: number
+          p_antes_criado_em?: string | null
+          p_antes_id?: string | null
+        }
+        Returns: Json // HistoricoPlaca (chaves por papel)
+      }
+      historico_os: {
+        Args: { p_os_id: string }
+        Returns: Json // HistoricoOS (chaves por papel)
+      }
+      dados_pdf_os: {
+        Args: { p_os_id: string }
+        Returns: Json // DadosPdfOS (dono e atendente)
+      }
       alterar_orcamento: { Args: { p_os_id: string }; Returns: undefined }
       cancelar_link_orcamento: { Args: { p_os_id: string }; Returns: boolean }
       conferir_orcamento: { Args: { p_versao_id: string }; Returns: boolean }
@@ -2136,6 +2194,7 @@ export type Database = {
           p_forma_pagamento: Database["public"]["Enums"]["forma_pagamento"]
           p_os_id: string
           p_pago_em?: string | null
+          p_so_se_a_receber?: boolean // Fase 7: true recusa OS ja paga (pagamento_ja_registrado)
         }
         Returns: undefined
       }
@@ -2473,3 +2532,178 @@ export type RespostaOrcamentoPublica =
   | { situacao: "aprovado" | "recusado"; aplicada: boolean; resposta: RespostaPublica }
 
 export type PreviaOrcamento = { documento: DocumentoOrcamento; expira_em: string }
+
+// Fase 7: contratos das RPCs que devolvem JSON (docs/ARQUITETURA.md, 14.5 a 14.8).
+// Dinheiro sempre em centavos inteiros. Chave marcada "balcao" so vem para dono e
+// atendente; "dono" so para o dono. Para o mecanico a chave NAO existe (nem null).
+export type RecortePainel = "entregues" | "recebido" | "servico" | "fora_catalogo" | "mecanico" | "sem_mecanico"
+
+export type PainelMes = {
+  ano: number
+  mes: number
+  fuso: string
+  inicio: string // inclusive, inicio do mes no fuso da oficina
+  fim: string // exclusive
+  entregues: { qtd_os: number; total_centavos: number; servicos_centavos: number; pecas_centavos: number }
+  recebido: { qtd_os: number; total_centavos: number }
+  servicos: { servico_id: string | null; nome: string; qtd_os: number }[] // null = "Fora do catálogo", sempre por ultimo
+  produtividade: { mecanico_id: string | null; nome: string | null; qtd_os: number; servicos_centavos: number }[] // null = sem mecanico, por ultimo
+}
+
+export type PainelHoje = {
+  hoje: string // AAAA-MM-DD no fuso da oficina
+  ano: number
+  mes: number
+  fuso: string
+  primeiro_registro_em: string | null // menor entre entregas e pagamentos; null = nunca entregou ("primeira vez")
+  a_receber: { total_centavos: number; qtd_os: number; qtd_clientes: number; mais_antiga_em: string | null }
+  abertas: {
+    total: number
+    aguardando_orcamento: number
+    orcamento_enviado: number
+    aprovada: number
+    em_andamento: number
+    pronta: number
+  }
+}
+
+export type HistoricoPlacaOS = {
+  id: string
+  numero: number
+  status: Database["public"]["Enums"]["status_os"]
+  criado_em: string
+  entregue_em: string | null
+  cancelado_em: string | null
+  km: number | null
+  horimetro: number | null
+  sintoma_relatado: string | null
+  codigo_falha: string | null
+  causa_encontrada: string | null
+  solucao_aplicada: string | null
+  abre_detalhe: boolean // false = o mecanico ve so o historico, sem abrir /os/[id]
+  qtd_itens: number
+  qtd_fotos: number
+  qtd_vistorias: number
+  // balcao
+  mecanico_nome?: string | null
+  motivo_cancelamento?: string | null // com o texto livre
+  cliente_nome?: string | null
+  observacoes?: string | null
+  total_centavos?: number
+  forma_pagamento?: Database["public"]["Enums"]["forma_pagamento"] | null
+  pago_em?: string | null
+  // dono
+  custo_total_centavos?: number
+}
+
+export type HistoricoPlaca = {
+  veiculo: {
+    id: string
+    placa: string
+    tipo: Database["public"]["Enums"]["tipo_veiculo"] | null
+    marca: string | null
+    modelo: string | null
+    ano_modelo: number | null
+    km_atual: number | null
+    horimetro_atual: number | null
+    cliente_id?: string // balcao
+    cliente_nome?: string | null // balcao
+  } | null
+  resumo: { qtd_os: number; qtd_vistorias: number; primeira_os_em: string | null } | null // do veiculo inteiro
+  os: HistoricoPlacaOS[]
+  proximo: { antes_criado_em: string; antes_id: string } | null
+}
+
+export type HistoricoOS = {
+  os_id: string
+  itens: {
+    id: string
+    tipo: Database["public"]["Enums"]["tipo_item_os"]
+    descricao: string
+    quantidade: number
+    unidade: string
+    preco_unitario_centavos?: number | null // balcao
+    subtotal_centavos?: number | null // balcao
+    custo_unitario_centavos?: number | null // dono
+  }[]
+  fotos: {
+    id: string
+    categoria: Database["public"]["Enums"]["categoria_foto"]
+    legenda: string | null
+    largura: number
+    altura: number
+    caminho: string
+    caminho_miniatura: string
+    criado_em: string
+  }[]
+  vistorias: {
+    id: string
+    tipo: Database["public"]["Enums"]["tipo_vistoria"]
+    status: "concluida" | "anulada"
+    concluida_em: string | null
+    anulada_em: string | null
+    km: number | null
+    horimetro: number | null
+    combustivel: Database["public"]["Enums"]["nivel_combustivel"] | null
+    objetos: string[] | null
+    sem_avarias: boolean
+    observacoes: string | null // observacoes gerais da vistoria (o mecanico ja via na Fase 4)
+    itens: { descricao: string; situacao: Database["public"]["Enums"]["situacao_item_vistoria"] | null; observacao: string | null }[]
+    avarias: { id: string; lado: Database["public"]["Enums"]["lado_avaria"]; descricao: string | null }[]
+    fotos: {
+      id: string
+      tipo: Database["public"]["Enums"]["tipo_foto_vistoria"]
+      avaria_id: string | null
+      complemento_id: string | null // null = foto original
+      legenda: string | null
+      largura: number
+      altura: number
+      caminho: string
+      caminho_miniatura: string
+    }[]
+    complementos: { id: string; texto: string | null; criado_em: string; criado_por_nome?: string | null /* balcao */ }[]
+    // balcao (o mecanico nao recebe a chave: nem assinatura, nem nomes, nem o motivo da anulacao)
+    concluida_por_nome?: string | null
+    motivo_anulacao?: string | null
+    anulada_por_nome?: string | null
+    assinado_por_nome?: string | null
+    sem_assinatura_motivo?: Database["public"]["Enums"]["motivo_sem_assinatura"] | null
+    assinatura_caminho?: string | null
+  }[]
+}
+
+export type DadosPdfOS = {
+  tipo_documento: "ordem_servico" | "resumo_final"
+  oficina_nome: string
+  oficina_telefone: string | null
+  oficina_cnpj: string | null // so CNPJ (14 digitos); CPF da oficina nunca vem
+  fuso: string
+  os_numero: number
+  status: Database["public"]["Enums"]["status_os"]
+  criado_em: string
+  entregue_em: string | null
+  gerado_em: string
+  cliente_nome: string | null
+  veiculo_placa: string
+  veiculo_marca: string | null
+  veiculo_modelo: string | null
+  veiculo_ano: number | null
+  km: number | null
+  causa_encontrada: string | null
+  solucao_aplicada: string | null
+  itens: {
+    tipo: Database["public"]["Enums"]["tipo_item_os"]
+    descricao: string
+    quantidade: number
+    unidade: string
+    preco_unitario_centavos: number | null
+    subtotal_centavos: number | null
+  }[]
+  subtotal_servicos_centavos: number
+  subtotal_pecas_centavos: number
+  total_centavos: number
+  itens_sem_preco: number
+  forma_pagamento: Database["public"]["Enums"]["forma_pagamento"] | null
+  situacao_pagamento: "pago" | "a_receber" | null // null antes da entrega
+  pago_em: string | null
+}

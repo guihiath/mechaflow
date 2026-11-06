@@ -795,13 +795,29 @@ begin
   assert public.zz_afetadas($q$ delete from storage.objects where bucket_id = 'vistorias' $q$) = 0, 'DONO B APAGOU ARQUIVO DA A';
 end $$;
 
--- a5 (mecanico sem acesso a OS): nada no Storage
+-- a5 (mecanico sem acesso a OS). Fase 7 (PLANO 20.6-7, ARQUITETURA 14.4): no Storage
+-- ele passa a LER as fotos ENVIADAS (originais e de complemento) de vistoria concluida
+-- ou anulada de qualquer OS da oficina. Assinatura e rascunho: continuam fora.
 select set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000004a5","role":"authenticated"}', true);
 do $$
 begin
-  assert (select count(*) from storage.objects where bucket_id = 'vistorias') = 0, 'MECANICO SEM ACESSO LISTA ARQUIVOS DA VISTORIA';
   assert not exists (select 1 from storage.objects where name = current_setting('teste.ass')), 'MECANICO SEM ACESSO ABRE A ASSINATURA';
+  perform set_config('teste.a5_vistoria_arquivos',
+    coalesce((select string_agg(name, '|') from storage.objects where bucket_id = 'vistorias'), ''), true);
 end $$;
+reset role;
+do $$
+declare v_nome text;
+begin
+  assert current_setting('teste.a5_vistoria_arquivos') <> '', 'Fase 7: mecanico deveria ler as fotos de vistoria concluida';
+  foreach v_nome in array string_to_array(current_setting('teste.a5_vistoria_arquivos'), '|') loop
+    assert exists (select 1 from public.vistoria_fotos f join public.vistorias v on v.id = f.vistoria_id
+                    where (f.caminho = v_nome or f.caminho_miniatura = v_nome)
+                      and f.enviada_em is not null and v.status <> 'rascunho'),
+      'MECANICO SEM ACESSO LE ARQUIVO FORA DA REGRA DA FASE 7: ' || v_nome;
+  end loop;
+end $$;
+set local role authenticated;
 
 -- =============================================================================
 -- 10b) OBJETOS NA CONCLUSAO: NULL e '{}' ficam como estao, o hash distingue e confere

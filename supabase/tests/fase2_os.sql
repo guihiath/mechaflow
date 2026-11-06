@@ -261,10 +261,10 @@ begin
   assert (select orcamento_aprovacao_canal from public.os_comercial where os_id = os1) = 'whatsapp', 'canal nao gravado';
 
   -- desfazer aprovacao e aprovar de novo
-  perform public.mudar_status_os(os1, 'aprovada', 'orcamento_enviado');
+  perform public.mudar_status_os(os1, 'aprovada', 'aguardando_orcamento');
   assert (select valor_aprovado_centavos from public.os_comercial where os_id = os1) is null, 'desfazer nao limpou a aprovacao';
   assert (select orcamento_aprovado_em from public.ordens_servico where id = os1) is null, 'desfazer nao limpou aprovado_em';
-  perform public.registrar_resposta_orcamento(os1, 'orcamento_enviado', true, 'telefone');
+  perform public.registrar_resposta_orcamento(os1, 'aguardando_orcamento', true, 'telefone');
 
   -- dono tambem pode ser o mecanico da OS
   perform public.atribuir_mecanico(current_setting('teste.os4')::uuid, '00000000-0000-4000-8000-0000000002a1');

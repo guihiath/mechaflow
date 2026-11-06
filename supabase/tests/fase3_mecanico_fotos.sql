@@ -573,15 +573,17 @@ begin
   assert (select count(*) from storage.objects where bucket_id = 'os-fotos') = 4, 'atendente deveria ver os 4 arquivos';
 end $$;
 
--- a5: mecanico que NAO ve a OS D: nada, nem com o caminho
+-- a5: mecanico que NAO ve a OS D: tabela e view continuam vazias. Fase 7 (PLANO
+-- 20.6-7, ARQUITETURA 14.4): no Storage ele passa a LER as fotos ENVIADAS de qualquer
+-- OS da oficina (historico por placa); subir e apagar continuam proibidos.
 select set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000003a5","role":"authenticated"}', true);
 do $$
 begin
   assert (select count(*) from public.os_fotos) = 0, 'MECANICO VE FOTO DE OS QUE NAO E DELE (tabela)';
   assert (select count(*) from public.vw_os_fotos) = 0, 'MECANICO VE FOTO DE OS QUE NAO E DELE (view)';
-  assert (select count(*) from storage.objects where bucket_id = 'os-fotos') = 0, 'MECANICO LISTA FOTO DE OS QUE NAO E DELE';
-  assert not exists (select 1 from storage.objects where bucket_id = 'os-fotos' and name = current_setting('teste.f1_caminho')),
-    'MECANICO ABRE FOTO DE OS QUE NAO E DELE COM O CAMINHO';
+  assert (select count(*) from storage.objects where bucket_id = 'os-fotos') = 4, 'Fase 7: mecanico deveria ler os 4 arquivos das fotos enviadas';
+  assert exists (select 1 from storage.objects where bucket_id = 'os-fotos' and name = current_setting('teste.f1_caminho')),
+    'Fase 7: mecanico deveria abrir a foto enviada com o caminho';
   assert public.zz_erro(format($q$ select public.registrar_foto(gen_random_uuid(), %L, 1600, 1200, 1000, 100) $q$,
                                current_setting('teste.osD'))) = 'os_nao_encontrada', 'mecanico enviou foto em OS que nao ve';
   assert public.zz_estado(format($q$ insert into storage.objects (bucket_id, name) values ('os-fotos', %L) $q$,

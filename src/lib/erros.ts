@@ -100,6 +100,11 @@ const MENSAGENS: Record<string, string> = {
   cliente_ja_respondeu: "O cliente acabou de responder pelo link. A tela foi atualizada.",
   texto_orcamento_grande: "Prazo e condições têm no máximo 120 letras cada.",
   versao_nao_encontrada: "Versão do orçamento não encontrada.",
+  // Fase 7 — painel, histórico e PDF (docs/ARQUITETURA.md, 14.10)
+  mes_invalido: "Mês inválido. Escolha outro mês.",
+  recorte_invalido: "Não foi possível abrir esta lista. Volte ao painel e toque de novo.",
+  os_cancelada_sem_pdf: "OS cancelada não gera PDF para o cliente.",
+  pagamento_ja_registrado: "O pagamento desta OS já foi registrado por outra pessoa. A lista foi atualizada.",
 };
 
 /** Mensagens do Supabase Auth (signUp / signIn), que vêm em inglês. */

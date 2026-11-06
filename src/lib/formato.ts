@@ -1,4 +1,4 @@
-import type { Database, SituacaoLinkOrcamento } from "@/lib/supabase/database.types";
+import type { DadosPdfOS, Database, RecortePainel, SituacaoLinkOrcamento } from "@/lib/supabase/database.types";
 
 /**
  * Formatacao para a TELA. No banco e no codigo: centavos (inteiro) e UTC.
@@ -408,4 +408,51 @@ export function formatarMotivoAnulacao(motivo: string): string {
   if (!INICIO_MOTIVO_OS_ERRADA.test(t)) return `${t}.`;
   const detalhe = t.replace(INICIO_MOTIVO_OS_ERRADA, "");
   return detalhe ? `feita na OS errada (${detalhe}).` : "feita na OS errada.";
+}
+
+// ---------------------------------------------------------------- Fase 7 (painel, histórico e PDF)
+// Vocabulário do DESIGN §14.12; contratos em ARQUITETURA 14.5 a 14.8.
+
+/** `p_recorte` de `painel_lista_os`. */
+export const RECORTES_PAINEL = ["entregues", "recebido", "servico", "fora_catalogo", "mecanico", "sem_mecanico"] as const satisfies readonly RecortePainel[];
+
+/**
+ * Título da lista do painel (DESIGN §14.7). `servico` e `mecanico` usam o nome do serviço ou do
+ * mecânico; o texto aqui é só a reserva, se o nome não vier.
+ */
+export const ROTULO_RECORTE_PAINEL: Record<RecortePainel, string> = {
+  entregues: "Serviços entregues",
+  recebido: "Dinheiro recebido",
+  servico: "Serviço",
+  fora_catalogo: "Fora do catálogo",
+  mecanico: "Mecânico",
+  sem_mecanico: "Sem mecânico",
+};
+
+/** Número do painel (DESIGN §14.12): "Serviços entregues no mês", "Dinheiro recebido no mês". */
+export const ROTULO_NUMERO_PAINEL = {
+  entregues: "Serviços entregues no mês",
+  recebido: "Dinheiro recebido no mês",
+  a_receber: "A receber",
+} as const;
+
+/** `situacao_pagamento` de `dados_pdf_os` (null antes da entrega). */
+export const ROTULO_SITUACAO_PAGAMENTO: Record<NonNullable<DadosPdfOS["situacao_pagamento"]>, string> = {
+  pago: "Pago",
+  a_receber: "A receber",
+};
+
+/** `tipo_documento` de `dados_pdf_os` (DESIGN §14.10: um documento, dois títulos). */
+export const ROTULO_TIPO_DOCUMENTO_PDF: Record<DadosPdfOS["tipo_documento"], string> = {
+  ordem_servico: "Ordem de serviço",
+  resumo_final: "Resumo final",
+};
+
+/**
+ * Evento `preco` do `os_historico` (ARQUITETURA 14.8): o banco não guarda valor nem item, e agrupa
+ * por pessoa a cada 5 min. Sem nome (escrita do sistema): texto neutro. Só dono e atendente leem.
+ */
+export function textoEventoPreco(porNome: string | null | undefined): string {
+  const nome = porNome?.trim();
+  return nome ? `${nome} definiu preços` : "Preços definidos";
 }

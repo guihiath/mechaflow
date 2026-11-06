@@ -979,16 +979,19 @@ do $$ begin
   assert (select count(*) from public.orcamento_versoes where os_id = current_setting('teste.os8')::uuid) = 1, 'cancelar apagou a versao';
 end $$;
 
--- Desfazer de aprovada para orcamento_enviado (app antigo) tambem nao devolve o link
+-- Desfazer de aprovada: o caminho antigo (-> orcamento_enviado) foi fechado na Fase 7
+-- (migracao 20261104000004); o desfazer vai sempre para aguardando_orcamento.
 select set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000006a1","role":"authenticated"}', true);
 set local role authenticated;
 do $$
 declare os uuid := current_setting('teste.os3')::uuid;
 begin
-  perform public.mudar_status_os(os, 'aprovada', 'orcamento_enviado');
-  assert (select desfeita_em from public.orcamento_respostas where os_id = os) is not null, 'desfazer para enviado: prova desfeita';
-  assert (select revogado_motivo from public.orcamento_links where os_id = os) = 'desfeito', 'desfazer para enviado: link';
-  assert not coalesce((select orcamento_itens_travados from public.vw_os where id = os), false), 'desfazer para enviado: nao trava';
+  assert public.zz_erro(format($q$ select public.mudar_status_os(%L, 'aprovada', 'orcamento_enviado') $q$, os)) = 'transicao_invalida',
+    'aprovada -> orcamento_enviado deveria estar fechado (Fase 7)';
+  perform public.mudar_status_os(os, 'aprovada', 'aguardando_orcamento');
+  assert (select desfeita_em from public.orcamento_respostas where os_id = os) is not null, 'desfazer: prova desfeita';
+  assert (select revogado_motivo from public.orcamento_links where os_id = os) = 'desfeito', 'desfazer: link';
+  assert not coalesce((select orcamento_itens_travados from public.vw_os where id = os), false), 'desfazer: nao trava';
   -- sai dali por um novo envio
   perform public.enviar_orcamento(os, gen_random_uuid(), 44925);
   assert (select count(*) from public.orcamento_versoes where os_id = os) = 2, 'novo envio: versao 2';
