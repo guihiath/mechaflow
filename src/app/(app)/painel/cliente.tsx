@@ -2,7 +2,9 @@
 
 import { useSyncExternalStore } from "react";
 import { FaixaSemInternet } from "@/components/painel/cartao-numero";
+import { ListaServicos, type ServicoRanking } from "@/components/painel/lista-servicos";
 import { SeletorMes } from "@/components/painel/seletor-mes";
+import { hrefListaPainel } from "@/lib/origem-os";
 import type { Mes } from "@/lib/painel";
 
 /**
@@ -12,6 +14,21 @@ import type { Mes } from "@/lib/painel";
  */
 export function SeletorMesPainel({ mes, hoje, primeiroMes, mesAtual }: { mes: Mes; hoje: string; primeiroMes: Mes; mesAtual: Mes }) {
   return <SeletorMes mes={mes} hoje={hoje} primeiroMes={primeiroMes} hrefDoMes={(m) => (m === mesAtual ? "/painel" : `/painel?mes=${m}`)} />;
+}
+
+/**
+ * "Serviços mais feitos" (F7-B6, DESIGN §14.8). `ListaServicos` é de navegador (expande no
+ * lugar) e recebe funções de link, que o servidor não pode passar: elas moram aqui.
+ */
+export function ServicosPainel({ mes, mesNaUrl, servicos }: { mes: Mes; mesNaUrl: Mes | null; servicos: ServicoRanking[] }) {
+  return (
+    <ListaServicos
+      mes={mes}
+      servicos={servicos}
+      hrefServico={(id) => hrefListaPainel({ ver: "servico", chave: id, mes: mesNaUrl })}
+      hrefForaCatalogo={hrefListaPainel({ ver: "fora_catalogo", mes: mesNaUrl })}
+    />
+  );
 }
 
 function assinar(aviso: () => void) {

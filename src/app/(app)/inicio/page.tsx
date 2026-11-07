@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
-import { BookOpen, ChevronRight, CircleCheckBig, Clock, Contact, PackageSearch, Plus, Truck, Users, Wallet, Wrench, ThumbsUp } from "lucide-react";
+import { BookOpen, ChevronRight, Contact, PackageSearch, Plus, Truck, Users, Wallet } from "lucide-react";
 import { Cabecalho } from "@/components/layout/cabecalho";
+import { AtalhosOSAbertas } from "@/components/os/atalhos-os-abertas";
 import { CartaoOSSemPreco } from "@/components/os/cartao-os-sem-preco";
 import { CartaoRespondidos } from "@/components/os/cartao-respondidos";
 import { BotaoLink } from "@/components/ui/botao";
@@ -44,13 +45,14 @@ async function Painel() {
     // Respostas pelo link que esperam o balcão (DESIGN §13.13)
     supabase.from("vw_os").select("numero, status").eq("orcamento_respondido", true).order("orcamento_respondido_em").limit(500),
   ]);
-  const contar = (...st: string[]) => (abertas.data ?? []).filter((o) => st.includes(o.status)).length;
-  const atalhosOS = [
-    { href: "/os?status=prontas", titulo: "Prontas para entregar", valor: contar("pronta"), icone: CircleCheckBig },
-    { href: "/os?status=orcamento", titulo: "Em orçamento", valor: contar("aguardando_orcamento", "orcamento_enviado"), icone: Clock },
-    { href: "/os?status=aprovadas", titulo: "Liberadas para começar", valor: contar("aprovada"), icone: ThumbsUp },
-    { href: "/os?status=em_andamento", titulo: "Em andamento", valor: contar("em_andamento"), icone: Wrench },
-  ];
+  const contar = (st: string) => (abertas.data ?? []).filter((o) => o.status === st).length;
+  const contagemAbertas = {
+    pronta: contar("pronta"),
+    aguardando_orcamento: contar("aguardando_orcamento"),
+    orcamento_enviado: contar("orcamento_enviado"),
+    aprovada: contar("aprovada"),
+    em_andamento: contar("em_andamento"),
+  };
 
   const n = (r: { count: number | null }) => r.count ?? 0;
   const qtdPendentes = n(pendentes);
@@ -78,20 +80,7 @@ async function Painel() {
 
       <CartaoOSSemPreco quantidade={semPreco.count ?? 0} />
 
-      <ul className="flex flex-col gap-3 lg:grid lg:grid-cols-2">
-        {atalhosOS.map(({ href, titulo, valor, icone: Icone }) => (
-          <li key={href}>
-            <Cartao href={href} className="h-full">
-              <div className="flex min-h-12 items-center gap-3">
-                <Icone size={26} strokeWidth={2.25} aria-hidden className="shrink-0 text-texto-suave" />
-                <p className="text-lg font-bold">
-                  {titulo} ({valor})
-                </p>
-              </div>
-            </Cartao>
-          </li>
-        ))}
-      </ul>
+      <AtalhosOSAbertas contagem={contagemAbertas} />
 
       {/* DESIGN §14.1: entrada do painel, sem valor no cartão. */}
       <Cartao href="/painel">

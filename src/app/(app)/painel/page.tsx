@@ -3,10 +3,13 @@ import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { Wallet } from "lucide-react";
 import { Cabecalho } from "@/components/layout/cabecalho";
+import { AtalhosOSAbertas } from "@/components/os/atalhos-os-abertas";
 import { CartaoContagem, CartaoNumero, NumerosCarregando } from "@/components/painel/cartao-numero";
+import { ListaMecanicos } from "@/components/painel/lista-mecanicos";
 import { CaixaErro, EstadoVazio, Pagina } from "@/components/ui/estados";
 import { exigirContexto } from "@/lib/dal";
 import { param } from "@/lib/formato";
+import { hrefListaPainel } from "@/lib/origem-os";
 import {
   diaEmSaoPaulo,
   diasDesde,
@@ -24,7 +27,8 @@ import {
 } from "@/lib/painel";
 import type { PainelHoje, PainelMes } from "@/lib/supabase/database.types";
 import { createClient } from "@/lib/supabase/server";
-import { AvisoSemInternet, SeletorMesPainel } from "./cliente";
+import { mecanicosDoPainel, servicosDoPainel } from "@/lib/painel-dados";
+import { AvisoSemInternet, SeletorMesPainel, ServicosPainel } from "./cliente";
 
 export const metadata: Metadata = { title: "Painel do mês" };
 
@@ -38,7 +42,7 @@ type Resposta<T> = { data: T | null; error: { message: string; code?: string } |
  * - Dados sempre frescos, por sessão: o cliente do Supabase usa os cookies do usuário (RLS), nada
  *   aqui tem `"use cache"`, e a oficina vem da sessão no banco.
  * - Mês padrão: `mesAtualEmSaoPaulo(agora)` (`lib/painel.ts`), nunca a data do servidor em UTC.
- * - Sem serviços mais feitos, produtividade e OS abertas por status (F7-B6).
+ * - F7-B6: serviços mais feitos e produtividade (mesma leitura do mês) e OS abertas por status.
  */
 export default function PainelPage({ searchParams }: PageProps<"/painel">) {
   return (
@@ -121,6 +125,21 @@ async function Painel({ searchParams }: { searchParams: Promise<Params> }) {
         </Suspense>
       </section>
 
+      {/* F7-B6: os mesmos atalhos do /inicio, com a contagem de `painel_hoje` (não muda com o mês). */}
+      <section aria-labelledby="painel-abertas" className="flex flex-col gap-3">
+        <div>
+          <h2 id="painel-abertas" className="text-2xl">
+            OS abertas agora
+          </h2>
+          <p className="text-sm text-texto-suave">Hoje, não muda com o mês.</p>
+        </div>
+        {painelHoje ? (
+          <AtalhosOSAbertas contagem={painelHoje.abertas} />
+        ) : (
+          <CaixaErro titulo="Não foi possível carregar as OS abertas." tentarDeNovo="/painel" />
+        )}
+      </section>
+
       <p className="text-xs text-texto-suave">Números de {carimbo(agora)}.</p>
     </>
   );
@@ -195,7 +214,7 @@ async function BlocoMes({
     );
   }
 
-  const sufixo = passado ? `&mes=${mes}` : "";
+  const mesNaUrl = passado ? mes : null;
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-3 lg:grid lg:grid-cols-2">
@@ -205,7 +224,7 @@ async function BlocoMes({
           quantidadeOS={entregues.qtd_os}
           frases={[`${textoOS(entregues.qtd_os)}, somando serviços e peças.`, "Conta pela data da entrega."]}
           fraseZero={TEXTO_PAINEL.entreguesZero}
-          href={`/painel/os?ver=entregues${sufixo}`}
+          href={hrefListaPainel({ ver: "entregues", mes: mesNaUrl })}
         />
         <CartaoNumero
           rotulo={TEXTO_PAINEL.recebido}
@@ -213,10 +232,22 @@ async function BlocoMes({
           quantidadeOS={recebido.qtd_os}
           frases={[`${textoOS(recebido.qtd_os)} ${recebido.qtd_os === 1 ? "paga" : "pagas"} no mês.`, "Conta pela data do pagamento."]}
           fraseZero={TEXTO_PAINEL.recebidoZero}
-          href={`/painel/os?ver=recebido${sufixo}`}
+          href={hrefListaPainel({ ver: "recebido", mes: mesNaUrl })}
         />
       </div>
       <p className="text-sm text-texto-suave">{TEXTO_PAINEL.naoPrecisamBater}</p>
+
+      {/* F7-B6: mesmas OS de "Serviços entregues no mês" (ARQUITETURA 14.2), da mesma leitura. */}
+      <div className="mt-3 flex flex-col gap-6 lg:grid lg:grid-cols-2 lg:items-start">
+        <ServicosPainel mes={mes} mesNaUrl={mesNaUrl} servicos={servicosDoPainel(data)} />
+        <ListaMecanicos
+          mes={mes}
+          mecanicos={mecanicosDoPainel(data)}
+          hrefMecanico={(id) => hrefListaPainel({ ver: "mecanico", chave: id, mes: mesNaUrl })}
+          hrefSemMecanico={hrefListaPainel({ ver: "sem_mecanico", mes: mesNaUrl })}
+        />
+      </div>
+
       {passado && <p className="text-sm text-texto-suave">{TEXTO_PAINEL.mesPassadoPodeMudar}</p>}
     </div>
   );

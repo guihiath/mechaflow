@@ -34,6 +34,7 @@ import {
   soDigitos,
 } from "@/lib/formato";
 import { podeEnviarFoto } from "@/lib/fotos/regras";
+import { voltarDaOS } from "@/lib/origem-os";
 import { CANAL_NA_FRASE, montarEventos, ROTULO_FORMA_PAGAMENTO } from "@/lib/os";
 import { ehStatusOS, osEncerrada, proximoPasso, type ModoOS, type StatusOS } from "@/lib/os-status";
 import { createClient } from "@/lib/supabase/server";
@@ -468,7 +469,8 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
   return (
     <PainelOS os={dados}>
       <EsconderNavegacao />
-      <Cabecalho titulo={`OS #${os.numero}`} voltar="/os" />
+      {/* Origem por lista fechada (?de=painel / ?de=a-receber, DESIGN §14.1); sem ela, /os. */}
+      <Cabecalho titulo={`OS #${os.numero}`} voltar={voltarDaOS(sp) ?? "/os"} />
       <Pagina larga>
         {aberta && <CaixaMensagem tipo="sucesso">OS #{aberta} aberta.</CaixaMensagem>}
         {/* Convite no fim do "Abrir OS" (DESIGN §12.2 a), só na chegada */}

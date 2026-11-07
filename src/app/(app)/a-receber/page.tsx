@@ -4,6 +4,7 @@ import { Cabecalho } from "@/components/layout/cabecalho";
 import { DevedoresCarregando } from "@/components/painel/cartao-devedor";
 import { CaixaErro, Pagina } from "@/components/ui/estados";
 import { exigirContexto } from "@/lib/dal";
+import { HREF_OS_DO_A_RECEBER } from "@/lib/origem-os";
 import { diaEmSaoPaulo } from "@/lib/painel";
 import { devedoresDeContas, type LinhaContaAReceber } from "@/lib/painel-dados";
 import { createClient } from "@/lib/supabase/server";
@@ -62,7 +63,7 @@ async function Conteudo() {
     );
   }
 
-  const devedores = devedoresDeContas(data, (id) => `/os/${id}?de=a-receber`);
+  const devedores = devedoresDeContas(data, HREF_OS_DO_A_RECEBER);
   // Soma de inteiros em centavos, sobre a lista inteira (sem paginação), só para o dono.
   const total = ehDono ? data.reduce((s, l) => s + l.total_centavos, 0) : null;
 
