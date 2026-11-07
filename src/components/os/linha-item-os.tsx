@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
 import { ChevronRight, Package, Wrench } from "lucide-react";
 import { EtiquetaSemPreco } from "@/components/os/badge-status";
-import { formatarCentavos, formatarQuantidade } from "@/lib/formato";
+import { ValorQuebravel } from "@/components/ui/valor-quebravel";
+import { formatarQuantidade } from "@/lib/formato";
 import type { TipoItemOS } from "@/lib/os-status";
 
 export type DadosItemOS = {
@@ -64,30 +65,47 @@ export function LinhaItemOS({
   const custo = item.custoUnitarioCentavos;
   const verCusto = !semValores && mostrarCusto && item.tipo === "peca" && typeof custo === "number";
 
-  const detalhe = semValores
-    ? `${qtd} ${item.unidade || "un."}`
-    : `${qtd} × ${temPreco ? formatarCentavos(preco) : "—"}${verCusto ? ` · Custo ${formatarCentavos(custo)}` : ""}`;
+  // Valores com `ValorQuebravel`: com texto grande, quebram entre "×", "R$" e o número, ou no
+  // ponto de milhar, e nunca deixam ",89" sozinho na linha de baixo (F7-B11, I1).
+  const detalhe = semValores ? (
+    `${qtd} ${item.unidade || "un."}`
+  ) : (
+    <>
+      {qtd} × {temPreco ? <ValorQuebravel centavos={preco} /> : "—"}
+      {verCusto && (
+        <>
+          {" "}· Custo <ValorQuebravel centavos={custo} />
+        </>
+      )}
+    </>
+  );
 
   const topo = (
     <>
       <Icone size={22} strokeWidth={2.25} aria-hidden className="mt-0.5 shrink-0 text-texto-suave" />
-      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        {/* Nome inteiro, sem "…": o balcão precisa ler o que o mecânico digitou para dar o preço (F3-B8, I3). */}
-        <span className="text-lg font-bold break-words hyphens-auto">
-          <span className="sr-only">{item.tipo === "servico" ? "Serviço: " : "Peça: "}</span>
-          {item.descricao}
+      {/* Descrição e valor podem dividir a linha: se a descrição ficaria com menos de 12ch,
+          o valor desce para a linha de baixo, à direita, em vez de espremer o texto (F7-B11, I1). */}
+      <span className="flex min-w-0 flex-1 flex-wrap items-start gap-x-3 gap-y-1">
+        <span className="flex min-w-[12ch] flex-1 basis-0 flex-col gap-0.5">
+          {/* Nome inteiro, sem "…": o balcão precisa ler o que o mecânico digitou para dar o preço (F3-B8, I3). */}
+          <span className="text-lg font-bold break-words hyphens-auto">
+            <span className="sr-only">{item.tipo === "servico" ? "Serviço: " : "Peça: "}</span>
+            {item.descricao}
+          </span>
+          <span className="font-mono text-sm break-words text-texto-suave">{detalhe}</span>
         </span>
-        <span className="font-mono text-sm text-texto-suave">{detalhe}</span>
+        {!semValores && (
+          <span className="ml-auto min-w-0 max-w-full text-right">
+            {subtotal !== null ? (
+              <span className="font-mono text-lg font-semibold">
+                <ValorQuebravel centavos={subtotal} />
+              </span>
+            ) : (
+              <EtiquetaSemPreco />
+            )}
+          </span>
+        )}
       </span>
-      {!semValores && (
-        <span className="shrink-0 text-right">
-          {subtotal !== null ? (
-            <span className="font-mono text-lg font-semibold">{formatarCentavos(subtotal)}</span>
-          ) : (
-            <EtiquetaSemPreco />
-          )}
-        </span>
-      )}
       {aoTocar && <ChevronRight size={22} strokeWidth={2.25} aria-hidden className="mt-0.5 shrink-0 text-texto-suave" />}
     </>
   );

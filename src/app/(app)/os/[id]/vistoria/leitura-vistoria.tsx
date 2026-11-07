@@ -348,7 +348,8 @@ export function LeituraVistoria({
       </BlocoVistoriaConcluida>
 
       <section aria-label="PDF da vistoria" className="flex flex-col gap-2">
-        <BotaoBaixarPdf pdf={pdf} />
+        {/* Sem compartilhar de arquivo, o "Enviar" da barra já vira "Baixar PDF": um só (F7-B11, I4). */}
+        {!(temBarra && enviarNaBarra && !pdf.podeCompartilhar) && <BotaoBaixarPdf pdf={pdf} />}
         {!temBarra && <MensagensPdf pdf={pdf} />}
       </section>
 

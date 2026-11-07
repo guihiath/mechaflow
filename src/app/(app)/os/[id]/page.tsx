@@ -493,7 +493,7 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
           <div className="flex flex-col gap-6 lg:col-span-3">
             {/* Desktop: o aviso dos itens do mecanico fica acima dos itens (DESIGN §11.9) */}
             <div className="flex flex-col gap-2">
-              <div className="[&>span]:text-[2.25rem] min-[400px]:[&>span]:text-[2.75rem]">
+              <div className="[&>span]:text-[min(2.25rem,11vw)] min-[400px]:[&>span]:text-[min(2.75rem,11vw)]">
                 <ChipPlaca placa={placa} grande />
               </div>
               {veiculoTexto(os) && <p className="text-xl font-bold">{veiculoTexto(os)}</p>}
@@ -770,7 +770,7 @@ vistoriaBarra:
   <Cabecalho titulo={`OS #${os.numero}`} voltar="/minhas-os" />
   <Pagina>
     <div className="flex flex-col gap-2">
-      <div className="[&>span]:text-[2.25rem] min-[400px]:[&>span]:text-[2.75rem]">
+      <div className="[&>span]:text-[min(2.25rem,11vw)] min-[400px]:[&>span]:text-[min(2.75rem,11vw)]">
         <ChipPlaca placa={formatarPlaca(os.placa)} grande />
       </div>
       {veiculoTexto(os) && <p className="text-xl font-bold">{veiculoTexto(os)}</p>}

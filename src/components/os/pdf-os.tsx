@@ -63,8 +63,15 @@ export function CartaoPdfOS({
             Não é documento fiscal.
           </p>
         </div>
-        <BotaoEnviarPdf pdf={pdf} variante={primario ? "primario" : "secundario"} />
-        <BotaoBaixarPdf pdf={pdf} className="h-auto! min-h-toque py-2" />
+        {pdf.podeCompartilhar ? (
+          <>
+            <BotaoEnviarPdf pdf={pdf} variante={primario ? "primario" : "secundario"} />
+            <BotaoBaixarPdf pdf={pdf} className="h-auto! min-h-toque py-2" />
+          </>
+        ) : (
+          // Sem compartilhar de arquivo, o "Enviar" viraria um segundo "Baixar PDF" igual (F7-B11, I4).
+          <BotaoBaixarPdf pdf={pdf} variante={primario ? "primario" : "secundario"} />
+        )}
         <MensagensPdf pdf={pdf} />
       </section>
     </Cartao>

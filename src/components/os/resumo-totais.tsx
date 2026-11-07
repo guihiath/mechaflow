@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 import { TriangleAlert } from "lucide-react";
 import { ValorQuebravel } from "@/components/ui/valor-quebravel";
-import { formatarCentavos } from "@/lib/formato";
 
 /**
  * Totais da OS (DESIGN §10.5), valores vindos do banco (o app nunca calcula o total oficial).
@@ -38,15 +37,19 @@ export function ResumoTotais({
     <section aria-label={rotuloSecao} className="flex flex-col gap-2">
       <dl className="flex flex-col gap-1">
         {typeof servicosCentavos === "number" && (
-          <div className="flex items-baseline justify-end gap-4">
+          <div className="flex flex-wrap items-baseline justify-end gap-x-4">
             <dt className="text-base text-texto-suave">Serviços</dt>
-            <dd className="min-w-32 text-right font-mono text-lg">{formatarCentavos(servicosCentavos)}</dd>
+            <dd className="min-w-32 max-w-full text-right font-mono text-lg">
+              <ValorQuebravel centavos={servicosCentavos} />
+            </dd>
           </div>
         )}
         {typeof pecasCentavos === "number" && (
-          <div className="flex items-baseline justify-end gap-4">
+          <div className="flex flex-wrap items-baseline justify-end gap-x-4">
             <dt className="text-base text-texto-suave">Peças</dt>
-            <dd className="min-w-32 text-right font-mono text-lg">{formatarCentavos(pecasCentavos)}</dd>
+            <dd className="min-w-32 max-w-full text-right font-mono text-lg">
+              <ValorQuebravel centavos={pecasCentavos} />
+            </dd>
           </div>
         )}
         {/* Se não couber na mesma linha, o valor desce; nunca encolhe (DESIGN §13.17). */}
@@ -71,14 +74,16 @@ export function ResumoTotais({
         <div className="mt-1 flex flex-col gap-1 border-t-2 border-dashed border-borda-sutil pt-2">
           <p className="text-right text-xs font-bold text-texto-suave">Só você vê</p>
           <dl className="flex flex-col gap-1 text-sm text-texto-suave">
-            <div className="flex items-baseline justify-end gap-4">
+            <div className="flex flex-wrap items-baseline justify-end gap-x-4">
               <dt>Custo das peças</dt>
-              <dd className="min-w-32 text-right font-mono">{formatarCentavos(custoPecasCentavos)}</dd>
+              <dd className="min-w-32 max-w-full text-right font-mono">
+                <ValorQuebravel centavos={custoPecasCentavos} />
+              </dd>
             </div>
-            <div className="flex items-baseline justify-end gap-4">
+            <div className="flex flex-wrap items-baseline justify-end gap-x-4">
               <dt>Margem</dt>
-              <dd className="min-w-32 text-right font-mono">
-                {formatarCentavos(margem)}
+              <dd className="min-w-32 max-w-full text-right font-mono">
+                <ValorQuebravel centavos={margem} />
                 {pct !== null && ` (${pct}%)`}
               </dd>
             </div>

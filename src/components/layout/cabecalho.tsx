@@ -24,29 +24,33 @@ export function Cabecalho({
   return (
     <header className="sticky top-0 z-30 bg-grafite pt-[env(safe-area-inset-top)] text-[#EDEBE6]">
       {!EH_PRODUCAO && <FaixaTeste />}
-      <div className="flex h-14 items-center gap-1 px-2 lg:px-6">
-        {voltar ? (
-          <>
-            <Link
-              href={voltar}
-              aria-label="Voltar"
-              className={`flex size-12 shrink-0 items-center justify-center rounded-md active:bg-white/10 ${voltarSoCelular ? "lg:hidden" : ""}`}
-            >
-              <ArrowLeft size={26} strokeWidth={2.25} aria-hidden />
-            </Link>
-            {voltarSoCelular && <span className="hidden w-2 lg:block" />}
-          </>
-        ) : (
-          <span className="w-2" />
-        )}
-        <h1 className="min-w-0 flex-1 truncate font-display text-xl">{titulo}</h1>
-        {!EH_PRODUCAO && (
-          <>
-            <span className="shrink-0 rounded-sm bg-primaria px-1.5 text-xs font-bold text-primaria-texto">TESTE</span>
-            <BotaoFeedback />
-          </>
-        )}
-        {acao}
+      {/* Texto grande (F7-B11, M1): o título ocupa até 2 linhas e a barra cresce; abaixo de 20rem de
+          largura (só com texto grande) o selo "TESTE" sai, porque a faixa listrada já avisa. */}
+      <div className="@container">
+        <div className="flex min-h-14 items-center gap-1 px-2 py-1 lg:px-6">
+          {voltar ? (
+            <>
+              <Link
+                href={voltar}
+                aria-label="Voltar"
+                className={`flex size-12 shrink-0 items-center justify-center rounded-md active:bg-white/10 ${voltarSoCelular ? "lg:hidden" : ""}`}
+              >
+                <ArrowLeft size={26} strokeWidth={2.25} aria-hidden />
+              </Link>
+              {voltarSoCelular && <span className="hidden w-2 lg:block" />}
+            </>
+          ) : (
+            <span className="w-2" />
+          )}
+          <h1 className="line-clamp-2 min-w-0 flex-1 font-display text-xl leading-tight [overflow-wrap:normal]">{titulo}</h1>
+          {!EH_PRODUCAO && (
+            <>
+              <span className="shrink-0 rounded-sm bg-primaria px-1.5 text-xs font-bold text-primaria-texto @max-[20rem]:hidden">TESTE</span>
+              <BotaoFeedback />
+            </>
+          )}
+          {acao}
+        </div>
       </div>
     </header>
   );

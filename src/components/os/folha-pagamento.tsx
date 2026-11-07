@@ -14,10 +14,12 @@ import { FORMAS_PAGAMENTO, hojeEmSaoPaulo, type FormaPagamento } from "@/lib/os"
 export type OSPagamento = {
   id: string;
   totalCentavos: number;
-  /** Forma escolhida na entrega (vem marcada). */
+  /** Forma gravada na OS (a da entrega, ou a do pagamento já registrado). */
   formaPagamento?: FormaPagamento | null;
   /** Identificação da OS, só fora do detalhe (DESIGN §14.4): "OS #1031 · [ABC1D23] · Transportes Silva". */
   identificacao?: { numero: number; placa: string; cliente?: string | null };
+  /** Pagamento já registrado (correção): aí a forma atual vem marcada. Sem ele, nenhuma vem. */
+  pagoEm?: string | null;
 };
 
 /**
@@ -43,7 +45,10 @@ export function FolhaPagamento({
   /** Na lista de quem deve: o recado de "já registrado" fala da lista, não da tela. */
   naLista?: boolean;
 }) {
-  const [forma, setForma] = useState<FormaPagamento | "">(os.formaPagamento ?? "");
+  // F7-B11 (M10): a forma da entrega (ex.: "Faturado") diz como foi cobrado, não como o dinheiro
+  // entrou. Ao registrar, nenhuma vem marcada e o botão só ativa depois de escolher. Na correção
+  // de um pagamento já registrado, mantém a forma atual.
+  const [forma, setForma] = useState<FormaPagamento | "">(os.pagoEm ? (os.formaPagamento ?? "") : "");
   const [hoje] = useState(() => hojeEmSaoPaulo());
   const [estado, setEstado] = useState<EstadoAcao>(null);
   const [enviando, iniciar] = useTransition();
@@ -86,6 +91,7 @@ export function FolhaPagamento({
           rotulo="Registrar pagamento"
           rotuloEnviando="Registrando…"
           variante="primario"
+          disabled={!forma}
         />
       }
     >
@@ -93,16 +99,14 @@ export function FolhaPagamento({
         <input type="hidden" name="os_id" value={os.id} />
         {naLista && <input type="hidden" name="origem" value="lista" />}
         {id && (
-          <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-base">
-            <span className="font-mono font-semibold">OS #{id.numero}</span>
-            <span aria-hidden>·</span>
-            <ChipPlaca placa={formatarPlaca(id.placa)} />
-            {id.cliente && (
-              <>
-                <span aria-hidden>·</span>
-                <span className="min-w-0 break-words">{id.cliente}</span>
-              </>
-            )}
+          // Duas linhas (F7-B11, M4): "OS #4 [placa]" e o cliente embaixo. Sem "·": a moldura da placa
+          // já separa, e com texto grande a placa desce sem deixar um ponto solto no fim da linha.
+          <p className="flex flex-col gap-1 text-base">
+            <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span className="font-mono font-semibold">OS #{id.numero}</span>
+              <ChipPlaca placa={formatarPlaca(id.placa)} />
+            </span>
+            {id.cliente && <span className="block min-w-0 break-words">{id.cliente}</span>}
           </p>
         )}
         <p className="font-mono text-2xl">Total: {formatarCentavos(os.totalCentavos)}</p>
@@ -110,6 +114,7 @@ export function FolhaPagamento({
           rotulo="Forma de pagamento"
           name="forma_pagamento"
           valor={forma}
+          ajuda="Como o dinheiro chegou?"
           aoMudar={setForma}
           colunas={2}
           opcoes={FORMAS_PAGAMENTO}

@@ -108,21 +108,26 @@ export function SeletorMes({
 
   return (
     <div className="flex flex-col gap-2" data-teste="seletor-mes">
-      <div className="flex items-center gap-2">
-        <Seta destino={mesAnterior(mes)} ativa={temAnterior} direcao="anterior" href={linkDe(mesAnterior(mes))} aoIr={ir} />
-        <h2 id={idTitulo} className="min-w-0 flex-1">
-          <button
-            type="button"
-            onClick={() => setEscolhendo(true)}
-            aria-haspopup="dialog"
-            className="inline-flex min-h-toque-principal w-full items-center justify-center gap-1.5 rounded-md px-2 text-xl font-bold active:bg-superficie-2"
-          >
-            <span className="min-w-0 text-center break-words">{nomeMesTitulo(mes)}</span>
-            <ChevronDown size={22} strokeWidth={2.5} aria-hidden className="shrink-0" />
-            <span className="sr-only">, escolher outro mês</span>
-          </button>
-        </h2>
-        <Seta destino={mesSeguinte(mes)} ativa={temSeguinte} direcao="seguinte" href={linkDe(mesSeguinte(mes))} aoIr={ir} />
+      {/* Texto grande (F7-B11, I3): quando a largura em rem fica pequena, o nome do mês ocupa a linha
+          toda e as setas descem para a linha de baixo, uma em cada canto, em vez de a palavra quebrar
+          letra por letra. Em tela normal continua [‹] Novembro de 2026 ⌄ [›] numa linha só. */}
+      <div className="@container">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <Seta destino={mesAnterior(mes)} ativa={temAnterior} direcao="anterior" href={linkDe(mesAnterior(mes))} aoIr={ir} />
+          <h2 id={idTitulo} className="min-w-0 flex-1 @max-[18rem]:order-first @max-[18rem]:basis-full">
+            <button
+              type="button"
+              onClick={() => setEscolhendo(true)}
+              aria-haspopup="dialog"
+              className="inline-flex min-h-toque-principal w-full items-center justify-center gap-1.5 rounded-md px-2 text-xl font-bold active:bg-superficie-2"
+            >
+              <span className="min-w-0 text-center [overflow-wrap:normal]">{nomeMesTitulo(mes)}</span>
+              <ChevronDown size={22} strokeWidth={2.5} aria-hidden className="shrink-0" />
+              <span className="sr-only">, escolher outro mês</span>
+            </button>
+          </h2>
+          <Seta destino={mesSeguinte(mes)} ativa={temSeguinte} direcao="seguinte" href={linkDe(mesSeguinte(mes))} aoIr={ir} />
+        </div>
       </div>
 
       {mes === mesAtual ? (

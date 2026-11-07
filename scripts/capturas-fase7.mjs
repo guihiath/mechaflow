@@ -175,7 +175,8 @@ async function preparar() {
   const his = [];
   for (let i = 1; i <= 30; i++) {
     process.stdout.write(`\r   OS ${i}/30 da placa ${HIS}`);
-    const mecanico = i % 3 === 1 ? mX.id : i % 3 === 2 ? dX.id : null;
+    // A #30 (aberta) é do mecânico: a tela dele com "Ver histórico desta placa" (F7-B11, I6).
+    const mecanico = i === 30 || i % 3 === 1 ? mX.id : i % 3 === 2 ? dX.id : null;
     const os = await abrir(HIS, cliHis, { mecanico, modo: i === 29 ? "com_orcamento" : "direto", sintoma: i % 2 ? SINTOMA_LONGO : `Revisão programada dos ${i * 10} mil km.` });
     await item(os, { servico: servIds[i % servIds.length] });
     await item(os, { tipo: "peca", descricao: i % 4 === 0 ? `${ITEM_LONGO} (kit ${i})` : "Filtro de óleo lubrificante", qtd: i === 7 ? 1.5 : 2, preco: 12345 + i });
@@ -684,6 +685,13 @@ async function main() {
       await tirar("minhas-os-cheia");
       await ir(`/os/${X.his[29]}`);
       await tirar("os-aberta-placa-30os", { topo: true });
+      // Rola até a entrada do histórico pela OS (§14.7) e tira a área visível.
+      const verHist = h.page.getByRole("link", { name: /^Ver histórico desta placa/ }).first();
+      if (await verHist.count()) {
+        await verHist.scrollIntoViewIfNeeded();
+        await h.page.waitForTimeout(400);
+        await tirar("os-aberta-placa-30os-ver-historico", { inteira: false, topo: true });
+      } else falha("os-aberta-placa-30os", "sem o link Ver histórico desta placa");
       await historicoCompleto(h, X.hisPlaca, "historico-30os");
     });
     await emCada({ grupo: "cheia-mecanico-200", papel: "mecanico", sessao: s, texto200: true }, async ({ ir, tirar }) => {

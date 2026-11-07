@@ -220,13 +220,21 @@ export function BotaoEnviarPdf({ pdf, variante = "primario" }: { pdf: Pdf; varia
   );
 }
 
-/** Secundário: "Baixar PDF", sempre disponível. */
-export function BotaoBaixarPdf({ pdf, className }: { pdf: Pdf; className?: string }) {
+/** "Baixar PDF", sempre disponível. Secundário por padrão; primário quando é o único botão do cartão (F7-B11, I4). */
+export function BotaoBaixarPdf({
+  pdf,
+  className,
+  variante = "secundario",
+}: {
+  pdf: Pdf;
+  className?: string;
+  variante?: VarianteBotao;
+}) {
   const { estado } = pdf;
   const meu = estado.gerando === "baixar";
   return (
     <Botao
-      variante="secundario"
+      variante={variante}
       className={className}
       onClick={() => void pdf.baixar()}
       disabled={estado.gerando !== null}

@@ -215,14 +215,16 @@ export function Folha({
     >
       {aberta && (
         <div className="flex max-h-[90%] min-h-0 w-full flex-col overflow-hidden rounded-t-xl bg-superficie text-texto shadow-folha lg:max-h-full lg:max-w-[560px] lg:rounded-xl">
-          <div className="flex min-h-14 shrink-0 items-center gap-2 border-b-2 border-borda-sutil py-1 pr-2 pl-4">
-            <h2 id={idTitulo} className="line-clamp-2 min-w-0 flex-1 text-xl leading-tight break-words">
+          <div className="flex min-h-14 shrink-0 flex-wrap items-center gap-2 border-b-2 border-borda-sutil py-1 pr-2 pl-4">
+            {/* Sem corte nem quebra no meio da palavra (F7-B11, M3): título de folha é curto e pode ter 3 linhas;
+                se a palavra mais longa não couber ao lado do "Fechar", o "Fechar" desce. */}
+            <h2 id={idTitulo} className="min-w-min flex-1 text-xl leading-tight [overflow-wrap:normal]">
               {titulo}
             </h2>
             <button
               type="button"
               onClick={pedirFechar}
-              className="inline-flex min-h-toque shrink-0 items-center gap-1.5 rounded-md px-3 text-base font-bold text-texto active:bg-superficie-2"
+              className="ml-auto inline-flex min-h-toque shrink-0 items-center gap-1.5 rounded-md px-3 text-base font-bold text-texto active:bg-superficie-2"
             >
               <X size={22} strokeWidth={2.25} aria-hidden />
               Fechar

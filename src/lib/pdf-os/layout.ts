@@ -35,14 +35,14 @@ export type OpcoesPdfOS = {
 
 // ------------------------------------------------------------------ colunas (180 mm úteis)
 
-const COL_DESC = 94 * MM;
+const COL_DESC = 86 * MM; // F7-B11 (I5): 94/20/32/34 deixava Unitário e Subtotal colados com valor de 7 dígitos
 const COL_QTD = 20 * MM;
-const COL_UNIT = 32 * MM;
-const COL_SUB = 34 * MM;
+const COL_UNIT = 36 * MM;
+const COL_SUB = 38 * MM;
 const X_QTD_FIM = MARGEM + COL_DESC + COL_QTD;
 const X_UNIT_FIM = X_QTD_FIM + COL_UNIT;
 const X_SUB_FIM = X_UNIT_FIM + COL_SUB; // = MARGEM + LARGURA
-const RESPIRO = 6; // entre colunas
+const RESPIRO = 10; // entre colunas
 
 const TAM_ITEM = 10;
 const ENTRE_ITEM = 13;
