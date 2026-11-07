@@ -1,11 +1,10 @@
 import "server-only";
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { formatarDocumento, formatarPlaca, LADOS_AVARIA, normalizarPlaca, soDigitos, type LadoAvaria } from "@/lib/formato";
 import { BUCKET_VISTORIAS } from "@/lib/fotos/regras";
 import type { Database } from "@/lib/supabase/database.types";
-import type { DadosPdfVistoria, FontesPdf, ImagemPdf } from "./pdf-layout";
+import type { ImagemPdf } from "@/lib/pdf/base";
+import type { DadosPdfVistoria } from "./pdf-layout";
 
 /*
  * Dados do PDF da vistoria (F4-B6), lidos com o cliente do usuário (RLS): quem não vê a OS
@@ -168,24 +167,4 @@ async function baixarTodos(supabase: Cliente, caminhos: string[]): Promise<Map<s
   });
   await Promise.all(trabalhadores);
   return falhou ? null : resultado;
-}
-
-// ---------------- fontes (OFL, em src/assets/fonts; incluídas no deploy pelo next.config.ts)
-
-let fontes: Promise<FontesPdf> | null = null;
-
-export function carregarFontesPdf(): Promise<FontesPdf> {
-  if (!fontes) {
-    const ler = (nome: string) => readFile(join(process.cwd(), "src", "assets", "fonts", nome)).then((b) => new Uint8Array(b));
-    fontes = Promise.all([
-      ler("Barlow-Medium.ttf"),
-      ler("Barlow-Bold.ttf"),
-      ler("BarlowCondensed-Bold.ttf"),
-      ler("IBMPlexMono-SemiBold.ttf"),
-    ]).then(([normal, negrito, condensada, mono]) => ({ normal, negrito, condensada, mono }));
-    fontes.catch(() => {
-      fontes = null; // tenta ler de novo na próxima requisição
-    });
-  }
-  return fontes;
 }

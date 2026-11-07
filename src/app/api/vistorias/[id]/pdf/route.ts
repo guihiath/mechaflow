@@ -1,7 +1,8 @@
 import type { NextRequest } from "next/server";
 import { contextoParaAcao } from "@/lib/dal";
 import { createClient } from "@/lib/supabase/server";
-import { carregarDadosPdf, carregarFontesPdf } from "@/lib/vistoria/pdf-dados";
+import { carregarFontesPdf } from "@/lib/pdf/fontes";
+import { carregarDadosPdf } from "@/lib/vistoria/pdf-dados";
 import { gerarPdfVistoria } from "@/lib/vistoria/pdf-layout";
 
 /*

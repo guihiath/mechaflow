@@ -1,8 +1,6 @@
-import fontkit from "@pdf-lib/fontkit";
-import { degrees, PDFDocument, rgb, type PDFFont, type PDFImage, type PDFPage, type RGB } from "pdf-lib";
+import { degrees } from "pdf-lib";
 import {
   formatarCodigoConferencia,
-  formatarData,
   formatarMotivoAnulacao,
   formatarNumero,
   formatarNumeroOS,
@@ -17,21 +15,38 @@ import {
   type SituacaoItemVistoria,
   type TipoVistoria,
 } from "../formato";
+import {
+  BORDA,
+  BRANCO,
+  criarDocumento,
+  dataHora,
+  desenharCabecalho,
+  desenharContida,
+  desenharPlaca,
+  desenharRodape,
+  embutir,
+  Escritor,
+  GRAFITE,
+  LARGURA,
+  MARGEM,
+  MM,
+  PAGINA,
+  SUAVE,
+  type FontesPdf,
+  type Imagem,
+  type ImagemPdf,
+} from "../pdf/base";
 
 /*
- * PDF da vistoria (F4-B6, DESIGN §12.17): A4 em pé, margens de 15 mm, Barlow 500/700,
- * Barlow Condensed 700 no título e IBM Plex Mono 600 na placa/OS (fontes embutidas: acentos
- * certos). Grafite sobre branco, amarelo só na faixa do topo (sai bem em impressora P&B e no
- * WhatsApp). Nenhum valor em dinheiro e nenhum telefone: o mesmo arquivo serve a todos os papéis.
+ * PDF da vistoria (F4-B6, DESIGN §12.17). Nenhum valor em dinheiro e nenhum telefone: o mesmo
+ * arquivo serve a todos os papéis. Página, fontes, cabeçalho, placa, imagens e rodapé vêm de
+ * `lib/pdf/base.ts` (comum com o PDF da OS); aqui fica só o miolo da vistoria.
  *
  * Este módulo é puro (sem Supabase nem fs): recebe os dados já travados e os bytes das imagens
  * e devolve o PDF. Quem busca e escolhe as fotos é `pdf-dados.ts`.
  */
 
 // ------------------------------------------------------------------ tipos
-
-/** Bytes de uma imagem já baixada (JPEG das fotos, PNG da assinatura). */
-export type ImagemPdf = { bytes: Uint8Array };
 
 export type ItemPdf = { descricao: string; situacao: SituacaoItemVistoria | null; observacao: string | null };
 export type AvariaPdf = { lado: LadoAvaria; descricao: string | null; fotos: ImagemPdf[] };
@@ -67,24 +82,7 @@ export type DadosPdfVistoria = {
   anulada: { em: string; por: string; motivo: string } | null;
 };
 
-export type FontesPdf = { normal: Uint8Array; negrito: Uint8Array; condensada: Uint8Array; mono: Uint8Array };
-
-// ------------------------------------------------------------------ medidas e cores
-
-const MM = 72 / 25.4;
-const PAGINA: [number, number] = [595.28, 841.89]; // A4
-const MARGEM = 15 * MM;
-const LARGURA = PAGINA[0] - 2 * MARGEM;
-const TOPO = PAGINA[1] - MARGEM;
-/** Abaixo disso só o rodapé. */
-const FUNDO = MARGEM + 22;
-
-const GRAFITE = rgb(0.078, 0.086, 0.102); // #14161A
-const SUAVE = rgb(0.33, 0.35, 0.38);
-const BORDA = rgb(0.72, 0.73, 0.75);
-const FUNDO_FOTO = rgb(0.95, 0.95, 0.95);
-const AMARELO = rgb(0.961, 0.722, 0); // #F5B800
-const BRANCO = rgb(1, 1, 1);
+// ------------------------------------------------------------------ medidas das fotos
 
 /** Célula de foto: 85 mm de largura, 4:3; 2 por linha (DESIGN §12.17). */
 const FOTO_L = 85 * MM;
@@ -95,194 +93,12 @@ const FOTO_ESPACO_V = 8;
 const PAINEL_L = (LARGURA - 2 * FOTO_ESPACO) / 3;
 const PAINEL_A = PAINEL_L * 0.75;
 
-const FUSO = "America/Sao_Paulo";
-const fmtHora = new Intl.DateTimeFormat("pt-BR", { timeZone: FUSO, hour: "2-digit", minute: "2-digit" });
-
-/** "31/10/2026 às 08:40" (America/Sao_Paulo). */
-function dataHora(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  return `${formatarData(iso)} às ${fmtHora.format(new Date(iso))}`;
-}
-
 const ROTULO_SEM_ASSINATURA: Record<MotivoSemAssinatura, string> = {
   motorista_ausente: "motorista ausente",
   recusou: "recusou assinar",
 };
 
-// ------------------------------------------------------------------ escrita com quebra de página
-
-type Fonte = { f: PDFFont; caracteres: Set<number> };
-
-class Escritor {
-  pagina!: PDFPage;
-  y = TOPO;
-  readonly paginas: PDFPage[] = [];
-
-  constructor(
-    readonly pdf: PDFDocument,
-    readonly fontes: { normal: Fonte; negrito: Fonte; condensada: Fonte; mono: Fonte },
-    /** Cabeçalho das páginas seguintes; a parte `mono` é a placa (§12.17). */
-    readonly cabecalhoCurto: { texto: string; mono?: boolean }[],
-  ) {}
-
-  novaPagina(primeira = false) {
-    this.pagina = this.pdf.addPage(PAGINA);
-    this.paginas.push(this.pagina);
-    this.y = TOPO;
-    if (!primeira) {
-      // Cabeçalho curto (placa, OS) nas páginas seguintes; o número da página vai no rodapé.
-      let x = MARGEM;
-      for (const parte of this.cabecalhoCurto) {
-        const fonte = parte.mono ? this.fontes.mono : this.fontes.negrito;
-        this.escrever(parte.texto, x, this.y - 10, fonte, 10, SUAVE);
-        x += this.largura(parte.texto, fonte, 10);
-      }
-      this.linha(this.y - 16);
-      this.y -= 28;
-    }
-  }
-
-  /** Garante `altura` livre; senão abre outra página. Devolve true se abriu. */
-  garantir(altura: number): boolean {
-    if (this.y - altura < FUNDO) {
-      this.novaPagina();
-      return true;
-    }
-    return false;
-  }
-
-  /** Espaço útil numa página nova (para decidir se um bloco "não quebra"). */
-  get alturaPaginaNova() {
-    return TOPO - 28 - FUNDO;
-  }
-
-  linha(y: number, espessura = 0.75, cor: RGB = BORDA) {
-    this.pagina.drawLine({ start: { x: MARGEM, y }, end: { x: MARGEM + LARGURA, y }, thickness: espessura, color: cor });
-  }
-
-  escrever(texto: string, x: number, y: number, fonte: Fonte, tamanho: number, cor: RGB = GRAFITE) {
-    const t = limpar(texto, fonte);
-    if (t) this.pagina.drawText(t, { x, y, size: tamanho, font: fonte.f, color: cor });
-  }
-
-  largura(texto: string, fonte: Fonte, tamanho: number) {
-    return fonte.f.widthOfTextAtSize(limpar(texto, fonte), tamanho);
-  }
-
-  quebrar(texto: string, fonte: Fonte, tamanho: number, largura: number): string[] {
-    return quebrarTexto(limpar(texto, fonte, true), (s) => fonte.f.widthOfTextAtSize(s, tamanho), largura);
-  }
-
-  /** Parágrafo com quebra de linha e de página. */
-  paragrafo(texto: string, opcoes: { fonte?: Fonte; tamanho?: number; cor?: RGB; x?: number; largura?: number; entrelinha?: number } = {}) {
-    const fonte = opcoes.fonte ?? this.fontes.normal;
-    const tamanho = opcoes.tamanho ?? 10.5;
-    const x = opcoes.x ?? MARGEM;
-    const largura = opcoes.largura ?? LARGURA - (x - MARGEM);
-    const entre = opcoes.entrelinha ?? tamanho * 1.35;
-    for (const l of this.quebrar(texto, fonte, tamanho, largura)) {
-      this.garantir(entre);
-      this.y -= entre;
-      this.escrever(l, x, this.y + entre - tamanho, fonte, tamanho, opcoes.cor);
-    }
-  }
-
-  /** Título de seção; leva junto pelo menos `minimo` pt do conteúdo. */
-  secao(titulo: string, minimo = 40) {
-    this.y -= 14;
-    this.garantir(16 + minimo);
-    this.escrever(titulo.toUpperCase(), MARGEM, this.y - 11, this.fontes.negrito, 11);
-    this.y -= 18;
-  }
-}
-
-/** Troca caracteres que a fonte não tem (emoji etc.) e controles; normaliza acentos (NFC). */
-function limpar(texto: string, fonte: Fonte, manterQuebras = false): string {
-  let s = "";
-  for (const ch of texto.normalize("NFC")) {
-    const cp = ch.codePointAt(0)!;
-    if (ch === "\n" && manterQuebras) s += ch;
-    else if (cp < 32 || (cp >= 0x7f && cp < 0xa0)) s += " ";
-    else if (fonte.caracteres.has(cp)) s += ch;
-    else if (/\s/.test(ch)) s += " ";
-    else if (cp >= 0x1f000 || (cp >= 0xfe00 && cp <= 0xfe0f) || cp === 0x200d) continue; // emoji e modificadores: some
-    else s += "?";
-  }
-  return s;
-}
-
-/** Quebra por palavras (e no meio da palavra se ela sozinha não couber). Respeita "\n". */
-export function quebrarTexto(texto: string, medir: (s: string) => number, largura: number): string[] {
-  const linhas: string[] = [];
-  for (const paragrafo of texto.split("\n")) {
-    const palavras = paragrafo.split(/ +/).filter(Boolean);
-    if (!palavras.length) {
-      linhas.push("");
-      continue;
-    }
-    let atual = "";
-    for (let p of palavras) {
-      const tentativa = atual ? `${atual} ${p}` : p;
-      if (medir(tentativa) <= largura) {
-        atual = tentativa;
-        continue;
-      }
-      if (atual) linhas.push(atual);
-      atual = "";
-      // Palavra maior que a linha (link, "xxxxx..."): corta onde couber, por busca binária
-      // (medir letra por letra numa palavra de 2.000 letras levaria minutos).
-      while (p.length > 1 && medir(p) > largura) {
-        let cabe = 1;
-        let naoCabe = p.length;
-        while (naoCabe - cabe > 1) {
-          const meio = (cabe + naoCabe) >> 1;
-          if (medir(p.slice(0, meio)) <= largura) cabe = meio;
-          else naoCabe = meio;
-        }
-        linhas.push(p.slice(0, cabe));
-        p = p.slice(cabe);
-      }
-      atual = p;
-    }
-    if (atual) linhas.push(atual);
-  }
-  // Sem linhas vazias sobrando no fim.
-  while (linhas.length > 1 && linhas[linhas.length - 1] === "") linhas.pop();
-  return linhas;
-}
-
 // ------------------------------------------------------------------ imagens
-
-type Imagem = PDFImage | null;
-
-async function embutir(pdf: PDFDocument, img: ImagemPdf | null): Promise<Imagem> {
-  if (!img) return null;
-  const b = img.bytes;
-  try {
-    if (b[0] === 0xff && b[1] === 0xd8) return await pdf.embedJpg(b);
-    if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return await pdf.embedPng(b);
-  } catch {
-    // Arquivo estragado: mostra o quadro "Foto não pôde ser lida" em vez de derrubar o PDF.
-  }
-  return null;
-}
-
-/** Imagem inteira dentro da caixa (sem cortar), centralizada. */
-function desenharContida(e: Escritor, img: Imagem, x: number, y: number, l: number, a: number, fundo = true) {
-  if (fundo) e.pagina.drawRectangle({ x, y, width: l, height: a, color: FUNDO_FOTO });
-  if (!img) {
-    const t = "Foto não pôde ser lida";
-    const tl = e.largura(t, e.fontes.normal, 9);
-    e.escrever(t, x + (l - tl) / 2, y + a / 2 - 3, e.fontes.normal, 9, SUAVE);
-  } else {
-    const escala = Math.min(l / img.width, a / img.height);
-    const il = img.width * escala;
-    const ia = img.height * escala;
-    e.pagina.drawImage(img, { x: x + (l - il) / 2, y: y + (a - ia) / 2, width: il, height: ia });
-  }
-  if (fundo) e.pagina.drawRectangle({ x, y, width: l, height: a, borderColor: BORDA, borderWidth: 0.5 });
-}
-
 /** Grade de fotos, 2 por linha; quebra de página entre linhas. */
 function gradeFotos(e: Escritor, fotos: Imagem[]) {
   for (let i = 0; i < fotos.length; i += 2) {
@@ -340,28 +156,13 @@ function ordenarChecklist<T extends { situacao: SituacaoItemVistoria | null }>(i
  * Fontes embutidas com subconjunto (só os caracteres usados), para o arquivo ficar pequeno.
  */
 export async function gerarPdfVistoria(d: DadosPdfVistoria, fontesBytes: FontesPdf, agora = new Date()): Promise<Uint8Array> {
-  const pdf = await PDFDocument.create();
-  pdf.registerFontkit(fontkit);
   const tipoTexto = ROTULO_TIPO_VISTORIA[d.tipo];
   const osTexto = formatarNumeroOS(d.numeroOS);
-  pdf.setTitle(`${tipoTexto} · ${osTexto} · ${d.placa}${d.anulada ? " · ANULADA" : ""}`);
-  pdf.setAuthor(d.oficina.nome);
-  pdf.setCreator("MechaFlow");
-  pdf.setProducer("MechaFlow");
-  pdf.setLanguage("pt-BR");
-  pdf.setCreationDate(agora);
-  pdf.setModificationDate(agora);
-
-  const carregar = async (bytes: Uint8Array): Promise<Fonte> => {
-    const f = await pdf.embedFont(bytes, { subset: true });
-    return { f, caracteres: new Set(f.getCharacterSet()) };
-  };
-  const [normal, negrito, condensada, mono] = await Promise.all([
-    carregar(fontesBytes.normal),
-    carregar(fontesBytes.negrito),
-    carregar(fontesBytes.condensada),
-    carregar(fontesBytes.mono),
-  ]);
+  const { pdf, fontes } = await criarDocumento(
+    { titulo: `${tipoTexto} · ${osTexto} · ${d.placa}${d.anulada ? " · ANULADA" : ""}`, autor: d.oficina.nome, agora },
+    fontesBytes,
+  );
+  const { normal, negrito, mono } = fontes;
 
   // Imagens: embutidas uma vez (JPEG entra como está, sem recomprimir).
   const [assinaturaImg, avariasImg, painelImg, complementosImg] = await Promise.all([
@@ -371,50 +172,21 @@ export async function gerarPdfVistoria(d: DadosPdfVistoria, fontesBytes: FontesP
     Promise.all(d.complementos.map((c) => Promise.all(c.fotos.map((f) => embutir(pdf, f))))),
   ]);
 
-  const e = new Escritor(pdf, { normal, negrito, condensada, mono }, [
+  const e = new Escritor(pdf, fontes, [
     { texto: `${tipoTexto} · ${osTexto} · ` },
     { texto: d.placa, mono: true },
     ...(d.anulada ? [{ texto: " · ANULADA" }] : []),
   ]);
   e.novaPagina(true);
 
-  // ---------------- cabeçalho
-  const pg = e.pagina;
-  pg.drawRectangle({ x: 0, y: PAGINA[1] - 3 * MM, width: PAGINA[0], height: 3 * MM, color: AMARELO });
-
-  const dir = MARGEM + LARGURA;
-  const titulo = `${tipoTexto.toUpperCase()}${d.anulada ? " — ANULADA" : ""}`.replace(/^VISTORIA DE /, "VISTORIA DE\n").split("\n");
-  let yd = TOPO;
-  for (const t of titulo) {
-    yd -= 20;
-    e.escrever(t, dir - e.largura(t, condensada, 20), yd, condensada, 20);
-  }
-  yd -= 17;
-  e.escrever(osTexto, dir - e.largura(osTexto, mono, 13), yd, mono, 13);
-  const larguraDireita = Math.max(...titulo.map((t) => e.largura(t, condensada, 20)), e.largura(osTexto, mono, 13));
-
-  let ye = TOPO;
-  for (const l of e.quebrar(d.oficina.nome.toUpperCase(), negrito, 16, LARGURA - larguraDireita - 16)) {
-    ye -= 18;
-    e.escrever(l, MARGEM, ye, negrito, 16);
-  }
-  if (d.oficina.cnpj) {
-    ye -= 13;
-    e.escrever(`CNPJ ${d.oficina.cnpj}`, MARGEM, ye, normal, 9, SUAVE);
-  }
-  e.y = Math.min(ye, yd) - 16;
-
-  // Placa com borda + veículo
-  const placaL = e.largura(d.placa, mono, 18);
-  e.y -= 26;
-  pg.drawRectangle({ x: MARGEM, y: e.y, width: placaL + 14, height: 26, borderColor: GRAFITE, borderWidth: 1.5 });
-  e.escrever(d.placa, MARGEM + 7, e.y + 7.5, mono, 18);
-  if (d.veiculo) {
-    const xv = MARGEM + placaL + 26;
-    const linhas = e.quebrar(d.veiculo, normal, 13, dir - xv);
-    e.escrever(linhas[0] ?? "", xv, e.y + 8.5, normal, 13);
-  }
-  e.y -= 6;
+  // ---------------- cabeçalho e placa + veículo
+  desenharCabecalho(e, {
+    titulo: `${tipoTexto.toUpperCase()}${d.anulada ? " — ANULADA" : ""}`.replace(/^VISTORIA DE /, "VISTORIA DE\n").split("\n"),
+    numero: osTexto,
+    oficina: d.oficina.nome,
+    detalhes: d.oficina.cnpj ? [`CNPJ ${d.oficina.cnpj}`] : [],
+  });
+  desenharPlaca(e, d.placa, d.veiculo);
   if (d.cliente) e.paragrafo(`Cliente: ${d.cliente}`, { tamanho: 11 });
   e.paragrafo(
     d.concluidaEm ? `Feita em ${dataHora(d.concluidaEm)}${d.concluidaPor ? ` por ${d.concluidaPor}` : ""}` : "Vistoria não concluída",
@@ -617,26 +389,18 @@ export async function gerarPdfVistoria(d: DadosPdfVistoria, fontesBytes: FontesP
 
   // ---------------- rodapé e marca d'água em todas as páginas
   const codigo = formatarCodigoConferencia(d.hash);
-  const total = e.paginas.length;
-  e.paginas.forEach((p, i) => {
-    e.pagina = p;
-    e.linha(MARGEM + 12, 0.5);
-    const partes = [`Gerado pelo MechaFlow em ${dataHora(agora.toISOString())}`];
-    if (codigo) partes.push(`Código de conferência ${codigo}`);
-    partes.push(`Pág. ${i + 1} de ${total}`);
-    e.escrever(partes.join(" · "), MARGEM, MARGEM, normal, 8, SUAVE);
-    if (d.anulada) {
-      const t = "ANULADA";
-      const tam = 60;
-      const l = e.largura(t, negrito, tam);
-      const cos = Math.SQRT1_2;
-      const cx = PAGINA[0] / 2;
-      const cy = PAGINA[1] / 2;
-      // Texto girado 45° com o centro no meio da página.
-      const x = cx - (l / 2) * cos + (tam * 0.35) * cos;
-      const y = cy - (l / 2) * cos - (tam * 0.35) * cos;
-      p.drawText(t, { x, y, size: tam, font: negrito.f, color: GRAFITE, opacity: 0.15, rotate: degrees(45) });
-    }
+  desenharRodape(e, agora, codigo ? [`Código de conferência ${codigo}`] : [], (p) => {
+    if (!d.anulada) return;
+    const t = "ANULADA";
+    const tam = 60;
+    const l = e.largura(t, negrito, tam);
+    const cos = Math.SQRT1_2;
+    const cx = PAGINA[0] / 2;
+    const cy = PAGINA[1] / 2;
+    // Texto girado 45° com o centro no meio da página.
+    const x = cx - (l / 2) * cos + (tam * 0.35) * cos;
+    const y = cy - (l / 2) * cos - (tam * 0.35) * cos;
+    p.drawText(t, { x, y, size: tam, font: negrito.f, color: GRAFITE, opacity: 0.15, rotate: degrees(45) });
   });
 
   return pdf.save({ useObjectStreams: true });
