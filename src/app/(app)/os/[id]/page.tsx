@@ -7,6 +7,7 @@ import { cancelarOS, desfazerAprovacaoOS } from "@/acoes/os";
 import { Cabecalho } from "@/components/layout/cabecalho";
 import { EsconderNavegacao } from "@/components/layout/marcador-pagina";
 import { BadgeStatus, EtiquetaModo, EtiquetaPagamento, SemMecanico } from "@/components/os/badge-status";
+import { CartaoPdfOS } from "@/components/os/pdf-os";
 import { FotosDaOS } from "@/components/fotos/fotos-da-os";
 import type { SituacaoCartaoLink } from "@/components/orcamento/cartao-link";
 import { DesfazerAprovacao, ProvaOrcamento, RespostasVersoes, type LinhaRespostaVersao } from "@/components/orcamento/prova-orcamento";
@@ -28,6 +29,7 @@ import {
   formatarNumero,
   formatarPlaca,
   formatarTelefone,
+  normalizarPlaca,
   param,
   soDigitos,
 } from "@/lib/formato";
@@ -325,6 +327,21 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
   const linhasVersoes = linhasRespostas(id, versoesR.data ?? [], provas);
   const temFechamento = status === "entregue" || os.causa_encontrada || os.solucao_aplicada;
   const tel = formatarTelefone(os.cliente_telefone);
+  // PDF para o cliente (F7-B3, DESIGN §14.10): dono e atendente; OS cancelada não gera.
+  const cartaoPdf =
+    status !== "cancelada" ? (
+      <CartaoPdfOS
+        osId={id}
+        numero={os.numero ?? 0}
+        placaNormalizada={normalizarPlaca(os.placa)}
+        entregue={status === "entregue"}
+        pagoEm={os.pago_em}
+        status={status}
+        totalCentavos={os.total_centavos ?? 0}
+        qtdItens={os.qtd_itens ?? itens.length}
+        itensSemPreco={os.itens_sem_preco ?? 0}
+      />
+    ) : null;
 
   const cartaoCliente = (
     <Cartao>
@@ -451,6 +468,8 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
           <ConviteVistoria osId={id} obrigatoria={obrigatoria} />
         )}
         {entregue && <CaixaMensagem tipo="sucesso">OS #{os.numero} entregue. Veículo liberado.</CaixaMensagem>}
+        {/* Oferta do resumo ao entregar (DESIGN §14.10): abaixo da mensagem; não abre sozinho. */}
+        {entregue && status === "entregue" && cartaoPdf}
         {(aberta || entregue || dados.precificarAoAbrir) && <LimparUrl />}
         {status === "cancelada" && (
           <CaixaMensagem tipo="erro">
@@ -476,6 +495,9 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
               {podeTrocarModo && <BotaoTrocarModo />}
               {status === "pronta" && <BotaoReabrir />}
             </div>
+
+            {/* OS entregue: o PDF é a tarefa que sobra, logo abaixo do topo (DESIGN §14.10) */}
+            {status === "entregue" && !entregue && cartaoPdf}
 
             {/* Recusa pelo link: logo depois do topo, é o que o balcão precisa resolver (DESIGN §13.13) */}
             {recusaAtual?.respondido_em && (
@@ -563,6 +585,8 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
               )}
             </ResumoTotais>
             {semPreco > 0 && !encerrada && !itensTravados && !temAvisoMecanico && <BotaoDefinirPrecos />}
+            {/* OS aberta: logo depois dos totais (DESIGN §14.10) */}
+            {!encerrada && cartaoPdf}
             {status === "aguardando_orcamento" && itens.length > 0 && (
               <div className="flex flex-col gap-1">
                 {semPreco === 0 && (
