@@ -15,7 +15,17 @@ type OsResumo = {
  * Ultimas OS de uma placa/veiculo (DESIGN §10.2, atalhos): numero, data, status e
  * sintoma em 1 linha. Sem valores (serve tambem para o mecanico).
  */
-export function UltimasOS({ os, verTodas, titulo = "Ordens de serviço" }: { os: OsResumo[]; verTodas?: string; titulo?: string }) {
+export function UltimasOS({
+  os,
+  verTodas,
+  rotuloVerTodas = "Ver todas as OS desta placa",
+  titulo = "Ordens de serviço",
+}: {
+  os: OsResumo[];
+  verTodas?: string;
+  rotuloVerTodas?: string;
+  titulo?: string;
+}) {
   return (
     <section className="flex flex-col gap-3">
       <h2 className="text-2xl">{titulo}</h2>
@@ -39,7 +49,7 @@ export function UltimasOS({ os, verTodas, titulo = "Ordens de serviço" }: { os:
       )}
       {verTodas && os.length > 0 && (
         <Link href={verTodas} className="inline-flex min-h-toque items-center self-start text-base font-bold text-info-texto underline underline-offset-4">
-          Ver todas as OS desta placa
+          {rotuloVerTodas}
         </Link>
       )}
     </section>

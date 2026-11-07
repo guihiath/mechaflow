@@ -43,7 +43,7 @@ async function Conteudo({
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
 
   const supabase = await createClient();
-  const [{ data: veiculo, error }, { data: clientes }, { data: ordens }] = await Promise.all([
+  const [{ data: veiculo, error }, { data: clientes }, { data: ordens, count: qtdOS }] = await Promise.all([
     supabase
       .from("veiculos")
       .select(
@@ -54,7 +54,7 @@ async function Conteudo({
     supabase.from("clientes").select("id, nome").order("nome").limit(1000),
     supabase
       .from("vw_os")
-      .select("id, numero, status, criado_em, sintoma_relatado")
+      .select("id, numero, status, criado_em, sintoma_relatado", { count: "exact" })
       .eq("veiculo_id", id)
       .order("criado_em", { ascending: false })
       .limit(3),
@@ -83,7 +83,11 @@ async function Conteudo({
       </div>
 
       <section className="flex flex-col gap-3">
-        <UltimasOS os={ordens ?? []} verTodas={`/os?q=${veiculo.placa}`} />
+        <UltimasOS
+          os={ordens ?? []}
+          verTodas={`/placa/${veiculo.placa}`}
+          rotuloVerTodas={`Ver histórico completo${qtdOS ? ` (${qtdOS})` : ""}`}
+        />
         <BotaoLink href={`/os/nova?placa=${veiculo.placa}`} variante="secundario">
           Abrir OS para este veículo
         </BotaoLink>

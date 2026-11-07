@@ -11,6 +11,7 @@ import type { DadosLinhaOSNumero } from "@/components/painel/linha-os-numero";
 import type { ProducaoMecanico } from "@/components/painel/lista-mecanicos";
 import type { ServicoRanking } from "@/components/painel/lista-servicos";
 import type { FotoTelaCheiaDados } from "@/components/os/foto-tela-cheia";
+import { ROTULO_LADO_AVARIA } from "@/lib/formato";
 import type { Database, HistoricoOS, HistoricoPlaca, HistoricoPlacaOS, PainelMes } from "@/lib/supabase/database.types";
 
 type Funcoes = Database["public"]["Functions"];
@@ -124,6 +125,40 @@ export function osDoHistorico(o: HistoricoPlacaOS, papel: PapelHistorico, hrefOS
   };
 }
 
+/**
+ * O que o detalhe usa da OS da lista (`historico_placa`), já cortado por papel: o mecânico só
+ * recebe as chaves da lista fechada comum; dono e atendente ganham as do balcão. Nunca custo.
+ * É o que a página guarda no navegador para abrir o cartão (nada de passar a linha inteira).
+ */
+export type ParteListaHistorico = Pick<
+  HistoricoPlacaOS,
+  "id" | "numero" | "status" | "criado_em" | "entregue_em" | "codigo_falha" | "causa_encontrada" | "solucao_aplicada"
+> &
+  Partial<Pick<HistoricoPlacaOS, "mecanico_nome" | "observacoes" | "total_centavos" | "forma_pagamento" | "pago_em">>;
+
+/** Cópia chave a chave da OS da lista para `ParteListaHistorico` (segunda trava por papel). */
+export function parteListaDoHistorico(o: ParteListaHistorico, papel: PapelHistorico): ParteListaHistorico {
+  const base: ParteListaHistorico = {
+    id: o.id,
+    numero: o.numero,
+    status: o.status,
+    criado_em: o.criado_em,
+    entregue_em: o.entregue_em ?? null,
+    codigo_falha: o.codigo_falha ?? null,
+    causa_encontrada: o.causa_encontrada ?? null,
+    solucao_aplicada: o.solucao_aplicada ?? null,
+  };
+  if (papel === "mecanico") return base;
+  return {
+    ...base,
+    mecanico_nome: o.mecanico_nome ?? null,
+    observacoes: o.observacoes ?? null,
+    ...(typeof o.total_centavos === "number" ? { total_centavos: o.total_centavos } : {}),
+    forma_pagamento: o.forma_pagamento ?? null,
+    pago_em: o.pago_em ?? null,
+  };
+}
+
 /** URLs já assinadas (por 15 min, só ao abrir), indexadas pelo `caminho` do Storage. */
 export type UrlsAssinadas = ReadonlyMap<string, { miniatura?: string | null; grande?: string | null }>;
 
@@ -132,7 +167,31 @@ function item(i: HistoricoOS["itens"][number], comPreco: boolean): ItemHistorico
   return comPreco ? { ...base, unitarioCentavos: i.preco_unitario_centavos ?? null, subtotalCentavos: i.subtotal_centavos ?? null } : base;
 }
 
-function vistoriaMecanico(v: HistoricoOS["vistorias"][number]): VistoriaMecanico {
+/** Fotos da vistoria lida pelo mecânico, na ordem da leitura atual: avarias, painel, depois. */
+function fotosVistoria(v: HistoricoOS["vistorias"][number], urls: UrlsAssinadas): FotoTelaCheiaDados[] {
+  const rotulo = (f: HistoricoOS["vistorias"][number]["fotos"][number]) => {
+    if (f.complemento_id) return "Acrescentado depois";
+    if (f.tipo === "avaria") {
+      const a = v.avarias.find((x) => x.id === f.avaria_id);
+      return a ? `Avaria: ${ROTULO_LADO_AVARIA[a.lado]}` : "Avaria";
+    }
+    return f.tipo === "painel" ? "Painel" : "Vistoria";
+  };
+  const ordem = (f: HistoricoOS["vistorias"][number]["fotos"][number]) => (f.complemento_id ? 2 : f.tipo === "painel" ? 1 : 0);
+  return [...v.fotos]
+    .sort((a, b) => ordem(a) - ordem(b))
+    .map((f) => ({
+      id: f.id,
+      categoria: "outro",
+      legenda: f.legenda,
+      estado: "enviada",
+      rotuloTipo: rotulo(f),
+      src: urls.get(f.caminho_miniatura)?.miniatura ?? null,
+      srcGrande: urls.get(f.caminho)?.grande ?? null,
+    }));
+}
+
+function vistoriaMecanico(v: HistoricoOS["vistorias"][number], urls: UrlsAssinadas): VistoriaMecanico {
   // Cópia chave a chave: nada de espalhar o objeto (lista fechada, DESIGN §14.7).
   return {
     id: v.id,
@@ -149,6 +208,7 @@ function vistoriaMecanico(v: HistoricoOS["vistorias"][number]): VistoriaMecanico
     itens: v.itens,
     avarias: v.avarias,
     complementos: v.complementos.map((c) => ({ id: c.id, texto: c.texto, criado_em: c.criado_em })),
+    fotos: fotosVistoria(v, urls),
   };
 }
 
@@ -160,7 +220,7 @@ function vistoriaMecanico(v: HistoricoOS["vistorias"][number]): VistoriaMecanico
  * `eventos` (LinhaTempo) não vem de nenhuma das duas leituras: quem quiser passa à parte.
  */
 export function detalheDoHistorico(
-  o: HistoricoPlacaOS,
+  o: ParteListaHistorico,
   h: HistoricoOS,
   papel: PapelHistorico,
   urls: UrlsAssinadas,
@@ -179,7 +239,7 @@ export function detalheDoHistorico(
   }));
   const vistorias: VistoriaHistorico[] = h.vistorias.map((v) => {
     const em = (v.status === "anulada" ? v.anulada_em : v.concluida_em) ?? v.concluida_em ?? v.anulada_em ?? o.criado_em;
-    if (mecanico) return { id: v.id, tipo: v.tipo, status: v.status, em, leitura: v.status === "concluida" ? vistoriaMecanico(v) : null };
+    if (mecanico) return { id: v.id, tipo: v.tipo, status: v.status, em, leitura: v.status === "concluida" ? vistoriaMecanico(v, urls) : null };
     return {
       id: v.id,
       tipo: v.tipo,

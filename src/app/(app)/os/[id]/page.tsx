@@ -379,12 +379,20 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
           </dd>
         </div>
       </dl>
-      <Link
-        href={`/veiculos/${os.veiculo_id}`}
-        className="mt-2 inline-flex min-h-toque items-center text-base font-bold text-info-texto underline underline-offset-4"
-      >
-        Ver cadastro do veículo
-      </Link>
+      <div className="mt-2 flex flex-wrap gap-x-6">
+        <Link
+          href={`/veiculos/${os.veiculo_id}`}
+          className="inline-flex min-h-toque items-center text-base font-bold text-info-texto underline underline-offset-4"
+        >
+          Ver cadastro do veículo
+        </Link>
+        <Link
+          href={`/placa/${normalizarPlaca(os.placa)}`}
+          className="inline-flex min-h-toque items-center text-base font-bold text-info-texto underline underline-offset-4"
+        >
+          Ver histórico desta placa
+        </Link>
+      </div>
     </Cartao>
   );
   const cartaoAutorizacao =
@@ -844,7 +852,7 @@ vistoriaBarra:
     <LinhaTempo eventos={montarEventos(histR.data ?? [], "mecanico")} />
 
     <Link
-      href={`/placa?placa=${os.placa}`}
+      href={`/placa/${normalizarPlaca(os.placa)}`}
       className="inline-flex min-h-toque items-center self-start text-base font-bold text-info-texto underline underline-offset-4"
     >
       Ver histórico desta placa

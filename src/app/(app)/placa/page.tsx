@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
-import { Phone, Plus, Search, Truck } from "lucide-react";
+import { History, Phone, Plus, Search } from "lucide-react";
 import { Cabecalho } from "@/components/layout/cabecalho";
 import { BotaoLink, classesBotao } from "@/components/ui/botao";
+import { PlacaNaoCadastrada } from "@/components/os/placa-nao-cadastrada";
 import { UltimasOS } from "@/components/os/ultimas-os";
 import { Busca } from "@/components/ui/busca";
-import { CaixaErro, Cartao, ChipPlaca, EstadoVazio, ListaCarregando, Pagina } from "@/components/ui/estados";
+import { CaixaErro, Cartao, ChipPlaca, ListaCarregando, Pagina } from "@/components/ui/estados";
 import { exigirContexto } from "@/lib/dal";
 import {
   formatarNumero,
@@ -14,7 +15,6 @@ import {
   formatarTelefone,
   normalizarPlaca,
   param,
-  placaValida,
   ROTULO_MODO,
   ROTULO_TIPO_VEICULO,
   soDigitos,
@@ -71,7 +71,7 @@ async function Resultado({ searchParams }: { searchParams: Promise<Record<string
       <>
         {busca}
         {!parecidas.length ? (
-          <NaoCadastrada placa={placa} podeEditar={podeEditar} />
+          <PlacaNaoCadastrada placa={placa} podeEditar={podeEditar} />
         ) : (
           <ul className="flex flex-col gap-3">
             {parecidas.map((v) => (
@@ -90,15 +90,19 @@ async function Resultado({ searchParams }: { searchParams: Promise<Record<string
 
   const { data: v, error } = await supabase.rpc("dados_da_placa", { p_placa: placa }).maybeSingle();
   if (error) return (<>{busca}<CaixaErro tentarDeNovo={`/placa?placa=${placa}`} /></>);
-  if (!v) return (<>{busca}<NaoCadastrada placa={placa} podeEditar={podeEditar} /></>);
+  if (!v) return (<>{busca}<PlacaNaoCadastrada placa={placa} podeEditar={podeEditar} /></>);
 
-  // Ultimas OS da placa (o mecanico so recebe as que ve; nenhuma coluna de valor).
-  const { data: ultimas, error: erroUltimas } = await supabase
-    .from("vw_os")
-    .select("id, numero, status, criado_em, sintoma_relatado")
-    .eq("veiculo_id", v.veiculo_id)
-    .order("criado_em", { ascending: false })
-    .limit(3);
+  // Ultimas OS da placa, so para dono e atendente (nenhuma coluna de valor). O mecanico nao as
+  // recebe: vw_os so traz as dele e contradiria o historico completo (DESIGN §14.7).
+  const ultimasR = podeEditar
+    ? await supabase
+        .from("vw_os")
+        .select("id, numero, status, criado_em, sintoma_relatado", { count: "exact" })
+        .eq("veiculo_id", v.veiculo_id)
+        .order("criado_em", { ascending: false })
+        .limit(3)
+    : null;
+  const historico = `/placa/${v.placa}`;
 
   return (
     <>
@@ -134,6 +138,12 @@ async function Resultado({ searchParams }: { searchParams: Promise<Record<string
             )}
           </div>
         </dl>
+        {!podeEditar && (
+          <Link href={historico} className={classesBotao("secundario", "mt-4")}>
+            <History size={24} strokeWidth={2.25} aria-hidden />
+            Ver histórico desta placa
+          </Link>
+        )}
         {podeEditar && (
           <div className="mt-4 flex flex-col gap-3">
             <BotaoLink href={`/os/nova?placa=${v.placa}`}>
@@ -147,28 +157,16 @@ async function Resultado({ searchParams }: { searchParams: Promise<Record<string
         )}
       </Cartao>
 
-      {erroUltimas ? (
-        <CaixaErro titulo="Não foi possível carregar as OS desta placa." tentarDeNovo={`/placa?placa=${placa}`} />
-      ) : (
-        <UltimasOS os={ultimas ?? []} verTodas={podeEditar ? `/os?q=${v.placa}` : undefined} />
-      )}
+      {ultimasR &&
+        (ultimasR.error ? (
+          <CaixaErro titulo="Não foi possível carregar as OS desta placa." tentarDeNovo={`/placa?placa=${placa}`} />
+        ) : (
+          <UltimasOS
+            os={ultimasR.data ?? []}
+            verTodas={historico}
+            rotuloVerTodas={`Ver histórico completo${ultimasR.count ? ` (${ultimasR.count})` : ""}`}
+          />
+        ))}
     </>
-  );
-}
-
-function NaoCadastrada({ placa, podeEditar }: { placa: string; podeEditar: boolean }) {
-  return (
-    <EstadoVazio
-      icone={Truck}
-      titulo={`${formatarPlaca(placa)} não está cadastrada na oficina.`}
-      texto={podeEditar ? "Confira a placa ou cadastre o veículo." : "Confira a placa. Se o veículo é novo, avise o dono ou o atendente."}
-      acao={
-        podeEditar
-          ? placaValida(placa)
-            ? { href: `/veiculos/novo?placa=${placa}`, rotulo: `Cadastrar ${formatarPlaca(placa)}` }
-            : { href: "/veiculos/novo", rotulo: "Cadastrar veículo" }
-          : undefined
-      }
-    />
   );
 }
