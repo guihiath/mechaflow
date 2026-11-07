@@ -14,6 +14,7 @@ import {
   Contact,
   LogOut,
   Wallet,
+  HandCoins,
 } from "lucide-react";
 import type { Papel } from "@/lib/contexto";
 import { FormSair } from "@/components/fotos/form-sair";
@@ -43,7 +44,7 @@ const BARRA: Record<Papel, Item[]> = {
     OS,
     { href: "/clientes", rotulo: "Clientes", icone: Contact },
     { href: "/catalogo", rotulo: "Catálogo", icone: BookOpen },
-    { href: "/mais", rotulo: "Mais", icone: Ellipsis, ativoEm: ["/mais", "/veiculos", "/placa", "/conta"] },
+    { href: "/mais", rotulo: "Mais", icone: Ellipsis, ativoEm: ["/mais", "/veiculos", "/placa", "/conta", "/a-receber"] },
   ],
   mecanico: [
     { href: "/minhas-os", rotulo: "Minhas OS", icone: ClipboardList, ativoEm: ["/minhas-os", "/os", "/catalogo"] },
@@ -69,6 +70,8 @@ const LATERAL: Record<Papel, Item[]> = {
   atendente: [
     OS_LATERAL,
     { href: "/clientes", rotulo: "Clientes", icone: Contact },
+    // DESIGN §14.1: "A receber" logo depois de "Clientes".
+    { href: "/a-receber", rotulo: "A receber", icone: HandCoins },
     { href: "/veiculos", rotulo: "Veículos", icone: Truck },
     { href: "/placa", rotulo: "Buscar placa", icone: Search },
     { href: "/catalogo", rotulo: "Catálogo", icone: BookOpen },

@@ -29,7 +29,6 @@ import {
   comecarServicoOS,
   marcarProntaOS,
   mudarStatusOS,
-  registrarPagamentoOS,
   registrarRespostaOS,
   removerItemMecanicoOS,
   removerItemOS,
@@ -51,6 +50,7 @@ import { CartaoLink, type SituacaoCartaoLink } from "@/components/orcamento/cart
 import { RecusaDestaque } from "@/components/orcamento/prova-orcamento";
 import { EtiquetaSemPreco } from "@/components/os/badge-status";
 import { BarraAcoesMecanico, BarraAcoesOS, classesBotaoBarra } from "@/components/os/barra-acoes-os";
+import { FolhaPagamento as FolhaPagamentoOS } from "@/components/os/folha-pagamento";
 import { LinhaItemOS, ListaItensOS } from "@/components/os/linha-item-os";
 import { AvisoDesfazer } from "@/components/ui/aviso-desfazer";
 import { Botao, BotaoLink } from "@/components/ui/botao";
@@ -67,8 +67,6 @@ import { LIMITE_FOTOS_OS } from "@/lib/fotos/regras";
 import { centavosParaCampo, formatarCentavos, formatarDiaHora, formatarTelefone, reaisParaCentavos } from "@/lib/formato";
 import {
   CANAIS_RESPOSTA,
-  FORMAS_PAGAMENTO,
-  hojeEmSaoPaulo,
   textoUnidade,
   unidadeFracionada,
   type FormaPagamento,
@@ -2255,34 +2253,15 @@ function FolhaMecanico({ aoFechar, comecar, aoComecar }: { aoFechar: () => void;
 
 // =================================================================== folha: pagamento
 
+/** A folha mora em `components/os/folha-pagamento.tsx` (F7-B5), compartilhada com `/a-receber`. */
 function FolhaPagamento({ aoFechar }: { aoFechar: () => void }) {
   const { os } = useOS();
-  const [forma, setForma] = useState<FormaPagamento | "">(os.formaPagamento ?? "");
-  const [hoje] = useState(() => hojeEmSaoPaulo());
-  const envio = useEnvio(registrarPagamentoOS, "Não foi possível registrar o pagamento. Confira a internet e tente de novo.", aoFechar);
   return (
-    <Folha
-      aberta
+    <FolhaPagamentoOS
+      os={{ id: os.id, totalCentavos: os.totalCentavos ?? 0, formaPagamento: os.formaPagamento ?? null }}
       aoFechar={aoFechar}
-      titulo="Registrar pagamento"
-      rodape={<BotaoForm form="form-pagamento" enviando={envio.enviando} rotulo="Registrar pagamento" rotuloEnviando="Registrando…" />}
-    >
-      <form id="form-pagamento" onSubmit={envio.enviar} noValidate className="flex flex-col gap-5">
-        <input type="hidden" name="os_id" value={os.id} />
-        <p className="font-mono text-2xl">Total: {formatarCentavos(os.totalCentavos ?? 0)}</p>
-        <Escolha
-          rotulo="Forma de pagamento"
-          name="forma_pagamento"
-          valor={forma}
-          aoMudar={setForma}
-          colunas={2}
-          opcoes={FORMAS_PAGAMENTO}
-          erro={envio.campos.forma_pagamento}
-        />
-        <Campo rotulo="Recebido em" name="recebido_em" type="date" defaultValue={hoje} max={hoje} erro={envio.campos.recebido_em} />
-        {envio.estado?.erro && <CaixaMensagem tipo="erro">{envio.estado.erro}</CaixaMensagem>}
-      </form>
-    </Folha>
+      aoRegistrar={aoFechar}
+    />
   );
 }
 

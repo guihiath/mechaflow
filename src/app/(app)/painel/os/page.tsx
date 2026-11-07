@@ -72,6 +72,8 @@ async function Lista({ searchParams }: { searchParams: Promise<Params> }) {
   const hoje = diaEmSaoPaulo(agora);
   const mesAtual = mesAtualEmSaoPaulo(agora);
 
+  // "A receber" agora tem tela própria, com o registrar pagamento (F7-B5).
+  if (param(sp.ver) === "a_receber") redirect("/a-receber");
   // Parâmetro inválido volta para o painel (DESIGN §14.3).
   const ver = lerVer(param(sp.ver));
   if (!ver) redirect("/painel");

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
-import { BookOpen, ChevronRight, Search, Settings, Truck, User, Users, Wallet } from "lucide-react";
+import { BookOpen, ChevronRight, HandCoins, Search, Settings, Truck, User, Users, Wallet } from "lucide-react";
 import { Cabecalho } from "@/components/layout/cabecalho";
 import { Cartao, ListaCarregando, Pagina } from "@/components/ui/estados";
 import { exigirContexto } from "@/lib/dal";
@@ -23,7 +23,13 @@ const ITENS = {
     { href: "/configuracoes", titulo: "Configurações da oficina", texto: "Vistoria e checklist", icone: Settings },
     CONTA,
   ],
-  atendente: [VEICULOS, PLACA, CONTA],
+  atendente: [
+    // DESIGN §14.1: primeiro item do atendente.
+    { href: "/a-receber", titulo: "A receber", texto: "Quem deve e registrar pagamento", icone: HandCoins },
+    VEICULOS,
+    PLACA,
+    CONTA,
+  ],
 };
 
 export default function MaisPage() {

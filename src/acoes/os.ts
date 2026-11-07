@@ -1,10 +1,10 @@
 "use server";
 
-import { refresh } from "next/cache";
+import { refresh, revalidatePath } from "next/cache";
 import { contextoParaAcao } from "@/lib/dal";
 import { erroCampos, temErros, texto, textoOuNull, type EstadoAcao } from "@/lib/acao";
 import { traduzirErro, type ErroSupabase } from "@/lib/erros";
-import { normalizarPlaca, REGEX_PLACA, reaisParaCentavos, soDigitos, textoParaQuantidade } from "@/lib/formato";
+import { formatarDiaMes, normalizarPlaca, REGEX_PLACA, reaisParaCentavos, soDigitos, textoParaQuantidade } from "@/lib/formato";
 import { ehCanalManual, ehFormaPagamento, hojeEmSaoPaulo, UNIDADES_ITEM, type UnidadeItem } from "@/lib/os";
 import { formatarDataEHora } from "@/lib/orcamento";
 import { ehStatusOS, rotuloStatus, type StatusOS } from "@/lib/os-status";
@@ -857,12 +857,28 @@ export async function fecharOS(_anterior: EstadoAcao, dados: FormData): Promise<
   return { ok: true };
 }
 
-/** OS entregue "a receber" -> paga. Data do <input type="date"> (hoje = agora). */
+/**
+ * Depois de mexer no pagamento, o painel e a lista de quem deve não podem ficar com número velho
+ * (ARQUITETURA 14.5): `revalidatePath` limpa o cache do roteador no navegador, e `refresh()` relê
+ * a tela aberta.
+ */
+function atualizarDinheiro() {
+  revalidatePath("/painel", "layout");
+  revalidatePath("/a-receber");
+  refresh();
+}
+
+/**
+ * OS entregue "a receber" -> paga. Data do <input type="date"> (hoje = agora).
+ * Pela lista e pelo detalhe, sempre com `p_so_se_a_receber = true` (decisão 5 do CEO, ARQUITETURA
+ * 14.15): se outra pessoa já registrou, nada muda e a tela diz quem e quando.
+ */
 export async function registrarPagamentoOS(_anterior: EstadoAcao, dados: FormData): Promise<EstadoAcao> {
   if (!(await contextoParaAcao(["dono", "atendente"]))) return SEM_PERMISSAO;
   const osId = texto(dados, "os_id");
   const forma = texto(dados, "forma_pagamento");
   const data = texto(dados, "recebido_em");
+  const naLista = texto(dados, "origem") === "lista";
   if (!UUID.test(osId)) return SEM_PERMISSAO;
   const hoje = hojeEmSaoPaulo();
   const campos = {
@@ -875,11 +891,43 @@ export async function registrarPagamentoOS(_anterior: EstadoAcao, dados: FormDat
   const args: Database["public"]["Functions"]["registrar_pagamento"]["Args"] = {
     p_os_id: osId,
     p_forma_pagamento: forma as Database["public"]["Enums"]["forma_pagamento"],
+    p_so_se_a_receber: true,
   };
   // Dia anterior: meio-dia de Sao Paulo (nao vira o dia anterior em UTC).
   if (data !== hoje) args.p_pago_em = `${data}T12:00:00-03:00`;
   const { error } = await supabase.rpc("registrar_pagamento", args);
+  if (error?.message === "pagamento_ja_registrado") {
+    // DESIGN §14.4: "O pagamento desta OS já foi registrado por Ana em 03/11. A lista foi atualizada."
+    const { data: atual } = await supabase.from("vw_os").select("pago_em, pagamento_registrado_por_nome").eq("id", osId).maybeSingle();
+    atualizarDinheiro();
+    const quem = atual?.pagamento_registrado_por_nome ? ` por ${atual.pagamento_registrado_por_nome}` : "";
+    const quando = atual?.pago_em ? ` em ${formatarDiaMes(atual.pago_em)}` : "";
+    const fim = naLista ? "A lista foi atualizada." : "A tela foi atualizada.";
+    return {
+      erro: quem || quando ? `O pagamento desta OS já foi registrado${quem}${quando}. ${fim}` : traduzirErro(error, "os"),
+      dados: { fechar: "1" },
+    };
+  }
   if (error) return erroDaOS(supabase, osId, error, "registrar o pagamento");
-  refresh();
+  atualizarDinheiro();
   return { ok: true, mensagem: "Pagamento registrado." };
+}
+
+/**
+ * "Desfazer" do pagamento registrado pela lista de quem deve (DESIGN §14.4): volta a OS para
+ * "a receber" (`p_pago_em = null`) e restaura a forma escolhida antes. Sem `p_so_se_a_receber`,
+ * como a ARQUITETURA 14.5 manda para corrigir.
+ */
+export async function desfazerPagamentoOS(osId: string, formaAnterior: string): Promise<EstadoAcao> {
+  if (!(await contextoParaAcao(["dono", "atendente"]))) return SEM_PERMISSAO;
+  if (!UUID.test(osId) || !ehFormaPagamento(formaAnterior)) return SEM_PERMISSAO;
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("registrar_pagamento", {
+    p_os_id: osId,
+    p_forma_pagamento: formaAnterior,
+    p_pago_em: null,
+  });
+  if (error) return erroDaOS(supabase, osId, error, "desfazer o pagamento");
+  atualizarDinheiro();
+  return { ok: true };
 }

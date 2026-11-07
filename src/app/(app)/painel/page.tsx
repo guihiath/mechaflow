@@ -146,7 +146,7 @@ function BlocoHoje({ dados, hoje }: { dados: PainelHoje | null; hoje: string }) 
             quantidadeOS={dados.a_receber.qtd_os}
             frases={[fraseAReceber(dados.a_receber, hoje)]}
             fraseZero={TEXTO_PAINEL.aReceberZero}
-            href="/painel/os?ver=a_receber"
+            href="/a-receber"
             tamanho="hoje"
             faixa="bg-alerta"
           />
