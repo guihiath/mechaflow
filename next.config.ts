@@ -7,10 +7,12 @@ const nextConfig: NextConfig = {
   env: {
     NEXT_PUBLIC_VERSAO_APP: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) || "local",
   },
-  // Fontes dos PDFs (lidas com fs na rota): vistoria (F4-B6) e OS / resumo final (F7-B3).
+  // Fontes dos PDFs (lidas com fs na rota): vistoria (F4-B6), OS / resumo final (F7-B3) e
+  // orçamento pela versão congelada (F7-B9).
   outputFileTracingIncludes: {
     "/api/vistorias/*/pdf": ["./src/assets/fonts/*.ttf"],
     "/api/os/*/pdf": ["./src/assets/fonts/*.ttf"],
+    "/api/os/*/orcamento/*/pdf": ["./src/assets/fonts/*.ttf"],
   },
   turbopack: {
     rules: {

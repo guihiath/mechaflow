@@ -3,11 +3,12 @@ import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { Cabecalho } from "@/components/layout/cabecalho";
 import { DocumentoOrcamento } from "@/components/orcamento/documento-orcamento";
+import { BotaoPdfOrcamento } from "@/components/orcamento/pdf-orcamento";
 import { DetalheCarregando } from "@/components/os/detalhe-carregando";
 import { CaixaErro, Pagina } from "@/components/ui/estados";
 import { CaixaMensagem } from "@/components/ui/formulario";
 import { exigirContexto } from "@/lib/dal";
-import { formatarDiaHora } from "@/lib/formato";
+import { formatarDiaHora, normalizarPlaca } from "@/lib/formato";
 import { documentoDoBanco, formatarDataEHora } from "@/lib/orcamento";
 import { CANAL_NA_FRASE } from "@/lib/os";
 import { createClient } from "@/lib/supabase/server";
@@ -47,7 +48,7 @@ async function Conteudo({ params }: { params: Promise<{ id: string; versao: stri
   const supabase = await createClient();
   const [{ data: v, error }, osR, situacaoR] = await Promise.all([
     supabase.from("vw_orcamento_versoes").select("id, numero, conteudo, congelada_em, codigo_conferencia").eq("os_id", id).eq("numero", numero).maybeSingle(),
-    supabase.from("vw_os").select("numero").eq("id", id).maybeSingle(),
+    supabase.from("vw_os").select("numero, status").eq("id", id).maybeSingle(),
     supabase.from("vw_orcamento_situacao").select("versao_numero, itens_travados, link_situacao").eq("os_id", id).maybeSingle(),
   ]);
   if (error || osR.error) {
@@ -99,6 +100,10 @@ async function Conteudo({ params }: { params: Promise<{ id: string; versao: stri
           <DocumentoOrcamento documento={documento} expiraEm={linkR.data?.expira_em ?? null} variante="consulta" />
         </div>
         {v.codigo_conferencia && <p className="font-mono text-xs">Código de conferência: {v.codigo_conferencia}</p>}
+        {/* F7-B9: PDF desta versão congelada (só dono e atendente; OS cancelada não gera). */}
+        {osR.data.status !== "cancelada" && (
+          <BotaoPdfOrcamento osId={id} versao={numero} numeroOS={osR.data.numero ?? documento.os_numero} placaNormalizada={normalizarPlaca(documento.veiculo_placa)} />
+        )}
       </Pagina>
     </>
   );
