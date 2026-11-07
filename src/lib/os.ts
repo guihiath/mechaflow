@@ -146,7 +146,7 @@ function textoEventoLink(obs: string, por: string | null): string | null {
 /**
  * Converte o historico do banco em eventos da LinhaTempo (mais recente primeiro).
  * O texto e montado aqui: a observacao crua do banco nao vai para o navegador.
- * Mecanico: eventos de pagamento e do link ficam de fora (DESIGN §10.0 regra 4 e §13.15) e o
+ * Mecanico: eventos de pagamento, de preco e do link ficam de fora (DESIGN §10.0 regra 4 e §13.15) e o
  * texto livre do balcao (motivo de recusa / cancelamento) vira texto fixo: pode conter valor (I5).
  * Dono e atendente: a frase distingue a resposta do cliente no link da marcada por alguem da
  * oficina, e ja traz o nome de quem fez (por isso `por` vai vazio nesses eventos).
@@ -237,6 +237,15 @@ export function montarEventos(linhas: LinhaHistorico[], papel: Papel): EventoOS[
       case "vistoria": {
         const texto = textoVistoria(obs, h.por_nome, mecanico);
         if (texto) eventos.push({ ...base, tipo: "texto", texto });
+        break;
+      }
+      case "preco": {
+        // F7-B8 (ARQUITETURA 14.8; decisao 3 do CEO em 14.15): "Ana definiu preços", sem valor,
+        // sem item e sem contagem. O banco ja nao manda ao mecanico (RLS de os_historico); a tela
+        // tambem corta. Vale so daqui para a frente: OS antiga nao tem o evento nem aviso.
+        if (mecanico) break;
+        const quem = h.por_nome?.trim();
+        eventos.push({ ...base, por: null, tipo: "texto", texto: quem ? `${quem} definiu preços` : "Preços definidos" });
         break;
       }
       case "pagamento":
