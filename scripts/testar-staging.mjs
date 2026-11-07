@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Teste de ponta a ponta das Fases 1, 2, 3, 4 e 6 contra o Supabase STAGING (so dados ficticios).
+ * Teste de ponta a ponta das Fases 1, 2, 3, 4, 6 e 7 contra o Supabase STAGING (so dados ficticios).
  * Fase 2 (OS): os dois modos ate "entregue", autorizacao, mecanico sem valores pela API
  * (tabelas e views), isolamento entre oficinas, idempotencia e numeracao com aberturas simultaneas.
  * Fase 3: itens lancados pelo mecanico (sem valores, status, "apos a aprovacao"), observacoes
@@ -15,12 +15,20 @@
  * Fase 6: orcamento por link com cliente anon de verdade (so a chave publishable): lista fechada,
  * tokens, versao congelada, trava, prova imutavel, convivencia, concorrencia real, limite,
  * isolamento, mecanico e, com APP_URL, cabecalhos e HTML da pagina publica e telas do balcao.
+ * Fase 7: painel, a receber, historico por placa e PDF (PLANO 20.4): papeis nas leituras novas,
+ * oficinas A x B com a mesma placa, anon, centavos inteiros, painel = soma de vw_os e lista = numero,
+ * pagamento na virada do dia em SP e "voltar para a receber", lista fechada do PDF, Storage do
+ * mecanico, conferir_vistoria/conferir_orcamento antes e depois, leitura sem mudar o banco e mes
+ * padrao com relogio fixo; com APP_URL, PDFs (texto extraido, tamanho, 401/404/409) e paginas.
+ * Desde a Fase 7 o mecanico LE no Storage as fotos enviadas de toda a oficina (14.4): os testes
+ * das Fases 3 e 4 seguem isso. `entregue_em` no passado so no fase7_painel.sql.
  *
  * Uso:
  *   node scripts/testar-staging.mjs                         # so testes sem login (anon)
  *   TESTE_EMAIL_DOMINIO=www.example.org node scripts/testar-staging.mjs
  *   APP_URL=http://localhost:3000 ...                       # tambem testa as paginas do app
  *   TESTE_SO_FASE6=1 ...                                    # so a Fase 6, com 4 contas e 2 oficinas
+ *   TESTE_SO_FASE7=1 ...                                    # so a Fase 7, com 5 contas e 2 oficinas
  *   TESTE_PLAYWRIGHT=/caminho/playwright/index.mjs ...      # com APP_URL: cliques no navegador
  *
  * Requisitos para o teste completo:
@@ -39,6 +47,7 @@ import { pathToFileURL } from "node:url";
 import { crc32, deflateSync } from "node:zlib";
 import { createClient } from "@supabase/supabase-js";
 import { createServerClient } from "@supabase/ssr";
+import { PDFArray, PDFDict, PDFDocument, PDFName, PDFRawStream, decodePDFRawStream } from "pdf-lib";
 
 // ------------------------------------------------------------------ env
 const env = Object.fromEntries(
@@ -261,6 +270,7 @@ async function testesCompletos() {
   const { mec2 } = await testesFase3({ donoA, mec, at, donoB, ofA: ofA.data, vei: vei.data, serv: serv.data, peca: peca.data, pend: pend.data });
   await testesFase4({ donoA, mec, mec2, at, donoB, ofA: ofA.data, ofB: ofB.data, vei: vei.data });
   await testesFase6({ donoA, mec, at, donoB, ofA: ofA.data, ofB: ofB.data });
+  await testesFase7({ donoA, mec, mec2, at, donoB, ofA: ofA.data, ofB: ofB.data });
 
   console.log("\n== Desativar mecanico ==");
   const desat = await donoA.sb.rpc("atualizar_membro", { p_perfil_id: mec.session.user.id, p_ativo: false });
@@ -911,12 +921,14 @@ async function testesFase3({ donoA, mec, at, donoB, ofA, vei, serv, peca, pend }
   const aindaD = (await donoA.sb.from("vw_os_fotos").select("legenda").eq("id", fd.id).single()).data;
   checar("dono A: foto intacta depois das tentativas da B", Boolean(aindaD) && aindaD.legenda === null);
 
-  // mecanico 2 (sem ve_todas_os) nao ve a OS do mecanico 1
+  // mecanico 2 (sem ve_todas_os) nao ve a OS do mecanico 1. Desde a Fase 7 (20.6-7, ARQUITETURA 14.4)
+  // ele LE no Storage as fotos ENVIADAS de qualquer OS da oficina (o historico da placa mostra), mas
+  // continua sem a galeria (tabela/view), sem subir e sem apagar.
   const m2Baixa = await baixa(mec2.sb, fd.caminho);
   const m2Assina = await mec2.sb.storage.from(BUCKET_FOTOS).createSignedUrl(fm.caminho, 60);
   const m2Lista = await mec2.sb.storage.from(BUCKET_FOTOS).list(`${ofA}/${osF}`);
   const m2Gal = await mec2.sb.from("vw_os_fotos").select("id").eq("os_id", osF);
-  checar("mecanico 2: nao baixa, nao assina, nao lista e nao ve na galeria fotos de OS que nao e dele", !m2Baixa && Boolean(m2Assina.error) && (m2Lista.data ?? []).length === 0 && (m2Gal.data ?? []).length === 0, `${errSt(m2Assina.error)}`);
+  checar("mecanico 2: le no Storage as fotos enviadas de OS que nao e dele (Fase 7), mas nao as ve na galeria", m2Baixa && !m2Assina.error && (m2Gal.data ?? []).length === 0, `${errSt(m2Assina.error)} | lista ${m2Lista.data?.length ?? errSt(m2Lista.error)} | galeria ${m2Gal.data?.length}`);
   const m2Reg = await registrarFoto(mec2.sb, osF);
   const m2Sobe = await subirArquivo(mec2.sb, pendA.caminho);
   checar("mecanico 2: nao registra foto nem sobe arquivo na OS de outro", msg(m2Reg.r) === "os_nao_encontrada" && Boolean(m2Sobe.error), `${msg(m2Reg.r)}/${errSt(m2Sobe.error)}`);
@@ -1512,14 +1524,17 @@ async function testesFase4({ donoA, mec, mec2, at, donoB, ofA, ofB, vei }) {
   );
   checar("mecanico: pode_editar=false na concluida, pode_complementar=true, pode_anular=false", mVe.data?.pode_editar === false && mVe.data?.pode_complementar === true && mVe.data?.pode_anular === false, JSON.stringify(mVe.data && [mVe.data.pode_editar, mVe.data.pode_complementar, mVe.data.pode_anular]));
   const mNaoVe = await mec.sb.from("vw_vistorias").select("id").in("id", [V2.vid, novaV2.data?.vistoria_id, V4]);
-  const mNaoBaixa = await tamanhoV(mec.sb, V2.fAv.caminho);
+  // Fase 7 (ARQUITETURA 14.4): foto ENVIADA de vistoria concluida/anulada de outra OS da oficina e
+  // legivel no Storage (historico da placa); a assinatura dessa OS continua fora.
+  const mBaixaFoto = await tamanhoV(mec.sb, V2.fAv.caminho);
+  const mNaoBaixa = await tamanhoV(mec.sb, V2.as.caminho);
   const mIni2 = await mec.sb.rpc("iniciar_vistoria", { p_os_id: os4 });
   const mSalva = await mec.sb.rpc("salvar_vistoria", { p_vistoria_id: novaV2.data?.vistoria_id, p_observacoes: "x" });
   const mComp = await mec.sb.rpc("complementar_vistoria", { p_id: uuid(), p_vistoria_id: V4, p_texto: "x" });
   checar(
-    "mecanico em OS que nao e dele: nao ve vistoria nem arquivo, nao inicia, nao edita e nao complementa",
-    (mNaoVe.data ?? []).length === 0 && mNaoBaixa === 0 && ["os_nao_encontrada", "acesso_negado"].includes(msg(mIni2)) && msg(mSalva) === "vistoria_nao_encontrada" && msg(mComp) === "vistoria_nao_encontrada",
-    `${mNaoVe.data?.length}/${mNaoBaixa}/${msg(mIni2)}/${msg(mSalva)}/${msg(mComp)}`,
+    "mecanico em OS que nao e dele: nao ve a vistoria nem a assinatura, nao inicia, nao edita e nao complementa (foto enviada: le, Fase 7)",
+    (mNaoVe.data ?? []).length === 0 && mBaixaFoto > 0 && mNaoBaixa === 0 && ["os_nao_encontrada", "acesso_negado"].includes(msg(mIni2)) && msg(mSalva) === "vistoria_nao_encontrada" && msg(mComp) === "vistoria_nao_encontrada",
+    `${mNaoVe.data?.length}/${mBaixaFoto}/${mNaoBaixa}/${msg(mIni2)}/${msg(mSalva)}/${msg(mComp)}`,
   );
   const mSalvaR = guardaMec(await mec.sb.rpc("salvar_vistoria", { p_vistoria_id: VR, p_combustivel: "cheio" }));
   checar("mecanico continua a vistoria que o dono comecou na OS dele", !mSalvaR.error, msg(mSalvaR));
@@ -1531,8 +1546,8 @@ async function testesFase4({ donoA, mec, mec2, at, donoB, ofA, ofB, vei }) {
   const m2Sv = await mec2.sb.rpc("salvar_vistoria", { p_vistoria_id: VR, p_observacoes: "x" });
   const m2Up = await subirV(mec2.sb, fRasc.caminho);
   checar(
-    "mecanico 2 (OS de outro): nao ve, nao baixa, nao assina URL, nao inicia, nao edita, nao sobe arquivo",
-    (m2Ve.data ?? []).length === 0 && m2Bx === 0 && Boolean(m2Url.error) && ["os_nao_encontrada", "acesso_negado"].includes(msg(m2Ini)) && msg(m2Sv) === "vistoria_nao_encontrada" && Boolean(m2Up.error),
+    "mecanico 2 (OS de outro): nao ve, nao baixa a assinatura, nao inicia, nao edita, nao sobe arquivo (URL da foto enviada: sim, Fase 7)",
+    (m2Ve.data ?? []).length === 0 && m2Bx === 0 && !m2Url.error && ["os_nao_encontrada", "acesso_negado"].includes(msg(m2Ini)) && msg(m2Sv) === "vistoria_nao_encontrada" && Boolean(m2Up.error),
     `${m2Ve.data?.length}/${m2Bx}/${errSt(m2Url.error)}/${msg(m2Ini)}/${msg(m2Sv)}/${errSt(m2Up.error)}`,
   );
   const vt = await donoA.sb.rpc("atualizar_membro", { p_perfil_id: idMec2, p_ve_todas_os: true });
@@ -2643,6 +2658,756 @@ async function testesSoFase6() {
   console.log(`\ninfo    contas criadas nesta rodada: *.${RODADA}@${DOMINIO} (ficam no staging)`);
 }
 
+// ------------------------------------------------------------------ Fase 7: painel, a receber, historico e PDF
+// Criterios "testar:staging" do PLANO 20.4 (ARQUITETURA 14). So oficinas e contas desta rodada:
+// nunca a "Oficina Diesel Teste" nem a gabarito7. O `entregue_em` passado nao se cria pela API: esse
+// caso (e o pagamento na virada de um mes que ja passou) fica no fase7_painel.sql. Os valores sao
+// longos e unicos, para a busca no HTML e no PDF nao bater por acaso.
+const F7 = {
+  SERV_CAT: 1234567, // servico do catalogo; quantidade 1,5 -> round(1.851.850,5) = 1.851.851
+  PECA: 3333337, //     peca avulsa; quantidade 2,5 -> round(8.333.342,5) = 8.333.343
+  CUSTO: 4444447, //    custo da peca: nunca no PDF, nem para o atendente
+  AVULSO: 5000107, //   servico fora do catalogo
+  ALTO: 123456789, //   R$ 1.234.567,89 (PDF com valor alto)
+  B: 7777713, //        OS da oficina B com a mesma placa
+};
+const TOTAL_O1 = Math.round(1.5 * F7.SERV_CAT) + Math.round(2.5 * F7.PECA); // 10.185.194
+const CUSTO_O1 = Math.round(2.5 * F7.CUSTO); // 11.111.118
+const LIMITE_PDF = 4_500_000; // limite de resposta da funcao da Vercel (4,5 MB)
+
+/** Chaves que cada papel recebe do historico (ARQUITETURA 14.6, lista fechada). */
+const H = {
+  veiculo: "ano_modelo,horimetro_atual,id,km_atual,marca,modelo,placa,tipo",
+  veiculoBalcao: ",cliente_id,cliente_nome",
+  os: "abre_detalhe,cancelado_em,causa_encontrada,codigo_falha,criado_em,entregue_em,horimetro,id,km,numero,qtd_fotos,qtd_itens,qtd_vistorias,sintoma_relatado,solucao_aplicada,status",
+  osBalcao: ",cliente_nome,forma_pagamento,mecanico_nome,motivo_cancelamento,observacoes,pago_em,total_centavos",
+  osDono: ",custo_total_centavos",
+  item: "descricao,id,quantidade,tipo,unidade",
+  itemBalcao: ",preco_unitario_centavos,subtotal_centavos",
+  itemDono: ",custo_unitario_centavos",
+  foto: "altura,caminho,caminho_miniatura,categoria,criado_em,id,largura,legenda",
+  vistoria: "avarias,combustivel,complementos,concluida_em,fotos,horimetro,id,itens,km,anulada_em,objetos,observacoes,sem_avarias,status,tipo",
+  vistoriaBalcao: ",anulada_por_nome,assinado_por_nome,assinatura_caminho,concluida_por_nome,motivo_anulacao,sem_assinatura_motivo",
+};
+const ordenadas = (lista) => lista.split(",").filter(Boolean).sort().join(",");
+const chavesH = (...partes) => ordenadas(partes.join(","));
+/** Chaves do dados_pdf_os (ARQUITETURA 14.7, lista fechada). */
+const CHAVES_PDF_OS = ordenadas("tipo_documento,oficina_nome,oficina_telefone,oficina_cnpj,fuso,os_numero,status,criado_em,entregue_em,gerado_em,cliente_nome,veiculo_placa,veiculo_marca,veiculo_modelo,veiculo_ano,km,causa_encontrada,solucao_aplicada,itens,subtotal_servicos_centavos,subtotal_pecas_centavos,total_centavos,itens_sem_preco,forma_pagamento,situacao_pagamento,pago_em");
+const CHAVES_PDF_ITEM = ordenadas("tipo,descricao,quantidade,unidade,preco_unitario_centavos,subtotal_centavos");
+
+/** Toda chave (em qualquer nivel) de um JSON. */
+function todasAsChaves(x, saida = new Set()) {
+  if (Array.isArray(x)) x.forEach((v) => todasAsChaves(v, saida));
+  else if (x && typeof x === "object") {
+    for (const [k, v] of Object.entries(x)) {
+      saida.add(k);
+      todasAsChaves(v, saida);
+    }
+  }
+  return saida;
+}
+/** Campos de dinheiro (`*_centavos`) que nao sao inteiros. */
+function centavosQuebrados(x, caminho = "") {
+  if (Array.isArray(x)) return x.flatMap((v, i) => centavosQuebrados(v, `${caminho}[${i}]`));
+  if (!x || typeof x !== "object") return [];
+  return Object.entries(x).flatMap(([k, v]) => {
+    const aqui = `${caminho}.${k}`;
+    if (/centavos/.test(k) && v !== null && !Number.isSafeInteger(v)) return [`${aqui}=${JSON.stringify(v)}`];
+    return centavosQuebrados(v, aqui);
+  });
+}
+const cnpjFormatado = (d) => `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-${d.slice(12)}`;
+const cpfFormatado = (d) => `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}`;
+
+// ---------------------------------------------------------------- texto do PDF (pdf-lib, sem dependencia nova)
+// O app desenha com fontes embutidas (Identity-H): o texto vem em <hex> Tj e volta a ser texto pela
+// ToUnicode de cada fonte. Basta para procurar o que pode e o que nao pode estar no arquivo.
+const bytesDoStream = (s) => (s instanceof PDFRawStream ? decodePDFRawStream(s).decode() : s.getContents());
+function lerCMap(texto) {
+  const mapa = new Map();
+  const utf16 = (hex) => String.fromCharCode(...(hex.match(/.{4}/g) ?? []).map((h) => parseInt(h, 16)));
+  for (const b of texto.matchAll(/beginbfchar([\s\S]*?)endbfchar/g)) {
+    for (const [, de, para] of b[1].matchAll(/<([0-9a-fA-F]+)>\s*<([0-9a-fA-F]+)>/g)) mapa.set(de.toLowerCase().padStart(4, "0"), utf16(para));
+  }
+  for (const b of texto.matchAll(/beginbfrange([\s\S]*?)endbfrange/g)) {
+    for (const [, a, z, d] of b[1].matchAll(/<([0-9a-fA-F]+)>\s*<([0-9a-fA-F]+)>\s*<([0-9a-fA-F]+)>/g)) {
+      for (let c = parseInt(a, 16), u = parseInt(d, 16); c <= parseInt(z, 16); c++, u++) mapa.set(c.toString(16).padStart(4, "0"), String.fromCharCode(u));
+    }
+  }
+  return mapa;
+}
+async function textoDoPdf(bytes) {
+  const doc = await PDFDocument.load(bytes, { updateMetadata: false });
+  const trechos = [];
+  for (const pag of doc.getPages()) {
+    const mapas = new Map();
+    const fontes = pag.node.Resources()?.lookupMaybe(PDFName.of("Font"), PDFDict);
+    for (const [nome, ref] of fontes?.entries() ?? []) {
+      const tu = doc.context.lookup(ref, PDFDict)?.lookup(PDFName.of("ToUnicode"));
+      mapas.set(String(nome).replace(/^\//, ""), tu ? lerCMap(Buffer.from(bytesDoStream(tu)).toString("latin1")) : null);
+    }
+    const c = pag.node.Contents();
+    const streams = c instanceof PDFArray ? c.asArray().map((r) => doc.context.lookup(r)) : [c];
+    const conteudo = streams.filter(Boolean).map((s) => Buffer.from(bytesDoStream(s)).toString("latin1")).join("\n");
+    let mapa = null;
+    for (const m of conteudo.matchAll(/\/([^\s/<>[\]()]+)\s+[-\d.]+\s+Tf|<([0-9a-fA-F\s]*)>\s*Tj|\(((?:\\.|[^\\)])*)\)\s*Tj/g)) {
+      if (m[1] !== undefined) mapa = mapas.get(m[1]) ?? null;
+      else if (m[2] !== undefined) {
+        const hex = m[2].replace(/\s/g, "").toLowerCase();
+        trechos.push(mapa ? (hex.match(/.{4}/g) ?? []).map((h) => mapa.get(h) ?? "�").join("") : Buffer.from(hex, "hex").toString("latin1"));
+      } else trechos.push(m[3]);
+    }
+  }
+  return { paginas: doc.getPageCount(), texto: trechos.join("\n") };
+}
+
+/** Instante mais recente (antes de agora) em que eram 23:40 em Sao Paulo: em UTC ja e o dia seguinte. */
+function ultimas2340EmSaoPaulo(agora = Date.now()) {
+  const sp = new Date(agora - 3 * 3600_000); // Sao Paulo = UTC-3 o ano todo (sem horario de verao desde 2019)
+  let t = Date.UTC(sp.getUTCFullYear(), sp.getUTCMonth(), sp.getUTCDate(), 26, 40); // 23:40 SP = 02:40 UTC do dia seguinte
+  while (t > agora - 5 * 60_000) t -= 86_400_000;
+  return new Date(t);
+}
+
+/** Redirecionamento do app: 3xx com Location, ou NEXT_REDIRECT no HTML em streaming (status 200). */
+function redirecionou(pg, destino) {
+  if (pg.status >= 300 && pg.status < 400) return (pg.local ?? "").includes(destino);
+  return pg.status === 200 && new RegExp(`NEXT_REDIRECT[^"<]{0,40}${destino.replace(/[/?]/g, "\\$&")}`).test(pg.html);
+}
+
+async function testesFase7({ donoA, mec, mec2, at, donoB, ofA, ofB }) {
+  const idMec = mec.session.user.id;
+  const idMec2 = mec2.session.user.id;
+  const respostas = []; // tudo que as leituras novas devolveram: centavos sempre inteiros
+  const guarda = (r) => (respostas.push(r?.data ?? null), r);
+  const marca = (s) => `${s}-${RODADA}`;
+  const CLI = { nome: `Cliente F7 ${RODADA}`, telefone: `119${digitos(8)}`, documento: digitos(11) };
+  const CLI2 = { nome: `Frota F7 ${RODADA}`, telefone: `118${digitos(8)}`, documento: digitos(14) };
+  const OBS = marca("OBS-BALCAO-F7");
+  const CANC = marca("MOTIVO-CANCEL-F7");
+  const ANUL = marca("MOTIVO-ANULACAO-F7");
+  const SINTOMA = marca("SINTOMA-F7");
+  const CNPJ_A = digitos(14);
+  const CPF_B = digitos(11);
+  const P = placaNova();
+  const Q = placaNova();
+  const R = placaNova();
+  let km = 300000;
+
+  // ---------------------------------------------------------------- preparo
+  console.log("\n== Fase 7: preparo (OS desta rodada, oficinas A e B) ==");
+  const docA = await donoA.sb.from("oficinas").update({ documento: CNPJ_A, vistoria_obrigatoria: false }).eq("id", ofA).select("id");
+  const docB = await donoB.sb.from("oficinas").update({ documento: CPF_B, telefone: "(21) 97777-1111" }).eq("id", ofB).select("id");
+  checar("preparo: oficina A com CNPJ, oficina B com CPF", docA.data?.length === 1 && docB.data?.length === 1, `${msg(docA)}/${msg(docB)}`);
+  const servCat = await donoA.sb.from("catalogo_servicos").insert({ nome: `Serviço F7 catálogo ${RODADA}` }).select("id").single();
+  await donoA.sb.from("catalogo_servicos_precos").upsert({ servico_id: servCat.data?.id, preco_padrao_centavos: F7.SERV_CAT });
+
+  const veiculos = new Map();
+  async function abrir({ sb = donoA.sb, placa = P, cliente = CLI, mecanico = null, modo = "direto" } = {}) {
+    const chaveVei = `${sb === donoA.sb ? "A" : "B"}:${placa}`;
+    const vid = veiculos.get(chaveVei);
+    const r = await sb
+      .rpc("abrir_os", {
+        p_chave_idempotencia: uuid(),
+        ...(vid ? { p_veiculo_id: vid } : { p_placa: placa, p_cliente_nome: cliente.nome, p_cliente_telefone: cliente.telefone, p_veiculo_tipo: "caminhao", p_veiculo_marca: "Volvo", p_veiculo_modelo: "FH 460" }),
+        p_km: ++km,
+        p_sintoma_relatado: SINTOMA,
+        p_modo: modo,
+        p_mecanico_id: mecanico,
+        p_observacoes: OBS,
+        ...(modo === "direto" ? { p_autorizado_por_nome: "Autorizador F7" } : {}),
+      })
+      .single();
+    if (r.error) throw new Error(`abrir_os F7: ${r.error.message}`);
+    const os = r.data.os_id;
+    if (!vid) {
+      const v = (await sb.from("vw_os").select("veiculo_id, cliente_id").eq("id", os).single()).data;
+      veiculos.set(chaveVei, v?.veiculo_id);
+      await sb.from("clientes").update({ documento: cliente.documento }).eq("id", v?.cliente_id);
+    }
+    return os;
+  }
+  async function item(os, { sb = donoA.sb, tipo = "servico", servico = null, descricao = null, qtd = 1, unidade = null, preco = null, custo = null }) {
+    const r = await sb.rpc("adicionar_item_os", {
+      p_chave_idempotencia: uuid(), p_os_id: os, p_tipo: tipo, p_servico_id: servico, p_descricao: descricao,
+      p_quantidade: qtd, p_unidade: unidade, p_preco_unitario_centavos: preco, p_custo_unitario_centavos: custo,
+    });
+    if (r.error) throw new Error(`item F7: ${r.error.message}`);
+    return r.data;
+  }
+  async function entregar(os, { sb = donoA.sb, forma = "boleto", pago = false } = {}) {
+    const p = await sb.rpc("marcar_pronta", { p_os_id: os, p_causa: "Causa F7", p_solucao: "Solução F7" });
+    const e = await sb.rpc("entregar_os", { p_os_id: os, p_causa: "Causa F7", p_solucao: "Solução F7", p_forma_pagamento: forma, p_pago: pago });
+    if (p.error || e.error) throw new Error(`entregar F7: ${msg(p)}/${msg(e)}`);
+  }
+
+  // O1: placa P, mecanico 1, quantidade fracionada, peca com custo, foto enviada e pendente, vistoria com assinatura; entregue a receber
+  const O1 = await abrir({ mecanico: idMec });
+  await item(O1, { servico: servCat.data?.id, qtd: 1.5 });
+  await item(O1, { tipo: "peca", descricao: `Peça F7 óleo ${RODADA}`, qtd: 2.5, unidade: "l", preco: F7.PECA, custo: F7.CUSTO });
+  const fotoO1 = await fotoEnviada(donoA.sb, O1);
+  const fotoPend = await registrarFoto(donoA.sb, O1);
+  const upPend = fotoPend.caminho ? await subirArquivo(donoA.sb, fotoPend.caminho) : { error: { message: "sem caminho" } };
+  const iniV1 = await donoA.sb.rpc("iniciar_vistoria", { p_os_id: O1 }).single();
+  const V1 = iniV1.data?.vistoria_id;
+  await donoA.sb.rpc("marcar_itens_restantes_ok", { p_vistoria_id: V1 });
+  await donoA.sb.rpc("salvar_vistoria", { p_vistoria_id: V1, p_sem_avarias: true, p_km: km });
+  const fotoV1 = await fotoV(donoA.sb, V1, "painel");
+  const assV1 = await assinarV(donoA.sb, V1);
+  const concV1 = await donoA.sb.rpc("concluir_vistoria", { p_vistoria_id: V1 });
+  await entregar(O1);
+  // O2: mecanico 2, servico fora do catalogo; entregue e pago
+  const O2 = await abrir({ mecanico: idMec2 });
+  await item(O2, { descricao: `Serviço avulso F7 ${RODADA}`, preco: F7.AVULSO });
+  await entregar(O2, { forma: "pix", pago: true });
+  // O3: sem mecanico, servico do catalogo; entregue a receber (pagamento, virada e desfazer)
+  const O3 = await abrir();
+  await item(O3, { servico: servCat.data?.id });
+  await entregar(O3, { forma: "dinheiro" });
+  // O4: cancelada com motivo livre
+  const O4 = await abrir({ modo: "com_orcamento", mecanico: idMec });
+  await item(O4, { descricao: "Item da cancelada", preco: 99991 });
+  const cancO4 = await donoA.sb.rpc("mudar_status_os", { p_os_id: O4, p_de: "aguardando_orcamento", p_para: "cancelada", p_motivo: CANC });
+  // O5: aberta, vistoria concluida e anulada, e um rascunho novo
+  const O5 = await abrir({ mecanico: idMec });
+  const itemO5 = await item(O5, { descricao: "Item da aberta", preco: 88881 });
+  // atendente muda o preco de um item que ja existia: evento "preco" (F7-B8), que o mecanico nao le
+  const precoO5 = await at.sb.from("os_itens_precos").upsert({ item_id: itemO5, preco_unitario_centavos: 88883 }).select("item_id");
+  const iniV5 = await donoA.sb.rpc("iniciar_vistoria", { p_os_id: O5 }).single();
+  const V5 = iniV5.data?.vistoria_id;
+  await donoA.sb.rpc("marcar_itens_restantes_ok", { p_vistoria_id: V5 });
+  await donoA.sb.rpc("salvar_vistoria", { p_vistoria_id: V5, p_sem_avarias: true });
+  const concV5 = await donoA.sb.rpc("concluir_vistoria", { p_vistoria_id: V5, p_sem_assinatura_motivo: "recusou" });
+  const anulV5 = await donoA.sb.rpc("anular_vistoria", { p_vistoria_id: V5, p_motivo: ANUL });
+  const rascO5 = await donoA.sb.rpc("iniciar_vistoria", { p_os_id: O5 }).single();
+  // O6: placa Q, entregue sem itens (total 0: entra em "entregues", nao em "a receber")
+  const O6 = await abrir({ placa: Q, cliente: CLI2 });
+  await entregar(O6, { forma: "pix" });
+  // O7: placa Q, orcamento enviado (versao 1 congelada)
+  const O7 = await abrir({ placa: Q, modo: "com_orcamento" });
+  await item(O7, { descricao: `Revisão do câmbio ${RODADA}`, preco: 654321 });
+  await item(O7, { tipo: "peca", descricao: "Junta F7", qtd: 2, preco: 12347, custo: F7.CUSTO });
+  const totO7 = (await totalDe(donoA.sb, O7))?.total_centavos;
+  const envO7 = await donoA.sb.rpc("enviar_orcamento", { p_os_id: O7, p_chave_idempotencia: uuid(), p_total_conferido_centavos: totO7 }).single();
+  // O8: placa R, 30 itens com descricao longa e acentos e um valor alto; aberta (PDF com varias paginas)
+  const O8 = await abrir({ placa: R, cliente: { nome: `Transportadora Ação F7 ${RODADA}`, telefone: `117${digitos(8)}`, documento: digitos(11) }, mecanico: idMec });
+  for (let i = 1; i <= 30; i++) {
+    await item(O8, {
+      tipo: i % 2 ? "servico" : "peca",
+      descricao: `Item ${i}: substituição da peça de suspensão traseira com regulagem, lubrificação e conferência — ${"ç".repeat(i % 3)}`,
+      qtd: i === 7 ? 1.5 : 1,
+      preco: i === 1 ? F7.ALTO : 10000 + i,
+      ...(i % 2 ? {} : { custo: F7.CUSTO }),
+    });
+  }
+  // OB: oficina B, MESMA placa P, entregue e paga
+  const OB = await abrir({ sb: donoB.sb, cliente: { nome: `Cliente B F7 ${RODADA}`, telefone: `116${digitos(8)}`, documento: digitos(11) } });
+  await item(OB, { sb: donoB.sb, descricao: "Serviço da B", preco: F7.B });
+  await entregar(OB, { sb: donoB.sb, forma: "pix", pago: true });
+  checar(
+    "preparo: 9 OS (entregues, paga, cancelada, aberta, total 0, orcamento enviado, 30 itens, oficina B com a mesma placa), fotos e vistorias",
+    fotoO1.ok && !upPend.error && fotoV1.ok && assV1.ok && /^[0-9a-f]{64}$/.test(concV1.data ?? "") && !cancO4.error && !concV5.error && !anulV5.error && !rascO5.error && !envO7.error,
+    [fotoO1.erro, errSt(upPend.error), fotoV1.erro, assV1.erro, msg(concV1), msg(cancO4), msg(concV5), msg(anulV5), msg(rascO5), msg(envO7)].join(" | "),
+  );
+  const tO1 = await totalDe(donoA.sb, O1);
+  checar(`vw_os_totais: O1 = round(1,5 x 12.345,67) + round(2,5 x 33.333,37) = ${reais(TOTAL_O1)} (conta a mao)`, tO1?.total_centavos === TOTAL_O1, JSON.stringify(tO1));
+
+  // ---------------------------------------------------------------- imutaveis: antes
+  const vistoriasA = async () => ((await donoA.sb.from("vw_vistorias").select("id, status").in("status", ["concluida", "anulada"])).data ?? []).map((v) => v.id);
+  const versoesA = async () => ((await donoA.sb.from("vw_orcamento_versoes").select("id")).data ?? []).map((v) => v.id);
+  async function conferirTudo() {
+    const vs = await vistoriasA();
+    const os = await versoesA();
+    const rv = await Promise.all(vs.map((id) => donoA.sb.rpc("conferir_vistoria", { p_vistoria_id: id })));
+    const ro = await Promise.all(os.map((id) => donoA.sb.rpc("conferir_orcamento", { p_versao_id: id })));
+    return { vs: vs.length, os: os.length, ok: [...rv, ...ro].every((r) => r.data === true), ruins: [...rv, ...ro].filter((r) => r.data !== true).map(msg) };
+  }
+  const confAntes = await conferirTudo();
+  checar(`antes: conferir_vistoria e conferir_orcamento verdadeiros (${confAntes.vs} vistorias, ${confAntes.os} versoes da oficina A)`, confAntes.ok && confAntes.vs >= 2 && confAntes.os >= 1, confAntes.ruins.join(", "));
+  const ordenar = (xs) => (xs ?? []).map((x) => JSON.stringify(x)).sort();
+  const estado = async () =>
+    JSON.stringify({
+      os: ordenar((await donoA.sb.from("vw_os").select("*")).data),
+      hist: ordenar((await donoA.sb.from("vw_os_historico").select("*")).data),
+      vist: ordenar((await donoA.sb.from("vw_vistorias").select("*")).data),
+      vers: ordenar((await donoA.sb.from("vw_orcamento_versoes").select("*")).data),
+      fotos: ordenar((await donoA.sb.from("os_fotos").select("*")).data),
+      osB: ordenar((await donoB.sb.from("vw_os").select("*")).data),
+    });
+  const estadoAntes = await estado();
+
+  // ---------------------------------------------------------------- papeis nas leituras novas
+  console.log("\n== Fase 7: papeis nas leituras novas ==");
+  const hojeDono = guarda(await donoA.sb.rpc("painel_hoje")).data;
+  const ANO = hojeDono?.ano;
+  const MES = hojeDono?.mes;
+  const args = {
+    painel_mes: { p_ano: ANO, p_mes: MES },
+    painel_lista_os: { p_ano: ANO, p_mes: MES, p_recorte: "entregues" },
+    painel_hoje: {},
+    contas_a_receber: {},
+    historico_placa: { p_placa: P },
+    historico_os: { p_os_id: O1 },
+    dados_pdf_os: { p_os_id: O1 },
+  };
+  for (const fn of ["painel_mes", "painel_lista_os", "painel_hoje", "contas_a_receber", "dados_pdf_os"]) {
+    const d = guarda(await donoA.sb.rpc(fn, args[fn]));
+    checar(`dono: ${fn} responde`, !d.error && d.data !== null, msg(d));
+  }
+  for (const fn of ["painel_mes", "painel_lista_os", "painel_hoje"]) {
+    const a = await at.sb.rpc(fn, args[fn]);
+    checar(`atendente: ${fn} recusado (42501, painel so do dono)`, a.error?.code === "42501" && a.data === null, a.error?.code ?? "sem erro");
+  }
+  const aRec = guarda(await at.sb.rpc("contas_a_receber"));
+  const aPdf = guarda(await at.sb.rpc("dados_pdf_os", { p_os_id: O1 }));
+  checar("atendente: contas_a_receber e dados_pdf_os respondem", !aRec.error && !aPdf.error && (aRec.data ?? []).length > 0, `${msg(aRec)}/${msg(aPdf)}`);
+  const custoAt = [...todasAsChaves(aRec.data), ...todasAsChaves(aPdf.data)].filter((k) => /custo|margem/i.test(k));
+  const custoAtValor = [JSON.stringify(aRec.data), JSON.stringify(aPdf.data)].some((s) => s.includes(String(F7.CUSTO)) || s.includes(String(CUSTO_O1)));
+  checar("atendente: a receber e dados do PDF sem chave nem valor de custo", custoAt.length === 0 && !custoAtValor, custoAt.join(","));
+  for (const fn of ["painel_mes", "painel_lista_os", "painel_hoje", "contas_a_receber", "dados_pdf_os"]) {
+    const m = await mec.sb.rpc(fn, args[fn]);
+    checar(`mecanico: ${fn} recusado (42501)`, m.error?.code === "42501" && m.data === null, m.error?.code ?? "sem erro");
+  }
+
+  // anon: nenhuma funcao da Fase 7 (lida das migracoes, para nao esquecer uma nova)
+  const pastaMig = new URL("../supabase/migrations/", import.meta.url);
+  const sqlF7 = readdirSync(pastaMig).filter((f) => /^20261104.*fase7.*\.sql$/.test(f)).map((f) => readFileSync(new URL(f, pastaMig), "utf8")).join("\n");
+  const fnsF7 = [...sqlF7.matchAll(/create\s+(?:or\s+replace\s+)?function\s+public\.([a-z0-9_]+)\s*\(([\s\S]*?)\)\s*returns/gi)].map((m) => ({ nome: m[1], params: m[2] }));
+  const argsAnon = {
+    ...args,
+    mudar_status_os: { p_os_id: O5, p_de: "em_andamento", p_para: "pronta" },
+    registrar_pagamento: { p_os_id: O3, p_forma_pagamento: "pix" },
+  };
+  const semArgs = [...new Set(fnsF7.map((f) => f.nome))].filter((n) => !(n in argsAnon));
+  checar(`anon: funcoes publicas da Fase 7 nas migracoes (${new Set(fnsF7.map((f) => f.nome)).size}) todas conhecidas pelo teste`, fnsF7.length >= 7 && semArgs.length === 0, semArgs.join(", "));
+  const anonAbriu = [];
+  for (const nome of new Set(fnsF7.map((f) => f.nome))) {
+    const r = await clienteAnon().rpc(nome, argsAnon[nome]);
+    if (!r.error || r.data !== null || r.error.code !== "42501") anonAbriu.push(`${nome}:${r.error?.code ?? "sem erro"}`);
+  }
+  checar("anon: nenhuma funcao da Fase 7 executa (42501 em todas)", anonAbriu.length === 0, anonAbriu.join(", "));
+  const comOficina = fnsF7.filter((f) => /oficina/i.test(f.params)).map((f) => f.nome);
+  checar("nenhuma leitura da Fase 7 aceita a oficina por parametro", comOficina.length === 0, comOficina.join(", "));
+  for (const t of ["vw_os", "vw_os_totais", "os_comercial", "vw_os_historico", "vw_vistorias", "os_fotos"]) {
+    const r = await clienteAnon().from(t).select("*").limit(1);
+    if ((r.data ?? []).length) checar(`anon: nao le ${t}`, false, `${r.data.length} linhas`);
+  }
+
+  // ---------------------------------------------------------------- painel = vw_os
+  console.log("\n== Fase 7: painel = soma de vw_os, listas = numero ==");
+  const pm = guarda(await donoA.sb.rpc("painel_mes", { p_ano: ANO, p_mes: MES })).data;
+  const mm = String(MES).padStart(2, "0");
+  checar(`painel_mes: mes em Sao Paulo (${ANO}-${mm}-01 00:00 SP = 03:00 UTC, fim exclusivo no mes seguinte)`, pm?.fuso === "America/Sao_Paulo" && new Date(pm?.inicio).toISOString() === `${ANO}-${mm}-01T03:00:00.000Z` && new Date(pm?.fim).toISOString().endsWith("-01T03:00:00.000Z"), `${pm?.inicio} -> ${pm?.fim}`);
+  const vwA = (await donoA.sb.from("vw_os").select("id, numero, status, entregue_em, pago_em, total_centavos, total_servicos_centavos, total_pecas_centavos, mecanico_id")).data ?? [];
+  const porId = new Map(vwA.map((o) => [o.id, o]));
+  const ini = Date.parse(pm?.inicio);
+  const fim = Date.parse(pm?.fim);
+  const noMes = (t) => Boolean(t) && Date.parse(t) >= ini && Date.parse(t) < fim;
+  const soma = (xs, f) => xs.reduce((s, x) => s + (f(x) ?? 0), 0);
+  const entreguesVw = vwA.filter((o) => o.status === "entregue" && noMes(o.entregue_em));
+  const recebidoVw = vwA.filter((o) => o.status === "entregue" && noMes(o.pago_em));
+  checar(
+    "Servicos entregues no mes = soma de vw_os.total_centavos das OS entregues no mes (servicos e pecas tambem)",
+    pm?.entregues?.qtd_os === entreguesVw.length && pm?.entregues?.total_centavos === soma(entreguesVw, (o) => o.total_centavos) &&
+      pm?.entregues?.servicos_centavos === soma(entreguesVw, (o) => o.total_servicos_centavos) && pm?.entregues?.pecas_centavos === soma(entreguesVw, (o) => o.total_pecas_centavos),
+    `${JSON.stringify(pm?.entregues)} x ${entreguesVw.length} OS / ${soma(entreguesVw, (o) => o.total_centavos)}`,
+  );
+  checar("Dinheiro recebido no mes = soma de vw_os.total_centavos das OS pagas no mes", pm?.recebido?.qtd_os === recebidoVw.length && pm?.recebido?.total_centavos === soma(recebidoVw, (o) => o.total_centavos), `${JSON.stringify(pm?.recebido)} x ${recebidoVw.length}`);
+  const lEnt = guarda(await donoA.sb.rpc("painel_lista_os", { ...args.painel_lista_os, p_recorte: "entregues" })).data ?? [];
+  const idsEnt = new Set(lEnt.map((l) => l.os_id));
+  checar(
+    "lista 'entregues': O1, O2, O3 e a de total 0 (O6) entram; cancelada, aberta, orcamento e a da oficina B ficam fora",
+    [O1, O2, O3, O6].every((id) => idsEnt.has(id)) && ![O4, O5, O7, O8, OB].some((id) => idsEnt.has(id)) && lEnt.find((l) => l.os_id === O1)?.valor_centavos === TOTAL_O1,
+    `${lEnt.length} linhas`,
+  );
+  const listas = [
+    ["entregues", null, pm?.entregues?.qtd_os, pm?.entregues?.total_centavos, "total_centavos"],
+    ["recebido", null, pm?.recebido?.qtd_os, pm?.recebido?.total_centavos, "total_centavos"],
+    ...(pm?.servicos ?? []).map((s) => [s.servico_id ? "servico" : "fora_catalogo", s.servico_id, s.qtd_os, null, "total_centavos"]),
+    ...(pm?.produtividade ?? []).map((p) => [p.mecanico_id ? "mecanico" : "sem_mecanico", p.mecanico_id, p.qtd_os, p.servicos_centavos, "total_servicos_centavos"]),
+  ];
+  const ruins = [];
+  for (const [recorte, chave, qtd, total, coluna] of listas) {
+    const l = guarda(await donoA.sb.rpc("painel_lista_os", { p_ano: ANO, p_mes: MES, p_recorte: recorte, p_chave: chave })).data ?? [];
+    const okQtd = l.length === qtd && new Set(l.map((x) => x.os_id)).size === l.length;
+    const okSoma = total === null || soma(l, (x) => x.valor_centavos) === total;
+    const okVw = l.every((x) => porId.get(x.os_id)?.[coluna] === x.valor_centavos);
+    if (!okQtd || !okSoma || !okVw) ruins.push(`${recorte}${chave ? `:${chave.slice(0, 8)}` : ""} qtd ${l.length}/${qtd} soma ${soma(l, (x) => x.valor_centavos)}/${total} vw ${okVw}`);
+  }
+  checar(`cada numero do painel abre a lista que o compoe: ${listas.length} listas com contagem = numero, soma = numero e cada valor = vw_os`, listas.length >= 6 && ruins.length === 0, ruins.join(" | "));
+  const sCat = pm?.servicos?.find((s) => s.servico_id === servCat.data?.id);
+  const sFora = pm?.servicos?.at(-1);
+  checar("servicos mais feitos: catalogo em 2 OS (O1 e O3), 'Fora do catalogo' por ultimo, sem valor em R$", sCat?.qtd_os === 2 && sFora?.servico_id === null && sFora?.qtd_os >= 1 && (pm?.servicos ?? []).every((s) => !Object.keys(s).some((k) => /centavos/.test(k))), JSON.stringify(pm?.servicos?.slice(-3)));
+  const pM1 = pm?.produtividade?.find((p) => p.mecanico_id === idMec);
+  const pM2 = pm?.produtividade?.find((p) => p.mecanico_id === idMec2);
+  const pSem = pm?.produtividade?.at(-1);
+  checar(
+    "produtividade: so servicos (sem pecas) por mecanico da OS, 'sem mecanico' por ultimo",
+    pM1?.servicos_centavos >= Math.round(1.5 * F7.SERV_CAT) && pM2?.servicos_centavos >= F7.AVULSO && pSem?.mecanico_id === null && pSem?.servicos_centavos >= F7.SERV_CAT && pM1?.nome === "Mecânico Teste",
+    JSON.stringify(pm?.produtividade),
+  );
+  const abertasVw = vwA.filter((o) => !["entregue", "cancelada"].includes(o.status));
+  checar("OS abertas (hoje) = contagem de vw_os fora de entregue e cancelada", hojeDono?.abertas?.total === abertasVw.length, `${hojeDono?.abertas?.total} x ${abertasVw.length}`);
+  const aReceberVw = vwA.filter((o) => o.status === "entregue" && !o.pago_em && o.total_centavos > 0);
+  const contas = aRec.data ?? [];
+  const okClientes = [...new Set(contas.map((c) => c.cliente_id))].every((cid) => {
+    const dele = contas.filter((c) => c.cliente_id === cid);
+    return dele.every((c) => c.cliente_total_centavos === soma(dele, (x) => x.total_centavos) && c.cliente_qtd_os === dele.length);
+  });
+  checar(
+    "A receber (hoje) = soma de vw_os das entregues sem pagamento e com valor; lista do atendente = numero do painel; O6 (total 0) fora",
+    hojeDono?.a_receber?.total_centavos === soma(aReceberVw, (o) => o.total_centavos) && hojeDono?.a_receber?.qtd_os === aReceberVw.length &&
+      soma(contas, (c) => c.total_centavos) === hojeDono?.a_receber?.total_centavos && contas.length === aReceberVw.length && okClientes &&
+      contas.some((c) => c.os_id === O1) && !contas.some((c) => c.os_id === O6) && contas.every((c) => porId.get(c.os_id)?.total_centavos === c.total_centavos),
+    `${JSON.stringify(hojeDono?.a_receber)} x ${aReceberVw.length} / lista ${contas.length}`,
+  );
+  const pdfO1 = aPdf.data;
+  checar(
+    "dados_pdf_os: total = vw_os, subtotais somam o total, mesmos subtotais dos itens",
+    pdfO1?.total_centavos === TOTAL_O1 && pdfO1?.subtotal_servicos_centavos + pdfO1?.subtotal_pecas_centavos === TOTAL_O1 && soma(pdfO1?.itens ?? [], (i) => i.subtotal_centavos) === TOTAL_O1,
+    JSON.stringify({ t: pdfO1?.total_centavos, s: pdfO1?.subtotal_servicos_centavos, p: pdfO1?.subtotal_pecas_centavos }),
+  );
+
+  // ---------------------------------------------------------------- historico por placa
+  console.log("\n== Fase 7: historico por placa (papeis e oficinas A x B) ==");
+  const hDono = guarda(await donoA.sb.rpc("historico_placa", { p_placa: P }));
+  const hAt = guarda(await at.sb.rpc("historico_placa", { p_placa: P }));
+  const hMec = guarda(await mec.sb.rpc("historico_placa", { p_placa: P }));
+  const hMec2 = guarda(await mec2.sb.rpc("historico_placa", { p_placa: P }));
+  const hB = guarda(await donoB.sb.rpc("historico_placa", { p_placa: P }));
+  const idsDe = (h) => (h.data?.os ?? []).map((o) => o.id).sort().join(",");
+  const osDeP = [O1, O2, O3, O4, O5].sort().join(",");
+  checar("dono, atendente e os 2 mecanicos: todas as 5 OS da placa na oficina A (inclusive as de outro mecanico)", [hDono, hAt, hMec, hMec2].every((h) => !h.error && idsDe(h) === osDeP && h.data?.resumo?.qtd_os === 5), [hDono, hAt, hMec, hMec2].map((h) => `${msg(h)}:${h.data?.os?.length}`).join(" "));
+  checar("mesma placa na oficina B: o dono B ve so a OS dele", !hB.error && idsDe(hB) === OB && hB.data?.veiculo?.placa === P, `${msg(hB)} ${idsDe(hB).slice(0, 40)}`);
+  const hNada = await donoA.sb.rpc("historico_placa", { p_placa: placaNova() });
+  checar("placa nao cadastrada: veiculo null, sem OS", hNada.data?.veiculo === null && (hNada.data?.os ?? []).length === 0, msg(hNada));
+  const chavesOs = (h) => [...new Set((h.data?.os ?? []).map((o) => chavesDe(o)))];
+  checar("mecanico: lista fechada de chaves do veiculo e de cada OS (sem cliente, valor, pagamento, observacao)", [hMec, hMec2].every((h) => chavesDe(h.data?.veiculo) === H.veiculo && chavesOs(h).join("|") === chavesH(H.os)), `${chavesDe(hMec2.data?.veiculo)} | ${chavesOs(hMec2).join(" | ")}`);
+  checar("atendente: + cliente, valores e pagamento, sem custo", chavesDe(hAt.data?.veiculo) === chavesH(H.veiculo, H.veiculoBalcao) && chavesOs(hAt).join("|") === chavesH(H.os, H.osBalcao), chavesOs(hAt).join(" | "));
+  checar("dono: + custo", chavesOs(hDono).join("|") === chavesH(H.os, H.osBalcao, H.osDono) && hDono.data?.os?.find((o) => o.id === O1)?.custo_total_centavos === CUSTO_O1, chavesOs(hDono).join(" | "));
+  const abre = (h, id) => h.data?.os?.find((o) => o.id === id)?.abre_detalhe;
+  checar("abre_detalhe: mecanico 1 abre a O1 (dele) e nao a O2; mecanico 2 abre a O2 e nao a O1", abre(hMec, O1) === true && abre(hMec, O2) === false && abre(hMec2, O2) === true && abre(hMec2, O1) === false);
+  const p1 = await donoA.sb.rpc("historico_placa", { p_placa: P, p_limite: 2 });
+  const p2 = await donoA.sb.rpc("historico_placa", { p_placa: P, p_limite: 2, p_antes_criado_em: p1.data?.proximo?.antes_criado_em, p_antes_id: p1.data?.proximo?.antes_id });
+  const p3 = await donoA.sb.rpc("historico_placa", { p_placa: P, p_limite: 2, p_antes_criado_em: p2.data?.proximo?.antes_criado_em, p_antes_id: p2.data?.proximo?.antes_id });
+  const paginas = [p1, p2, p3].flatMap((p) => (p.data?.os ?? []).map((o) => o.id));
+  checar("paginacao por cursor: 2 + 2 + 1, sem repetir, ultima sem proximo", paginas.length === 5 && new Set(paginas).size === 5 && [...paginas].sort().join(",") === osDeP && p3.data?.proximo === null, `${paginas.length} ${msg(p1)}/${msg(p2)}/${msg(p3)}`);
+
+  const hoDono = guarda(await donoA.sb.rpc("historico_os", { p_os_id: O1 }));
+  const hoAt = guarda(await at.sb.rpc("historico_os", { p_os_id: O1 }));
+  const hoMec2 = guarda(await mec2.sb.rpc("historico_os", { p_os_id: O1 }));
+  const ho5Mec2 = guarda(await mec2.sb.rpc("historico_os", { p_os_id: O5 }));
+  const ho5Dono = guarda(await donoA.sb.rpc("historico_os", { p_os_id: O5 }));
+  const chavesItens = (h) => [...new Set((h.data?.itens ?? []).map((i) => chavesDe(i)))].join("|");
+  checar("historico_os: itens do mecanico sem preco; atendente com preco sem custo; dono com custo", chavesItens(hoMec2) === H.item && chavesItens(hoAt) === chavesH(H.item, H.itemBalcao) && chavesItens(hoDono) === chavesH(H.item, H.itemBalcao, H.itemDono), `${chavesItens(hoMec2)} | ${chavesItens(hoAt)}`);
+  const fotosMec2 = hoMec2.data?.fotos ?? [];
+  checar("historico_os: so a foto enviada (a pendente fica fora), com a lista fechada de chaves", fotosMec2.length === 1 && fotosMec2[0].id === fotoO1.id && chavesDe(fotosMec2[0]) === H.foto, `${fotosMec2.length} fotos`);
+  const vMec2 = hoMec2.data?.vistorias ?? [];
+  const vDonoO1 = hoDono.data?.vistorias ?? [];
+  checar("historico_os: vistoria concluida para o mecanico sem assinatura nem quem fez; balcao com assinatura", vMec2.length === 1 && vMec2[0].id === V1 && chavesDe(vMec2[0]) === chavesH(H.vistoria) && chavesDe(vDonoO1[0]) === chavesH(H.vistoria, H.vistoriaBalcao) && vDonoO1[0].assinatura_caminho === assV1.caminho, `${chavesDe(vMec2[0])}`);
+  const v5 = ho5Mec2.data?.vistorias ?? [];
+  checar("historico_os: vistoria anulada aparece marcada, sem o motivo para o mecanico; rascunho nunca aparece", v5.length === 1 && v5[0].id === V5 && v5[0].status === "anulada" && !("motivo_anulacao" in v5[0]) && ho5Dono.data?.vistorias?.[0]?.motivo_anulacao === ANUL, JSON.stringify(v5.map((v) => v.status)));
+  const textoMec = JSON.stringify([hMec.data, hMec2.data, hoMec2.data, ho5Mec2.data, guarda(await mec.sb.rpc("historico_os", { p_os_id: O2 })).data]);
+  const marcasMec = [CLI.nome, CLI.telefone, CLI.documento, OBS, CANC, ANUL, NOME_ASSINA, "centavos", "assinatura", "pagamento", String(F7.SERV_CAT), String(F7.PECA), String(F7.CUSTO), String(TOTAL_O1), String(F7.AVULSO)];
+  const vazouMec = marcasMec.filter((m) => textoMec.includes(m));
+  const outroNome = JSON.stringify(hMec2.data).includes("Mecânico Teste") || JSON.stringify(hMec.data).includes("Mecânico Dois");
+  checar("mecanico: nenhuma resposta do historico traz cliente, telefone, documento, observacao, motivos, assinatura, valor ou nome de outro mecanico", vazouMec.length === 0 && !outroNome, `${vazouMec.join(", ")}${outroNome ? " nome de outro mecanico" : ""}`);
+  const custoHAt = [...todasAsChaves(hAt.data), ...todasAsChaves(hoAt.data)].filter((k) => /custo|margem/i.test(k));
+  checar("atendente: historico sem chave nem valor de custo", custoHAt.length === 0 && !JSON.stringify([hAt.data, hoAt.data]).includes(String(F7.CUSTO)), custoHAt.join(","));
+  const hoB = await donoB.sb.rpc("historico_os", { p_os_id: O1 });
+  const hoMecB = await mec.sb.rpc("historico_os", { p_os_id: OB });
+  const pdfB = await donoB.sb.rpc("dados_pdf_os", { p_os_id: O1 });
+  checar("oficina B com o id da A na mao: historico_os e dados_pdf_os = os_nao_encontrada (e o mecanico da A com o da B)", msg(hoB) === "os_nao_encontrada" && msg(hoMecB) === "os_nao_encontrada" && msg(pdfB) === "os_nao_encontrada", `${msg(hoB)}/${msg(hoMecB)}/${msg(pdfB)}`);
+  const recB = guarda(await donoB.sb.rpc("contas_a_receber"));
+  const entB = guarda(await donoB.sb.rpc("painel_lista_os", { p_ano: ANO, p_mes: MES, p_recorte: "entregues" }));
+  const hojeB = guarda(await donoB.sb.rpc("painel_hoje"));
+  const hojeA2 = await donoA.sb.rpc("painel_hoje");
+  const idsDaA = new Set(vwA.map((o) => o.id));
+  checar(
+    "dono B: painel e a receber so com OS da B; A, B e A de novo em sequencia, cada um com o seu",
+    !(recB.data ?? []).some((c) => idsDaA.has(c.os_id)) && (entB.data ?? []).some((l) => l.os_id === OB) && !(entB.data ?? []).some((l) => idsDaA.has(l.os_id)) &&
+      JSON.stringify(hojeA2.data?.a_receber) === JSON.stringify(hojeDono?.a_receber) && JSON.stringify(hojeB.data?.a_receber) !== JSON.stringify(hojeDono?.a_receber),
+    `${msg(recB)}/${msg(entB)}/${msg(hojeB)}`,
+  );
+
+  // Storage do mecanico (ARQUITETURA 14.4, so o staging comprova): foto enviada de outro sim; pendente e assinatura nao
+  const urlFoto = await mec2.sb.storage.from(BUCKET_FOTOS).createSignedUrl(fotosMec2[0]?.caminho_miniatura ?? "x", 60);
+  const urlPend = await mec2.sb.storage.from(BUCKET_FOTOS).createSignedUrl(fotoPend.caminho ?? "x", 60);
+  const urlVist = await mec2.sb.storage.from(BUCKET_VIST).createSignedUrl(vMec2[0]?.fotos?.[0]?.caminho ?? "x", 60);
+  const urlAss = await mec2.sb.storage.from(BUCKET_VIST).createSignedUrl(assV1.caminho ?? "x", 60);
+  const baixou = async (u) => (u.data?.signedUrl ? (await fetch(u.data.signedUrl)).status === 200 : false);
+  checar("Storage: mecanico 2 abre a foto enviada da OS de outro e a foto da vistoria concluida", await baixou(urlFoto) && await baixou(urlVist), `${errSt(urlFoto.error)}/${errSt(urlVist.error)}`);
+  checar("Storage: mecanico 2 nao abre foto pendente nem a assinatura da OS de outro", !(await baixou(urlPend)) && !(await baixou(urlAss)), `${errSt(urlPend.error)}/${errSt(urlAss.error)}`);
+
+  // ---------------------------------------------------------------- PDF pelo banco
+  console.log("\n== Fase 7: dados do PDF (lista fechada) ==");
+  const pdfO8 = guarda(await donoA.sb.rpc("dados_pdf_os", { p_os_id: O8 }));
+  const pdfOB = guarda(await donoB.sb.rpc("dados_pdf_os", { p_os_id: OB }));
+  const pdfO4 = await donoA.sb.rpc("dados_pdf_os", { p_os_id: O4 });
+  const pdfInv = await donoA.sb.rpc("dados_pdf_os", { p_os_id: uuid() });
+  checar("dados_pdf_os: lista exata de chaves (e dos itens)", [pdfO1, pdfO8.data, pdfOB.data].every((d) => chavesDe(d) === CHAVES_PDF_OS && (d?.itens ?? []).every((i) => chavesDe(i) === CHAVES_PDF_ITEM)), chavesDe(pdfO1));
+  checar("dados_pdf_os: entregue = resumo_final a receber; aberta = ordem_servico sem situacao", pdfO1?.tipo_documento === "resumo_final" && pdfO1?.situacao_pagamento === "a_receber" && pdfO8.data?.tipo_documento === "ordem_servico" && pdfO8.data?.situacao_pagamento === null, `${pdfO1?.tipo_documento}/${pdfO8.data?.tipo_documento}`);
+  checar("dados_pdf_os: CNPJ da oficina A sai; CPF da oficina B nunca", pdfO1?.oficina_cnpj === CNPJ_A && pdfOB.data?.oficina_cnpj === null && !JSON.stringify(pdfOB.data).includes(CPF_B), `${pdfO1?.oficina_cnpj}/${pdfOB.data?.oficina_cnpj}`);
+  const textoPdfDados = JSON.stringify([pdfO1, pdfO8.data]);
+  const vazPdf = [CLI.telefone, CLI.documento, SINTOMA, OBS, "Mecânico Teste", String(F7.CUSTO), String(CUSTO_O1)].filter((m) => textoPdfDados.includes(m));
+  checar("dados_pdf_os: sem telefone e documento do cliente, sintoma, observacao, mecanico e custo", vazPdf.length === 0, vazPdf.join(", "));
+  checar("dados_pdf_os: cancelada = os_cancelada_sem_pdf; inventada = os_nao_encontrada", msg(pdfO4) === "os_cancelada_sem_pdf" && msg(pdfInv) === "os_nao_encontrada", `${msg(pdfO4)}/${msg(pdfInv)}`);
+
+  const quebrados = centavosQuebrados(respostas);
+  checar(`${respostas.length} respostas das leituras novas: todo campo *_centavos e inteiro`, respostas.length >= 20 && quebrados.length === 0, quebrados.slice(0, 5).join(", "));
+
+  // ---------------------------------------------------------------- mes padrao com relogio fixo
+  console.log("\n== Fase 7: mes padrao em Sao Paulo com relogio fixo ==");
+  const tzAntes = process.env.TZ;
+  process.env.TZ = "UTC"; // como o servidor da Vercel
+  try {
+    const { mesAtualEmSaoPaulo, diaEmSaoPaulo } = await import(new URL("../src/lib/painel.ts", import.meta.url).href);
+    const casos = [
+      ["31/10 21:00 SP", "2026-11-01T00:00:00Z", "2026-10"],
+      ["31/10 23:30 SP", "2026-11-01T02:30:00Z", "2026-10"],
+      ["31/10 23:59:59 SP", "2026-11-01T02:59:59Z", "2026-10"],
+      ["01/11 00:00 SP", "2026-11-01T03:00:00Z", "2026-11"],
+      ["30/11 21:00 SP", "2026-12-01T00:00:00Z", "2026-11"],
+      ["31/12 23:30 SP", "2027-01-01T02:30:00Z", "2026-12"],
+      ["01/01 00:30 SP", "2027-01-01T03:30:00Z", "2027-01"],
+    ];
+    const errados = casos.filter(([, iso, esperado]) => mesAtualEmSaoPaulo(new Date(iso)) !== esperado).map(([n]) => n);
+    const servidorPularia = new Date("2026-11-01T00:00:00Z").getMonth() === 10;
+    checar(`mesAtualEmSaoPaulo (src/lib/painel.ts) com o processo em UTC: ${casos.length} horarios fixos da virada, nenhum pula de mes`, errados.length === 0 && servidorPularia, errados.join(", "));
+    checar("diaEmSaoPaulo: 31/10 23:30 SP (01/11 em UTC) = 2026-10-31", diaEmSaoPaulo(new Date("2026-11-01T02:30:00Z")) === "2026-10-31");
+    const agoraMes = mesAtualEmSaoPaulo(new Date());
+    checar("painel_hoje (banco) e o app concordam no mes padrao de agora", agoraMes === `${ANO}-${mm}`, `${agoraMes} x ${ANO}-${mm}`);
+  } finally {
+    if (tzAntes === undefined) delete process.env.TZ;
+    else process.env.TZ = tzAntes;
+  }
+
+  // ---------------------------------------------------------------- paginas e PDFs (APP_URL)
+  let ck = null;
+  if (APP_URL) ck = await testesFase7Paginas({ donoA, at, mec, mec2, donoB, P, Q, O1, O4, O7, O8, OB, V1, CLI, CLI2, OBS, CANC, SINTOMA, CNPJ_A, CPF_B, pm, hojeDono });
+
+  // ---------------------------------------------------------------- nada mudou
+  const estadoDepois = await estado();
+  checar(`ler painel, a receber, historico${APP_URL ? ", paginas" : ""} e dados${APP_URL ? "/arquivos" : ""} do PDF nao mudou nada no banco (OS, linha do tempo, vistorias, versoes, fotos)`, estadoDepois === estadoAntes, `${estadoAntes.length} x ${estadoDepois.length} bytes`);
+
+  // ---------------------------------------------------------------- pagamento: virada e desfazer
+  console.log("\n== Fase 7: pagamento na virada e voltar para 'a receber' ==");
+  const { mesAtualEmSaoPaulo } = await import(new URL("../src/lib/painel.ts", import.meta.url).href);
+  const totO3 = porId.get(O3)?.total_centavos;
+  const recebidoDe = async (mes) => {
+    const [a, m] = mes.split("-").map(Number);
+    const n = guarda(await donoA.sb.rpc("painel_mes", { p_ano: a, p_mes: m })).data?.recebido;
+    const l = (guarda(await donoA.sb.rpc("painel_lista_os", { p_ano: a, p_mes: m, p_recorte: "recebido" })).data ?? []).map((x) => x.os_id);
+    return { total: n?.total_centavos, qtd: n?.qtd_os, tem: l.includes(O3) };
+  };
+  const t = ultimas2340EmSaoPaulo();
+  const mesT = mesAtualEmSaoPaulo(t);
+  const recAntes = await recebidoDe(mesT);
+  const hojeAntes = (await donoA.sb.rpc("painel_hoje")).data?.a_receber;
+  const pg1 = await at.sb.rpc("registrar_pagamento", { p_os_id: O3, p_forma_pagamento: "pix", p_pago_em: t.toISOString(), p_so_se_a_receber: true });
+  const vO3 = (await donoA.sb.from("vw_os").select("pago_em, forma_pagamento").eq("id", O3).single()).data;
+  const recDepois = await recebidoDe(mesT);
+  const hojeDepois = (await donoA.sb.rpc("painel_hoje")).data?.a_receber;
+  const contasDepois = (await at.sb.rpc("contas_a_receber")).data ?? [];
+  checar(
+    `registrar_pagamento as 23:40 de ${diaEmSaoPaulo2(t)} em SP (${t.toISOString().slice(0, 16)} UTC, ja outro dia): conta no dia e no mes de SP (${mesT})`,
+    !pg1.error && Date.parse(vO3?.pago_em) === t.getTime() && recDepois.tem && !recAntes.tem && recDepois.total === recAntes.total + totO3 && recDepois.qtd === recAntes.qtd + 1,
+    `${msg(pg1)} ${JSON.stringify({ recAntes, recDepois })}`,
+  );
+  checar("depois de registrar: a receber do painel cai pelo total da OS e a OS sai da lista de quem deve", hojeDepois?.total_centavos === hojeAntes?.total_centavos - totO3 && hojeDepois?.qtd_os === hojeAntes?.qtd_os - 1 && !contasDepois.some((c) => c.os_id === O3), `${hojeAntes?.total_centavos} -> ${hojeDepois?.total_centavos}`);
+  const pg2 = await donoA.sb.rpc("registrar_pagamento", { p_os_id: O3, p_forma_pagamento: "dinheiro", p_so_se_a_receber: true });
+  const vO3b = (await donoA.sb.from("vw_os").select("pago_em, forma_pagamento").eq("id", O3).single()).data;
+  checar("registrar de novo pela lista (p_so_se_a_receber): pagamento_ja_registrado, nada muda", msg(pg2) === "pagamento_ja_registrado" && vO3b?.pago_em === vO3?.pago_em && vO3b?.forma_pagamento === "pix", msg(pg2));
+  // Virada de MES de verdade: so cabe na janela que o banco aceita (criacao - 1 dia ate agora + 1 dia).
+  const [aT, mT] = mesT.split("-").map(Number);
+  const jan = (await donoA.sb.rpc("painel_mes", { p_ano: aT, p_mes: mT })).data;
+  const criadoO3 = Date.parse((await donoA.sb.from("vw_os").select("criado_em").eq("id", O3).single()).data?.criado_em);
+  const candidatos = [
+    [Date.parse(jan?.inicio) - 20 * 60_000, "23:40 do ultimo dia do mes anterior"],
+    [Date.parse(jan?.fim) - 20 * 60_000, "23:40 do ultimo dia deste mes"],
+    [Date.parse(jan?.fim) + 30 * 60_000, "00:30 do dia 1 do mes seguinte"],
+  ].filter(([x]) => x > criadoO3 - 86_400_000 + 600_000 && x < Date.now() + 86_400_000 - 600_000);
+  for (const [x, rot] of candidatos) {
+    const ti = new Date(x);
+    const mesI = mesAtualEmSaoPaulo(ti);
+    const r = await donoA.sb.rpc("registrar_pagamento", { p_os_id: O3, p_forma_pagamento: "pix", p_pago_em: ti.toISOString() });
+    const rec = await recebidoDe(mesI);
+    checar(`virada do mes: pagamento as ${rot} (SP) cai em ${mesI}`, !r.error && rec.tem, msg(r));
+  }
+  if (!candidatos.length) console.log(`info    virada do MES pela API so cabe perto do dia 1 (o banco aceita pago_em de criado_em - 1 dia ate agora + 1 dia); hoje so a virada do DIA. A do mes esta no fase7_painel.sql.`);
+  const volta = await donoA.sb.rpc("registrar_pagamento", { p_os_id: O3, p_forma_pagamento: "pix", p_pago_em: null });
+  const vO3c = (await donoA.sb.from("vw_os").select("pago_em").eq("id", O3).single()).data;
+  const recVolta = await recebidoDe(mesT);
+  const hojeVolta = (await donoA.sb.rpc("painel_hoje")).data?.a_receber;
+  const contasVolta = (await at.sb.rpc("contas_a_receber")).data ?? [];
+  checar(
+    "voltar para 'a receber' (p_pago_em null) desfaz: recebido do mes e a receber voltam ao que eram, a OS volta para a lista",
+    !volta.error && vO3c?.pago_em === null && recVolta.total === recAntes.total && recVolta.qtd === recAntes.qtd && !recVolta.tem &&
+      JSON.stringify(hojeVolta) === JSON.stringify(hojeAntes) && contasVolta.some((c) => c.os_id === O3),
+    `${msg(volta)} ${JSON.stringify({ recAntes, recVolta })}`,
+  );
+  const evs = ((await donoA.sb.from("vw_os_historico").select("evento").eq("os_id", O3)).data ?? []).filter((e) => e.evento === "pagamento").length;
+  const evsMec = await mec.sb.from("vw_os_historico").select("evento").in("evento", ["pagamento", "preco"]);
+  const evO5Dono = ((await donoA.sb.from("vw_os_historico").select("evento, observacao, por_nome").eq("os_id", O5)).data ?? []).filter((e) => e.evento === "preco");
+  const evO5Mec = (await mec.sb.from("vw_os_historico").select("evento").eq("os_id", O5)).data ?? [];
+  checar("as mudancas ficam na linha do tempo (eventos 'pagamento'); o mecanico nao le pagamento nem preco", evs >= 2 && (evsMec.data ?? []).length === 0, `${evs} eventos; mecanico ${evsMec.data?.length ?? msg(evsMec)}`);
+  checar(
+    "evento 'preco' (atendente mudou o preco de item ja lancado): o balcao ve 'Atendente Teste', sem valor; o mecanico ve a linha do tempo da OS dele sem o evento",
+    !precoO5.error && evO5Dono.length === 1 && evO5Dono[0].observacao === null && evO5Dono[0].por_nome === "Atendente Teste" && evO5Mec.length > 0 && !evO5Mec.some((e) => e.evento === "preco"),
+    `${msg(precoO5)} dono ${evO5Dono.length} mecanico ${evO5Mec.map((e) => e.evento).join(",")}`,
+  );
+  if (APP_URL) await testesFase7PagamentoNaTela({ ck, donoA, O3, totO3 });
+
+  // ---------------------------------------------------------------- imutaveis: depois
+  const confDepois = await conferirTudo();
+  checar(`depois: conferir_vistoria e conferir_orcamento continuam verdadeiros (${confDepois.vs} vistorias, ${confDepois.os} versoes)`, confDepois.ok && confDepois.vs === confAntes.vs && confDepois.os === confAntes.os, confDepois.ruins.join(", "));
+}
+const diaEmSaoPaulo2 = (d) => new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit" }).format(d);
+
+// ------------------------------------------------------------------ Fase 7 com APP_URL
+async function baixarArquivo(caminho, cookie) {
+  const r = await fetch(`${APP_URL}${caminho}`, { headers: cookie ? { cookie } : {}, redirect: "manual" });
+  const buf = Buffer.from(await r.arrayBuffer());
+  return { status: r.status, tipo: r.headers.get("content-type") ?? "", cache: r.headers.get("cache-control") ?? "", inicio: buf.subarray(0, 5).toString("latin1"), bytes: buf.length, buf };
+}
+const pdfOk7 = (p) => p.status === 200 && p.tipo.startsWith("application/pdf") && p.inicio === "%PDF-" && /no-store/.test(p.cache) && p.bytes > 1000 && p.bytes < LIMITE_PDF;
+const det7 = (p) => `${p.status} ${p.tipo.split(";")[0]} ${p.bytes} B`;
+
+async function testesFase7Paginas(c) {
+  const { donoA, at, mec, mec2, donoB, P, Q, O1, O4, O7, O8, OB, V1, CLI, CLI2, OBS, CANC, SINTOMA, CNPJ_A, CPF_B, pm, hojeDono } = c;
+  console.log(`\n== Fase 7: PDFs (${APP_URL}) ==`);
+  const [ckDono, ckAt, ckMec, ckMec2, ckB] = await Promise.all([donoA, at, mec, mec2, donoB].map((u) => cookiesDaSessao(u.session)));
+  const proibidosPdf = (cli) => [
+    String(F7.CUSTO), reais(F7.CUSTO), reais(CUSTO_O1), cli.telefone, telFormatado(cli.telefone), cli.documento, cpfFormatado(cli.documento.slice(0, 11)),
+    SINTOMA, OBS, CANC, "Mecânico Teste", "Mecânico Dois", "custo", "Custo", "margem", "Margem",
+  ];
+  const conferePdf = async (rot, caminho, cookie, { tem = [], semCli = CLI, paginasMin = 1 } = {}) => {
+    const p = await baixarArquivo(caminho, cookie);
+    let txt = { paginas: 0, texto: "" };
+    try {
+      if (p.status === 200) txt = await textoDoPdf(p.buf);
+    } catch (e) {
+      txt.texto = `ERRO ${e.message}`;
+    }
+    const faltam = tem.filter((x) => !txt.texto.includes(x));
+    const sobram = proibidosPdf(semCli).filter((x) => txt.texto.includes(x));
+    checar(`PDF ${rot}: 200, < 4,5 MB, ${txt.paginas} pagina(s); texto com o esperado e sem custo, telefone/documento do cliente, sintoma, observacao ou mecanico`, pdfOk7(p) && txt.paginas >= paginasMin && faltam.length === 0 && sobram.length === 0, `${det7(p)}${faltam.length ? ` faltam: ${faltam.join(" | ")}` : ""}${sobram.length ? ` sobram: ${sobram.join(" | ")}` : ""}`);
+    return { ...p, ...txt };
+  };
+  const oficinaTel = "(11) 98888-7777";
+  const comuns = ["Não é documento fiscal", P, CLI.nome, reais(TOTAL_O1), `CNPJ ${cnpjFormatado(CNPJ_A)}`, oficinaTel];
+  const r1 = await conferePdf("resumo final (dono, O1 entregue a receber)", `/api/os/${O1}/pdf`, ckDono, { tem: comuns });
+  checar("PDF resumo final: titulo 'Resumo final', acentos legiveis e situacao a receber", /resumo\s+final/i.test(r1.texto) && r1.texto.includes("Serviço") && !r1.texto.includes("�") && /a receber/i.test(r1.texto), r1.texto.slice(0, 160).replace(/\n/g, " / "));
+  await conferePdf("resumo final (atendente)", `/api/os/${O1}/pdf`, ckAt, { tem: comuns });
+  const r8 = await conferePdf("da OS aberta com 30 itens e R$ 1.234.567,89 (dono)", `/api/os/${O8}/pdf`, ckDono, { tem: ["1.234.567,89", "Item 30: substituição", "conferência"], semCli: { telefone: "00000000000", documento: "00000000000" }, paginasMin: 2 });
+  checar("PDF da OS aberta: titulo 'Ordem de servico' e varias paginas", /ordem\s+de\s+serviço/i.test(r8.texto) && r8.paginas >= 2, `${r8.paginas} paginas`);
+  const rB = await conferePdf("da oficina B (dono B, OS com a mesma placa)", `/api/os/${OB}/pdf`, ckB, { tem: ["Não é documento fiscal", P], semCli: { telefone: "00000000000", documento: "00000000000" } });
+  checar("PDF da oficina B: CPF da oficina nunca sai (nem formatado)", rB.status === 200 && !rB.texto.includes(CPF_B) && !rB.texto.includes(cpfFormatado(CPF_B)) && !rB.texto.includes("CNPJ"), det7(rB));
+  const telaO1 = await pagina(`/os/${O1}`, ckDono);
+  checar("valor do PDF = valor da tela da OS (mesmo total formatado)", telaO1.status === 200 && telaO1.html.includes(reais(TOTAL_O1)) && r1.texto.includes(reais(TOTAL_O1)), `status ${telaO1.status}`);
+  const [eMec, eMec2, eB, eAnon, eCanc, eInv] = await Promise.all([
+    baixarArquivo(`/api/os/${O1}/pdf`, ckMec), baixarArquivo(`/api/os/${O1}/pdf`, ckMec2), baixarArquivo(`/api/os/${O1}/pdf`, ckB),
+    baixarArquivo(`/api/os/${O1}/pdf`, null), baixarArquivo(`/api/os/${O4}/pdf`, ckDono), baixarArquivo(`/api/os/${uuid()}/pdf`, ckDono),
+  ]);
+  checar("PDF da OS: mecanico (da OS e outro) 404, oficina B 404, sem login 401, cancelada 409, inventada 404, todos sem cache", eMec.status === 404 && eMec2.status === 404 && eB.status === 404 && eAnon.status === 401 && eCanc.status === 409 && eInv.status === 404 && [eMec, eB, eAnon, eCanc].every((p) => /no-store/.test(p.cache)), [eMec, eMec2, eB, eAnon, eCanc, eInv].map((p) => p.status).join("/"));
+
+  const totO7 = (await totalDe(donoA.sb, O7))?.total_centavos;
+  const orc = (who) => baixarArquivo(`/api/os/${O7}/orcamento/1/pdf`, who);
+  for (const [rot, ckX] of [["dono", ckDono], ["atendente", ckAt]]) {
+    const p = await orc(ckX);
+    let txt = "";
+    try {
+      txt = p.status === 200 ? (await textoDoPdf(p.buf)).texto : "";
+    } catch (e) {
+      txt = `ERRO ${e.message}`;
+    }
+    const sobram = proibidosPdf(CLI2).filter((x) => txt.includes(x));
+    checar(`PDF do orcamento (versao 1, ${rot}): 200, total da versao, sem custo nem telefone/documento do cliente`, pdfOk7(p) && txt.includes(reais(totO7)) && txt.includes(Q) && sobram.length === 0, `${det7(p)} ${sobram.join(" | ")}`);
+  }
+  const [oMec, oB, oAnon, oV9] = await Promise.all([orc(ckMec), orc(ckB), orc(null), baixarArquivo(`/api/os/${O7}/orcamento/9/pdf`, ckDono)]);
+  checar("PDF do orcamento: mecanico 404, oficina B 404, sem login 401, versao inexistente 404", oMec.status === 404 && oB.status === 404 && oAnon.status === 401 && oV9.status === 404, [oMec, oB, oAnon, oV9].map((p) => p.status).join("/"));
+  const [vDono, vMec, vMec2] = await Promise.all([ckDono, ckMec, ckMec2].map((ckX) => baixarArquivo(`/api/vistorias/${V1}/pdf`, ckX)));
+  checar("PDF da vistoria continua como antes: dono e mecanico da OS 200; outro mecanico 404", pdfOk7(vDono) && pdfOk7(vMec) && vMec2.status === 404, [vDono, vMec, vMec2].map(det7).join(" | "));
+
+  // ---------------------------------------------------------------- paginas
+  console.log(`\n== Fase 7: paginas por papel (${APP_URL}) ==`);
+  const semValor = (html) => !html.includes("R$") && !/centavos/i.test(html);
+  const marcas = [reais(TOTAL_O1), reais(F7.SERV_CAT), reais(F7.AVULSO), CLI.telefone, telFormatado(CLI.telefone), CLI.documento, OBS, CANC];
+  for (const [rot, cam, ckX, deve, naoDeve] of [
+    ["mecanico: /placa", `/placa?placa=${P}`, ckMec, P, []],
+    ["mecanico: historico da placa", `/placa/${P}`, ckMec, P, ["Mecânico Dois"]],
+    ["mecanico 2: historico da placa (OS de outro mecanico)", `/placa/${P}`, ckMec2, P, ["Mecânico Teste"]],
+    ["mecanico: /minhas-os", "/minhas-os", ckMec, P, []],
+  ]) {
+    const pg = await pagina(cam, ckX);
+    const vaz = [...marcas, ...naoDeve].filter((m) => pg.html.includes(m));
+    checar(`app ${rot} sem 'R$' nem 'centavos' no HTML/payload, sem telefone, observacao ou valor`, pg.status === 200 && pg.html.includes(deve) && semValor(pg.html) && vaz.length === 0, `status ${pg.status}${pg.local ? ` -> ${pg.local}` : ""} ${vaz.join(", ")}${pg.status === 200 && !pg.html.includes(deve) ? ` sem '${deve}'` : ""}`);
+  }
+  const hDonoPg = await pagina(`/placa/${P}`, ckDono);
+  checar("app dono: historico da placa mostra as OS com valor", hDonoPg.status === 200 && hDonoPg.html.includes(reais(TOTAL_O1)), `status ${hDonoPg.status}`);
+  for (const [rot, cam, ckX, destino] of [
+    ["mecanico", "/painel", ckMec, "/minhas-os"],
+    ["mecanico", "/painel/os?ver=entregues", ckMec, "/minhas-os"],
+    ["mecanico", "/a-receber", ckMec, "/minhas-os"],
+    ["atendente", "/painel", ckAt, "/os"],
+    ["atendente", "/painel/os?ver=entregues", ckAt, "/os"],
+  ]) {
+    const pg = await pagina(cam, ckX);
+    checar(`app ${rot}: ${cam} manda para ${destino}, sem nenhum valor`, redirecionou(pg, destino) && !pg.html.includes("R$") && !pg.html.includes(reais(pm?.entregues?.total_centavos ?? 1)), `status ${pg.status}${pg.local ? ` -> ${pg.local}` : ""}`);
+  }
+  const semLogin = await pagina("/painel", null);
+  checar("app sem login: /painel manda para o login", redirecionou(semLogin, "/login"), `status ${semLogin.status} -> ${semLogin.local}`);
+  const recAt = await pagina("/a-receber", ckAt);
+  checar("app atendente: /a-receber mostra quem deve, sem custo", recAt.status === 200 && recAt.html.includes(CLI.nome) && recAt.html.includes(reais(TOTAL_O1)) && ![String(F7.CUSTO), reais(F7.CUSTO), reais(CUSTO_O1)].some((x) => recAt.html.includes(x)), `status ${recAt.status}`);
+  const painelA = await pagina("/painel", ckDono);
+  const valoresA = [reais(pm?.entregues?.total_centavos), reais(hojeDono?.a_receber?.total_centavos)];
+  checar("app dono: /painel com os numeros do banco (entregues e a receber)", painelA.status === 200 && valoresA.every((v) => painelA.html.includes(v)), `status ${painelA.status} ${valoresA.filter((v) => !painelA.html.includes(v)).join(", ")}`);
+  const nomeServ = pm?.servicos?.find((s) => s.servico_id)?.nome ?? "sem servico";
+  checar("app dono: /painel completo (F7-B6): servicos mais feitos e produtividade com os nomes do banco", ["Serviços mais feitos", "Produtividade por mecânico", nomeServ, "Mecânico Dois", "Fora do catálogo"].every((x) => painelA.html.includes(x)), `status ${painelA.status}`);
+  const painelB = await pagina("/painel", ckB);
+  const painelA2 = await pagina("/painel", ckDono);
+  checar("app: dono A, dono B e dono A de novo em sequencia: B nunca recebe o painel da A, A continua o seu", painelB.status === 200 && !valoresA.some((v) => painelB.html.includes(v)) && painelA2.status === 200 && valoresA.every((v) => painelA2.html.includes(v)), `status ${painelB.status}/${painelA2.status}`);
+  return { ckDono, ckAt };
+}
+
+async function testesFase7PagamentoNaTela({ ck, donoA, O3, totO3 }) {
+  const ler = async () => (await donoA.sb.rpc("painel_hoje")).data?.a_receber?.total_centavos;
+  const antes = await ler();
+  const pgAntes = await pagina("/painel", ck.ckDono);
+  const r = await donoA.sb.rpc("registrar_pagamento", { p_os_id: O3, p_forma_pagamento: "pix", p_so_se_a_receber: true });
+  const depois = await ler();
+  const pgDepois = await pagina("/painel", ck.ckDono);
+  const v = await donoA.sb.rpc("registrar_pagamento", { p_os_id: O3, p_forma_pagamento: "pix", p_pago_em: null });
+  const pgVolta = await pagina("/painel", ck.ckDono);
+  checar(
+    "app dono: registrar pagamento muda o 'a receber' ao reabrir /painel (sem cache) e voltar para 'a receber' desfaz",
+    !r.error && !v.error && depois === antes - totO3 && pgAntes.html.includes(reais(antes)) && pgDepois.html.includes(reais(depois)) && !pgDepois.html.includes(reais(antes)) && pgVolta.html.includes(reais(antes)),
+    `${msg(r)}/${msg(v)} ${reais(antes)} -> ${reais(depois)}`,
+  );
+}
+
+/** So a Fase 7 (TESTE_SO_FASE7=1): 2 oficinas e 5 contas desta rodada. */
+async function testesSoFase7() {
+  console.log("\n== Preparo so da Fase 7 ==");
+  const donoA = await criarConta("dono.f7");
+  const ofA = await donoA.sb.rpc("criar_oficina", { p_nome_oficina: `Oficina Teste A ${RODADA}`, p_nome_dono: "Dono Teste A", p_versao_termos: TERMOS, p_telefone: "(11) 98888-7777" });
+  const convM = await donoA.sb.rpc("criar_convite", { p_papel: "mecanico" }).single();
+  const convM2 = await donoA.sb.rpc("criar_convite", { p_papel: "mecanico" }).single();
+  const convA = await donoA.sb.rpc("criar_convite", { p_papel: "atendente" }).single();
+  const mec = await criarConta("mecanico.f7");
+  const mec2 = await criarConta("mecanico2.f7");
+  const at = await criarConta("atendente.f7");
+  const a1 = await mec.sb.rpc("aceitar_convite", { p_token: convM.data?.token, p_nome: "Mecânico Teste", p_versao_termos: TERMOS });
+  const a2 = await mec2.sb.rpc("aceitar_convite", { p_token: convM2.data?.token, p_nome: "Mecânico Dois", p_versao_termos: TERMOS });
+  const a3 = await at.sb.rpc("aceitar_convite", { p_token: convA.data?.token, p_nome: "Atendente Teste", p_versao_termos: TERMOS });
+  const donoB = await criarConta("dono.f7.b");
+  const ofB = await donoB.sb.rpc("criar_oficina", { p_nome_oficina: `Oficina Teste B ${RODADA}`, p_nome_dono: "Dono Teste B", p_versao_termos: TERMOS });
+  checar("preparo: 2 oficinas e 5 contas da rodada", typeof ofA.data === "string" && typeof ofB.data === "string" && [a1, a2, a3].every((a) => a.data === ofA.data), [ofA, ofB, a1, a2, a3].map(msg).join("/"));
+  await testesFase7({ donoA, mec, mec2, at, donoB, ofA: ofA.data, ofB: ofB.data });
+  console.log(`\ninfo    contas criadas nesta rodada: *.${RODADA}@${DOMINIO} (ficam no staging)`);
+}
+
+
 // ------------------------------------------------------------------ main
 const autoconfirm = await testesAnon();
 if (!DOMINIO) {
@@ -2651,7 +3416,8 @@ if (!DOMINIO) {
   console.log("\nPULADO  fluxo com login: a confirmacao de e-mail esta LIGADA no staging. Desligue em Auth > Providers > Email > Confirm email.");
 } else {
   try {
-    if (process.env.TESTE_SO_FASE6) await testesSoFase6();
+    if (process.env.TESTE_SO_FASE7) await testesSoFase7();
+    else if (process.env.TESTE_SO_FASE6) await testesSoFase6();
     else await testesCompletos();
   } catch (e) {
     falhou++;
