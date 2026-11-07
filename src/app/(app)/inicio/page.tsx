@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
-import { BookOpen, CircleCheckBig, Clock, Contact, PackageSearch, Plus, Truck, Users, Wrench, ThumbsUp } from "lucide-react";
+import { BookOpen, ChevronRight, CircleCheckBig, Clock, Contact, PackageSearch, Plus, Truck, Users, Wallet, Wrench, ThumbsUp } from "lucide-react";
 import { Cabecalho } from "@/components/layout/cabecalho";
 import { CartaoOSSemPreco } from "@/components/os/cartao-os-sem-preco";
 import { CartaoRespondidos } from "@/components/os/cartao-respondidos";
@@ -92,6 +92,18 @@ async function Painel() {
           </li>
         ))}
       </ul>
+
+      {/* DESIGN §14.1: entrada do painel, sem valor no cartão. */}
+      <Cartao href="/painel">
+        <div className="flex min-h-12 items-center gap-3">
+          <Wallet size={26} strokeWidth={2.25} aria-hidden className="shrink-0 text-texto-suave" />
+          <div className="flex-1">
+            <p className="text-lg font-bold">Painel do mês</p>
+            <p className="text-base text-texto-suave">Entregues, dinheiro recebido e quem deve.</p>
+          </div>
+          <ChevronRight size={24} aria-hidden className="shrink-0 text-texto-suave" />
+        </div>
+      </Cartao>
 
       {qtdPendentes > 0 && (
         <Cartao href="/catalogo?aba=pecas&pendentes=1" faixa="bg-alerta">

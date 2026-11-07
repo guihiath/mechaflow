@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
-import { BookOpen, ChevronRight, Search, Settings, Truck, User, Users } from "lucide-react";
+import { BookOpen, ChevronRight, Search, Settings, Truck, User, Users, Wallet } from "lucide-react";
 import { Cabecalho } from "@/components/layout/cabecalho";
 import { Cartao, ListaCarregando, Pagina } from "@/components/ui/estados";
 import { exigirContexto } from "@/lib/dal";
@@ -14,6 +14,8 @@ const CONTA = { href: "/conta", titulo: "Conta", texto: "Seus dados e sair", ico
 /** DESIGN §10.2: o dono ve tudo; o atendente so o que pode usar. */
 const ITENS = {
   dono: [
+    // DESIGN §14.1: primeiro item do dono.
+    { href: "/painel", titulo: "Painel do mês", texto: "Entregues, dinheiro recebido e quem deve", icone: Wallet },
     VEICULOS,
     PLACA,
     { href: "/catalogo", titulo: "Catálogo", texto: "Serviços e peças, preços e custos", icone: BookOpen },

@@ -13,6 +13,7 @@ import {
   Settings,
   Contact,
   LogOut,
+  Wallet,
 } from "lucide-react";
 import type { Papel } from "@/lib/contexto";
 import { FormSair } from "@/components/fotos/form-sair";
@@ -27,7 +28,8 @@ const OS_LATERAL: Item = { ...OS, rotulo: "Ordens de serviço" };
 /** Barra inferior do celular (DESIGN 5.6, 6.2 e §10.2). */
 const BARRA: Record<Papel, Item[]> = {
   dono: [
-    { href: "/inicio", rotulo: "Início", icone: House },
+    // DESIGN §14.1: o painel e o a receber acendem "Início" na barra.
+    { href: "/inicio", rotulo: "Início", icone: House, ativoEm: ["/inicio", "/painel", "/a-receber"] },
     OS,
     { href: "/clientes", rotulo: "Clientes", icone: Contact },
     {
@@ -54,6 +56,7 @@ const BARRA: Record<Papel, Item[]> = {
 const LATERAL: Record<Papel, Item[]> = {
   dono: [
     { href: "/inicio", rotulo: "Início", icone: House },
+    { href: "/painel", rotulo: "Painel do mês", icone: Wallet },
     OS_LATERAL,
     { href: "/clientes", rotulo: "Clientes", icone: Contact },
     { href: "/veiculos", rotulo: "Veículos", icone: Truck },
