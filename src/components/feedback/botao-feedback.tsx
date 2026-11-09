@@ -6,19 +6,16 @@ import { Botao } from "@/components/ui/botao";
 import { AreaTexto } from "@/components/ui/campo";
 import { Folha } from "@/components/ui/folha";
 import { CaixaMensagem } from "@/components/ui/formulario";
+import { EH_PRODUCAO } from "@/lib/brand";
 import { apagarRascunhoFeedback, guardarRascunhoFeedback, lerRascunhoFeedback, montarTextoFeedback } from "@/lib/feedback";
 
 /**
- * Botão "Enviar feedback" do cabeçalho (F5-F1, PLANO §18.1), só fora de produção.
+ * Botão "Enviar feedback" do cabeçalho (F5-F1, PLANO §18.1). Desde o F8-B2 também em produção
+ * (PLANO 21.12-10, DESIGN 15.5): o piloto precisa dele a um toque em qualquer tela.
  * Abre uma folha por cima da tela, sem navegar, e o texto sai pelo compartilhar do aparelho.
  * A importação é direta (sem carregar sob demanda) para o botão funcionar em modo avião.
- *
- * A condição fica escrita por inteiro aqui (e não via EH_PRODUCAO) para o build cortar o código:
- * com NEXT_PUBLIC_AMBIENTE=producao, nada do feedback vai para o pacote do navegador.
  */
-export const BotaoFeedback = process.env.NEXT_PUBLIC_AMBIENTE === "producao" ? () => null : BotaoFeedbackTeste;
-
-function BotaoFeedbackTeste() {
+export function BotaoFeedback() {
   const [aberta, setAberta] = useState(false);
   return (
     <>
@@ -66,8 +63,11 @@ async function copiarTexto(texto: string, dentro: Element | null): Promise<boole
   }
 }
 
-/** Só existe depois do toque: pode ler navegador e rascunho já na primeira renderização. */
-function FolhaFeedback({ aoFechar }: { aoFechar: () => void }) {
+/**
+ * Só existe depois do toque: pode ler navegador e rascunho já na primeira renderização.
+ * Também aberta pelo "Enviar feedback" do grupo Ajuda (F8-B2).
+ */
+export function FolhaFeedback({ aoFechar }: { aoFechar: () => void }) {
   const [compartilha] = useState(aparelhoCompartilhaTexto);
   const [texto, setTexto] = useState(lerRascunhoFeedback);
   const [recuperado] = useState(() => texto.trim() !== "");
@@ -178,6 +178,8 @@ function FolhaFeedback({ aoFechar }: { aoFechar: () => void }) {
       }
     >
       <div ref={caixa} className="flex flex-col gap-3">
+        {/* DESIGN 15.5: só em produção, acima do campo. */}
+        {EH_PRODUCAO && <p className="text-[15px]">Mande para o suporte do MechaFlow pelo WhatsApp.</p>}
         <AreaTexto
           rotulo="O que aconteceu?"
           ajuda="Qual OS ou placa, o que você tentou fazer, o que aconteceu e se perdeu algo."

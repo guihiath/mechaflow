@@ -1,7 +1,7 @@
 import { formatarDataHora, ROTULO_PAPEL } from "@/lib/formato";
 
 /**
- * "Enviar feedback" (F5-F1), só fora de produção. Nada aqui usa a rede: o texto sai pelo
+ * "Enviar feedback" (F5-F1; em produção desde o F8-B2). Nada aqui usa a rede: o texto sai pelo
  * compartilhar do aparelho, o rascunho fica no localStorage e os dados vêm do navegador.
  *
  * O que vai junto é uma lista fechada (ver `montarTextoFeedback`): nunca e-mail, token, ids

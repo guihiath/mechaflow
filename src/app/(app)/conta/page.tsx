@@ -7,7 +7,9 @@ import { Cabecalho } from "@/components/layout/cabecalho";
 import { classesBotao } from "@/components/ui/botao";
 import { Cartao, FormularioCarregando, Pagina } from "@/components/ui/estados";
 import { FormSair } from "@/components/fotos/form-sair";
+import { AjudaDoApp } from "@/components/ajuda/ajuda-do-app";
 import { exigirContexto } from "@/lib/dal";
+import { linkWhatsAppSuporte, mensagemSuporteApp } from "@/lib/suporte";
 import { ROTULO_PAPEL } from "@/lib/formato";
 
 export const metadata: Metadata = { title: "Conta" };
@@ -50,6 +52,8 @@ async function Dados() {
         </p>
       )}
       <EscolherTema />
+      {/* DESIGN 15.5: grupo Ajuda entre Tema e Sair, nos 3 papéis. */}
+      <AjudaDoApp whatsapp={linkWhatsAppSuporte(mensagemSuporteApp(ctx.perfil_nome, ctx.oficina_nome))} />
       <FormSair botaoClassName={classesBotao("secundario")}>
           <LogOut size={24} strokeWidth={2.25} aria-hidden />
           Sair da conta

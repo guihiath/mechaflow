@@ -295,6 +295,7 @@ async function testesCompletos() {
   await testesFase6({ donoA, mec, at, donoB, ofA: ofA.data, ofB: ofB.data });
   await testesFase7({ donoA, mec, mec2, at, donoB, ofA: ofA.data, ofB: ofB.data });
   await testesF8P3({ donoA, mec, mec2, at, donoB });
+  await testesF8B2({ donoA, mec, at });
 
   console.log("\n== Desativar mecanico ==");
   const desat = await donoA.sb.rpc("atualizar_membro", { p_perfil_id: mec.session.user.id, p_ativo: false });
@@ -3588,6 +3589,90 @@ async function testesF8P3({ donoA, mec, mec2, at, donoB }) {
     mec.session = entraNova.data.session;
     await mec.sb.auth.setSession({ access_token: entraNova.data.session.access_token, refresh_token: entraNova.data.session.refresh_token });
   }
+}
+
+// ------------------------------------------------------------------ F8-B2: primeiros passos e Ajuda
+async function testesF8B2({ donoA, mec, at }) {
+  console.log("\n== F8-B2: primeiros passos (RPC) ==");
+  // Oficina nova, sem telefone, sem equipe, catalogo so o padrao (se houver) e sem OS.
+  const donoC = await criarConta("dono.f8");
+  const ofC = await donoC.sb.rpc("criar_oficina", { p_nome_oficina: `Oficina Passos ${RODADA}`, p_nome_dono: "Dono Passos", p_versao_termos: TERMOS });
+  checar("dono C: oficina nova para os primeiros passos", typeof ofC.data === "string", msg(ofC));
+  const BOOLS = ["dados_oficina", "equipe", "catalogo", "primeira_os", "dispensado"];
+  const ler = async (sb) => sb.rpc("primeiros_passos");
+  const p0 = await ler(donoC.sb);
+  checarTodas("dono C: primeiros_passos() devolve os 5 booleanos; oficina nova sem telefone, equipe, OS nem dispensa", [
+    [`sem erro (${msg(p0)})`, !p0.error],
+    ["5 booleanos", BOOLS.every((k) => typeof p0.data?.[k] === "boolean")],
+    ["dados_oficina false", p0.data?.dados_oficina === false],
+    ["equipe false", p0.data?.equipe === false],
+    ["primeira_os false", p0.data?.primeira_os === false],
+    ["dispensado false", p0.data?.dispensado === false],
+  ], JSON.stringify(p0.data));
+  const pA = await ler(donoA.sb);
+  checar("dono A (oficina com equipe, catalogo e OS): equipe, catalogo e primeira_os feitos", pA.data?.equipe === true && pA.data?.catalogo === true && pA.data?.primeira_os === true, JSON.stringify(pA.data));
+  for (const [rot, c] of [["atendente", at], ["mecanico", mec]]) {
+    const [l, d, u] = await Promise.all([ler(c.sb), c.sb.rpc("dispensar_primeiros_passos"), c.sb.rpc("desfazer_dispensar_primeiros_passos")]);
+    checar(`${rot}: as 3 RPCs dos primeiros passos dao 42501`, [l, d, u].every((r) => r.error?.code === "42501"), [l, d, u].map((r) => r.error?.code ?? "sem erro").join("/"));
+  }
+  const anonP = await novoCliente().rpc("primeiros_passos");
+  checar("anon: primeiros_passos() recusado", Boolean(anonP.error), anonP.error?.code);
+  const updDireto = await donoC.sb.from("oficinas").update({ primeiros_passos_dispensado_em: new Date().toISOString() }).eq("id", ofC.data).select("id");
+  checar("dono C: UPDATE direto da coluna recusado (so pela RPC)", Boolean(updDireto.error) || (updDireto.data ?? []).length === 0, msg(updDireto));
+
+  if (!APP_URL) return console.log("PULADO  F8-B2 pelas paginas: defina APP_URL");
+  console.log(`\n== F8-B2: /inicio, /mais e /conta (${APP_URL}) ==`);
+  const idDisp = idDaAcao("src/acoes/primeiros-passos.ts", "dispensarPrimeirosPassos");
+  const idDesf = idDaAcao("src/acoes/primeiros-passos.ts", "desfazerDispensarPrimeirosPassos");
+  const [ckC, ckDonoA, ckAt, ckMec] = await Promise.all([donoC, donoA, at, mec].map((c) => cookiesDaSessao(c.session)));
+  const temCartao = (html) => html.includes("Dispensar primeiros passos");
+
+  const ini0 = await pagina("/inicio", ckC);
+  checarTodas("app dono C: /inicio mostra o cartao Primeiros passos acima do Abrir OS", [
+    [`status 200 (veio ${ini0.status})`, ini0.status === 200],
+    comTermo(ini0.html, "Primeiros passos"),
+    ["botao Dispensar", temCartao(ini0.html)],
+    ["cartao antes do Abrir OS", ini0.html.indexOf("Dispensar primeiros passos") < ini0.html.indexOf('id="abrir-os"')],
+  ]);
+  if (!idDisp || !idDesf) {
+    console.log("PULADO  dispensar/desfazer pela Server Action: sem o manifesto do build local");
+  } else {
+    const d1 = await chamarAcao("/inicio", idDisp, [], ckC);
+    const depois = await ler(donoC.sb);
+    const ini1 = await pagina("/inicio", ckC);
+    checar("app dono C: Dispensar grava e o /inicio vem sem o cartao", d1.ok && depois.data?.dispensado === true && ini1.status === 200 && !temCartao(ini1.html), `ok ${d1.ok} dispensado ${depois.data?.dispensado}`);
+    const d2 = await chamarAcao("/inicio", idDisp, [], ckC);
+    checar("app dono C: Dispensar de novo nao erra", d2.ok);
+    const u1 = await chamarAcao("/inicio", idDesf, [], ckC);
+    const volta = await ler(donoC.sb);
+    const ini2 = await pagina("/inicio", ckC);
+    checar("app dono C: Desfazer traz o cartao de volta", u1.ok && volta.data?.dispensado === false && temCartao(ini2.html), `ok ${u1.ok} dispensado ${volta.data?.dispensado}`);
+    const at1 = await chamarAcao("/os", idDisp, [], ckAt);
+    const intacto = await ler(donoA.sb);
+    checar("atendente A: Dispensar pela Server Action devolve erro e nao grava", !at1.ok && at1.erro === "servidor" && intacto.data?.dispensado === pA.data?.dispensado, `ok ${at1.ok} erro ${at1.erro}`);
+  }
+  for (const [rot, cam, ck] of [["atendente", "/os", ckAt], ["mecanico", "/minhas-os", ckMec], ["atendente /inicio", "/inicio", ckAt], ["mecanico /inicio", "/inicio", ckMec]]) {
+    const pg = await pagina(cam, ck);
+    checar(`app ${rot}: sem o cartao Primeiros passos`, !temCartao(pg.html) && !pg.html.includes("Primeiros passos"), `status ${pg.status}${pg.local ? ` -> ${pg.local}` : ""}`);
+  }
+
+  const comZap = Boolean((process.env.NEXT_PUBLIC_SUPORTE_WHATSAPP ?? env.NEXT_PUBLIC_SUPORTE_WHATSAPP ?? "").replace(/\D/g, ""));
+  for (const [rot, cam, ck] of [["dono", "/mais", ckDonoA], ["atendente", "/mais", ckAt], ["dono", "/conta", ckDonoA], ["atendente", "/conta", ckAt], ["mecanico", "/conta", ckMec]]) {
+    const pg = await pagina(cam, ck);
+    checarTodas(`app ${rot}: ${cam} com o grupo Ajuda (feedback, termos e privacidade${comZap ? ", suporte" : "; sem a variavel, sem suporte"})`, [
+      [`status 200 (veio ${pg.status}${pg.local ? ` -> ${pg.local}` : ""})`, pg.status === 200],
+      comTermo(pg.html, ">Ajuda<"),
+      comTermo(pg.html, "Conte o que travou ou o que falta"),
+      comTermo(pg.html, 'href="/termos"'),
+      comTermo(pg.html, 'href="/privacidade"'),
+      comZap ? comTermo(pg.html, "Falar com o suporte") : semTermo(pg.html, "Falar com o suporte"),
+      semTermo(pg.html, "wa.me/?"),
+    ]);
+  }
+  const mecConta = await pagina("/conta", ckMec);
+  checar("app mecanico: /conta mantem 'Fale com o dono da oficina' acima do grupo Ajuda", mecConta.html.indexOf("Fale com o dono da oficina") > 0 && mecConta.html.indexOf("Fale com o dono da oficina") < mecConta.html.indexOf(">Ajuda<"));
+  const cab = await pagina("/minhas-os", ckMec);
+  checar("app mecanico: cabecalho com o botao 'Enviar feedback'", cab.html.includes('aria-label="Enviar feedback"'), `status ${cab.status}`);
 }
 
 /** So a Fase 7 (TESTE_SO_FASE7=1): 2 oficinas e 5 contas desta rodada. */

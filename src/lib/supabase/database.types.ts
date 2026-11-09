@@ -721,6 +721,7 @@ export type Database = {
           logo_path: string | null
           nome: string
           plano: string
+          primeiros_passos_dispensado_em: string | null
           telefone: string | null
           vistoria_obrigatoria: boolean
         }
@@ -734,6 +735,7 @@ export type Database = {
           logo_path?: string | null
           nome: string
           plano?: string
+          primeiros_passos_dispensado_em?: string | null
           telefone?: string | null
           vistoria_obrigatoria?: boolean
         }
@@ -747,6 +749,7 @@ export type Database = {
           logo_path?: string | null
           nome?: string
           plano?: string
+          primeiros_passos_dispensado_em?: string | null
           telefone?: string | null
           vistoria_obrigatoria?: boolean
         }
@@ -1813,6 +1816,19 @@ export type Database = {
       }
     }
     Functions: {
+      // Fase 8A, primeiros passos (docs/ARQUITETURA.md, 15.15). So o dono; os outros recebem 42501.
+      primeiros_passos: {
+        Args: never
+        Returns: Json // { dados_oficina, equipe, catalogo, primeira_os, dispensado }: boolean
+      }
+      dispensar_primeiros_passos: {
+        Args: never
+        Returns: undefined
+      }
+      desfazer_dispensar_primeiros_passos: {
+        Args: never
+        Returns: undefined
+      }
       // Fase 7 (docs/ARQUITETURA.md, 14). Oficina sempre da sessao; nenhuma recebe oficina.
       painel_mes: {
         Args: { p_ano: number; p_mes: number }

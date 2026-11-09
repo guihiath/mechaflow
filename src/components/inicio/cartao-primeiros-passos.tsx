@@ -83,6 +83,8 @@ export function CartaoPrimeirosPassos({
   const [oculto, setOculto] = useState(dispensado);
   const [aviso, setAviso] = useState(0);
   const [erro, setErro] = useState<ErroDispensar | undefined>(erroInicial);
+  /** Desfazer falhou: o cartão continua dispensado no servidor, e a tela avisa em vez de sumir calada. */
+  const [erroDesfazer, setErroDesfazer] = useState(false);
   const refDispensar = useRef<HTMLButtonElement>(null);
   const idTitulo = useId();
 
@@ -111,6 +113,7 @@ export function CartaoPrimeirosPassos({
   }
 
   async function desfazer() {
+    setErroDesfazer(false);
     let r: ResultadoPassos;
     try {
       r = await aoDesfazer();
@@ -118,7 +121,10 @@ export function CartaoPrimeirosPassos({
       r = { ok: false, erro: "rede" };
     }
     setAviso(0);
-    if (!r.ok) return; // continua dispensado no servidor; o cartão fica fora (o F8-B2 pode avisar)
+    if (!r.ok) {
+      setErroDesfazer(true);
+      return;
+    }
     setOculto(false);
     requestAnimationFrame(() => refDispensar.current?.focus());
   }
@@ -134,7 +140,20 @@ export function CartaoPrimeirosPassos({
     ) : null;
 
   if (!passos || !proximo) return null;
-  if (oculto) return aviso6s;
+  if (oculto)
+    return (
+      <>
+        {aviso6s}
+        {erroDesfazer && (
+          <div className="flex w-full max-w-[560px] flex-col gap-2">
+            <CaixaMensagem tipo="erro">Não deu para trazer os primeiros passos de volta. Confira a internet e tente de novo.</CaixaMensagem>
+            <button type="button" onClick={desfazer} className={`${fantasmaSemCor} self-start text-info-texto`}>
+              Trazer de volta
+            </button>
+          </div>
+        )}
+      </>
+    );
 
   return (
     <section aria-labelledby={idTitulo} className="w-full max-w-[560px]">

@@ -3,7 +3,6 @@ import { headers } from "next/headers";
 import { Navegacao, NavegacaoEsqueleto } from "@/components/layout/navegacao";
 import { FilaFotosGlobal } from "@/components/fotos/fila-fotos-global";
 import { PapelFeedback } from "@/components/feedback/papel-feedback";
-import { EH_PRODUCAO } from "@/lib/brand";
 import { lerContexto } from "@/lib/dal";
 import { CABECALHO_CAMINHO } from "@/lib/caminho";
 
@@ -32,7 +31,7 @@ async function NavegacaoDoUsuario() {
     <>
       <Navegacao papel={ctx.papel} oficina={ctx.oficina_nome} caminhoServidor={caminho} />
       {ctx.usuario_id && <FilaFotosGlobal usuarioId={ctx.usuario_id} caminhoServidor={caminho} />}
-      {!EH_PRODUCAO && <PapelFeedback papel={ctx.papel} />}
+      <PapelFeedback papel={ctx.papel} />
     </>
   );
 }

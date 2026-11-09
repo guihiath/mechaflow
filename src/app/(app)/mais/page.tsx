@@ -3,7 +3,9 @@ import { Suspense } from "react";
 import { BookOpen, ChevronRight, HandCoins, Search, Settings, Truck, User, Users, Wallet } from "lucide-react";
 import { Cabecalho } from "@/components/layout/cabecalho";
 import { Cartao, ListaCarregando, Pagina } from "@/components/ui/estados";
+import { AjudaDoApp } from "@/components/ajuda/ajuda-do-app";
 import { exigirContexto } from "@/lib/dal";
+import { linkWhatsAppSuporte, mensagemSuporteApp } from "@/lib/suporte";
 
 export const metadata: Metadata = { title: "Mais" };
 
@@ -48,21 +50,25 @@ export default function MaisPage() {
 async function Lista() {
   const ctx = await exigirContexto(["dono", "atendente"]);
   return (
-    <ul className="flex flex-col gap-3">
-      {ITENS[ctx.papel === "dono" ? "dono" : "atendente"].map(({ href, titulo, texto, icone: Icone }) => (
-        <li key={href}>
-          <Cartao href={href}>
-            <div className="flex min-h-12 items-center gap-3">
-              <Icone size={26} strokeWidth={2.25} aria-hidden className="shrink-0" />
-              <div className="flex-1">
-                <p className="text-lg font-bold">{titulo}</p>
-                <p className="text-base text-texto-suave">{texto}</p>
+    <>
+      <ul className="flex flex-col gap-3">
+        {ITENS[ctx.papel === "dono" ? "dono" : "atendente"].map(({ href, titulo, texto, icone: Icone }) => (
+          <li key={href}>
+            <Cartao href={href}>
+              <div className="flex min-h-12 items-center gap-3">
+                <Icone size={26} strokeWidth={2.25} aria-hidden className="shrink-0" />
+                <div className="flex-1">
+                  <p className="text-lg font-bold">{titulo}</p>
+                  <p className="text-base text-texto-suave">{texto}</p>
+                </div>
+                <ChevronRight size={24} aria-hidden className="text-texto-suave" />
               </div>
-              <ChevronRight size={24} aria-hidden className="text-texto-suave" />
-            </div>
-          </Cartao>
-        </li>
-      ))}
-    </ul>
+            </Cartao>
+          </li>
+        ))}
+      </ul>
+      {/* DESIGN 15.5: grupo Ajuda abaixo da lista. */}
+      <AjudaDoApp whatsapp={linkWhatsAppSuporte(mensagemSuporteApp(ctx.perfil_nome, ctx.oficina_nome))} />
+    </>
   );
 }

@@ -7,7 +7,7 @@ import { EH_PRODUCAO } from "@/lib/brand";
 /**
  * Cabecalho (DESIGN 5.7): 56px, grafite, titulo Condensed 20px a esquerda,
  * voltar 48x48 quando nao e tela raiz, no maximo 1 acao secundaria a direita.
- * Em staging: faixa listrada + "TESTE" + "Enviar feedback" (F5-F1).
+ * Em staging: faixa listrada + "TESTE". "Enviar feedback" (F5-F1) em todos os ambientes desde o F8-B2.
  */
 export function Cabecalho({
   titulo,
@@ -44,11 +44,9 @@ export function Cabecalho({
           )}
           <h1 className="line-clamp-2 min-w-0 flex-1 font-display text-xl leading-tight [overflow-wrap:normal]">{titulo}</h1>
           {!EH_PRODUCAO && (
-            <>
-              <span className="shrink-0 rounded-sm bg-primaria px-1.5 text-xs font-bold text-primaria-texto @max-[20rem]:hidden">TESTE</span>
-              <BotaoFeedback />
-            </>
+            <span className="shrink-0 rounded-sm bg-primaria px-1.5 text-xs font-bold text-primaria-texto @max-[20rem]:hidden">TESTE</span>
           )}
+          <BotaoFeedback />
           {acao}
         </div>
       </div>
