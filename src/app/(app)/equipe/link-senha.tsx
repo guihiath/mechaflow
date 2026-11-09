@@ -62,7 +62,6 @@ export function LinkSenha({ id, nome }: { id: string; nome: string }) {
           <li>Gerar de novo cancela este link.</li>
           <li>Mande só para a própria pessoa: quem abrir entra na conta dela.</li>
         </ul>
-        <p className="break-all rounded-md bg-superficie-2 p-3 font-mono text-sm">{gerado.link}</p>
         <a href={whatsapp} target="_blank" rel="noopener noreferrer" className={classesBotao("primario")}>
           <MessageCircle size={24} strokeWidth={2.25} aria-hidden />
           Enviar pelo WhatsApp
@@ -72,6 +71,12 @@ export function LinkSenha({ id, nome }: { id: string; nome: string }) {
           {copiado ? "Link copiado" : "Copiar link"}
         </Botao>
         {copiado && <CaixaMensagem tipo="sucesso">Link copiado. Cole na conversa com {gerado.nome}.</CaixaMensagem>}
+        <details>
+          <summary className="flex min-h-toque cursor-pointer items-center text-base font-bold text-info-texto underline">
+            Ver o link
+          </summary>
+          <p className="mt-2 break-all rounded-md bg-superficie-2 p-3 font-mono text-sm">{gerado.link}</p>
+        </details>
         <button
           type="button"
           onClick={() => {

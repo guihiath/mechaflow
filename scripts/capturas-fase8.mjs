@@ -539,11 +539,34 @@ async function senha() {
       await page.getByRole("button", { name: "Gerar link de senha para Mecânico Senha" }).click();
       const titulo = page.getByRole("heading", { name: /Link de senha de Mecânico Senha/ });
       await titulo.waitFor({ timeout: 20000 });
-      await titulo.scrollIntoViewIfNeeded();
+      // Título da caixa logo abaixo do cabeçalho fixo: é onde o dono está quando a caixa abre.
+      await titulo.evaluate((el) => {
+        el.scrollIntoView({ block: "start" });
+        window.scrollBy(0, -(document.querySelector("header")?.getBoundingClientRect().height ?? 0) - 16);
+      });
       await page.waitForTimeout(400);
-      const link = (await page.locator("p.font-mono").first().innerText()).trim();
+      const zap = page.getByRole("link", { name: "Enviar pelo WhatsApp" });
+      const posZap = await zap.evaluate((el) => {
+        const nav = [...document.querySelectorAll("nav")].map((n) => n.getBoundingClientRect()).find((r) => r.bottom >= window.innerHeight - 1);
+        const limite = nav ? nav.top : window.innerHeight;
+        return { base: Math.round(el.getBoundingClientRect().bottom), limite: Math.round(limite) };
+      });
+      nota(`Link gerado (${chave}${t200 ? ", 200 %" : ""}): "Enviar pelo WhatsApp" ${posZap.base <= posZap.limite ? "na primeira tela" : "ABAIXO da dobra"} (base ${posZap.base} px, limite ${posZap.limite} px)`);
+      const link = (await page.locator("p.font-mono").first().textContent() ?? "").trim();
       if (!link.includes("/auth/confirmar?")) throw new Error(`link inesperado: ${link.replace(/token_hash=[^&]+/, "token_hash=…")}`);
       await tirar("equipe-link-senha-gerado", { inteira: !t200, topo: true, desc: "Equipe: caixa \"Link de senha de …\" com Enviar pelo WhatsApp, Copiar link e Fechar (link real)" });
+      // "Ver o link" abre e fecha
+      const verLink = page.locator("summary", { hasText: "Ver o link" });
+      const url = page.locator("p.font-mono").first();
+      const fechadoAntes = !(await url.isVisible());
+      await verLink.click();
+      await url.waitFor({ state: "visible", timeout: 5000 });
+      await url.scrollIntoViewIfNeeded();
+      await page.waitForTimeout(300);
+      await tirar("equipe-link-senha-ver-o-link", { inteira: false, topo: true, desc: "Equipe: \"Ver o link\" aberto" });
+      await verLink.click();
+      await url.waitFor({ state: "hidden", timeout: 5000 });
+      nota(`"Ver o link" (${chave}${t200 ? ", 200 %" : ""}): fechado no início ${fechadoAntes ? "sim" : "NÃO"}, abre e fecha ok`);
       if (chave === "chromium") {
         await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: APP_URL }).catch(() => {});
         await page.getByRole("button", { name: "Copiar link" }).click();
