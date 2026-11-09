@@ -449,7 +449,9 @@ export function LeituraVistoria({
 }
 
 function MiniaturaLeitura({ foto, rotulo, aoAbrir }: { foto: FotoLeitura; rotulo: string; aoAbrir: () => void }) {
-  const [falhou, setFalhou] = useState(false);
+  // URL que falhou: depois da renovação (F8-P2) a URL nova tenta carregar de novo.
+  const [falhouSrc, setFalhouSrc] = useState<string | null>(null);
+  const falhou = falhouSrc !== null && falhouSrc === foto.src;
   return (
     <button
       type="button"
@@ -460,7 +462,7 @@ function MiniaturaLeitura({ foto, rotulo, aoAbrir }: { foto: FotoLeitura; rotulo
       {foto.src && !falhou ? (
         // URL assinada do Storage: sem otimizador do Next.
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={foto.src} alt="" className="h-full w-full object-cover" draggable={false} onError={() => setFalhou(true)} />
+        <img src={foto.src} alt="" className="h-full w-full object-cover" draggable={false} onError={() => setFalhouSrc(foto.src)} />
       ) : (
         <ImageOff size={28} strokeWidth={2} aria-hidden className="text-texto-suave" />
       )}

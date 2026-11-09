@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
+import { RenovarUrlsAssinadas } from "@/components/fotos/renovar-urls-assinadas";
 import { Cabecalho } from "@/components/layout/cabecalho";
 import { EsconderNavegacao } from "@/components/layout/marcador-pagina";
 import { DetalheCarregando } from "@/components/os/detalhe-carregando";
@@ -151,6 +152,9 @@ async function Conteudo({
     for (const s of data ?? []) if (s.path && s.signedUrl && !s.error) urls.set(s.path, s.signedUrl);
   }
   const assinaturaUrl = v.assinatura_caminho ? (urls.get(v.assinatura_caminho) ?? null) : null;
+  // Com a tela aberta, as URLs são renovadas perto de vencer (refresh da página, F8-P2).
+  // eslint-disable-next-line react-hooks/purity -- marca de quando as URLs foram assinadas (renovação no navegador)
+  const renovarUrls = caminhos.length ? <RenovarUrlsAssinadas assinadasEm={Date.now()} /> : null;
 
   if (leitura) {
     const paraLeitura = (f: (typeof todas)[number]): FotoLeitura => ({
@@ -233,6 +237,7 @@ async function Conteudo({
     return (
       <>
         <EsconderNavegacao />
+        {renovarUrls}
         {concluida && <LimparRascunhoVistoria usuarioId={ctx.usuario_id} vistoriaId={v.id} />}
         <Cabecalho titulo={titulo} voltar={voltar} />
         <Pagina>
@@ -309,6 +314,7 @@ async function Conteudo({
   return (
     <>
       <EsconderNavegacao />
+      {renovarUrls}
       <VistoriaRascunho
         osId={id}
         numeroOS={os.numero ?? null}

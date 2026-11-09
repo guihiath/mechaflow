@@ -89,8 +89,10 @@ export function MiniaturaFoto({
   /** Pede URL nova para a miniatura que nao carregou. */
   aoRecarregar?: () => void;
 }) {
-  const [falhouImagem, setFalhouImagem] = useState(false);
+  // Guarda a URL que falhou: quando a URL assinada é renovada, a imagem nova tenta carregar (F8-P2).
+  const [falhouSrc, setFalhouSrc] = useState<string | null>(null);
   const { estado } = foto;
+  const falhouImagem = falhouSrc !== null && falhouSrc === foto.src;
   const semImagem = estado === "sem_imagem" || falhouImagem || !foto.src;
   const tipo = rotuloCategoriaFoto(foto.categoria);
   const comErro = estado === "falhou" || estado === "nao_enviavel";
@@ -105,7 +107,7 @@ export function MiniaturaFoto({
         type="button"
         onClick={() => {
           if (recarregar) {
-            setFalhouImagem(false);
+            setFalhouSrc(null);
             aoRecarregar();
           } else aoAbrir?.();
         }}
@@ -126,7 +128,7 @@ export function MiniaturaFoto({
             loading="lazy"
             decoding="async"
             draggable={false}
-            onError={() => setFalhouImagem(true)}
+            onError={() => setFalhouSrc(foto.src ?? null)}
             className="h-full w-full object-cover"
           />
         )}

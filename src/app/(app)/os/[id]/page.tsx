@@ -372,9 +372,9 @@ async function DetalheGerencia({ ctx, id, sp }: { ctx: ContextoAtivo; id: string
             <dd className="font-mono text-lg">{formatarNumero(os.horimetro)}</dd>
           </div>
         )}
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-x-3">
           <dt className="text-sm font-bold text-texto-suave">Mecânico</dt>
-          <dd className="flex items-center gap-1 text-lg">
+          <dd className="flex min-w-0 flex-wrap items-center gap-1 text-lg break-words">
             {os.mecanico_nome ?? <SemMecanico />}
             {!encerrada && <BotaoTrocarMecanico />}
           </dd>
@@ -809,9 +809,9 @@ vistoriaBarra:
           <dt className="text-sm font-bold text-texto-suave">KM na entrada</dt>
           <dd className="font-mono text-lg">{formatarNumero(os.km) || "—"}</dd>
         </div>
-        <div className="flex items-baseline justify-between gap-3">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3">
           <dt className="text-sm font-bold text-texto-suave">Mecânico</dt>
-          <dd className="text-lg">{os.mecanico_nome ?? <SemMecanico />}</dd>
+          <dd className="min-w-0 text-lg break-words">{os.mecanico_nome ?? <SemMecanico />}</dd>
         </div>
       </dl>
     </Cartao>

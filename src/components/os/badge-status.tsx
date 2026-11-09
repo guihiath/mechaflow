@@ -5,12 +5,27 @@ import { INFO_STATUS, ROTULO_MODO_OS, type ModoOS, type StatusOS } from "@/lib/o
 /**
  * Badge de status da OS (DESIGN §5.5 e §10.1): icone + texto + cor, nunca so cor.
  * Nao e botao. "normal" 32px / 15px; "grande" 40px / 18px (topo do detalhe).
+ * `quebravel` (padrão no "grande"): com texto a 200% o rótulo quebra a linha e o selo cresce para
+ * baixo em vez de alargar a página (F8-P2); no tamanho normal cabe numa linha e fica igual.
+ * Só onde o selo está sozinho na linha (topo e linha do tempo do detalhe); nas listas ele divide
+ * a linha com outros textos e continua sem quebrar.
  */
-export function BadgeStatus({ status, tamanho = "normal" }: { status: StatusOS; tamanho?: "normal" | "grande" }) {
+export function BadgeStatus({
+  status,
+  tamanho = "normal",
+  quebravel = tamanho === "grande",
+}: {
+  status: StatusOS;
+  tamanho?: "normal" | "grande";
+  quebravel?: boolean;
+}) {
   const { rotulo, icone: Icone, badge } = INFO_STATUS[status];
-  const medida = tamanho === "grande" ? "h-10 px-3 text-lg" : "h-8 px-2.5 text-sm";
+  const fonte = tamanho === "grande" ? "px-3 text-lg" : "px-2.5 text-sm";
+  const medida = quebravel
+    ? `${tamanho === "grande" ? "min-h-10" : "min-h-8"} max-w-full py-1 leading-tight ${fonte}`
+    : `${tamanho === "grande" ? "h-10" : "h-8"} shrink-0 whitespace-nowrap ${fonte}`;
   return (
-    <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-sm font-bold whitespace-nowrap ${medida} ${badge}`}>
+    <span className={`inline-flex items-center gap-1.5 rounded-sm font-bold ${medida} ${badge}`}>
       <Icone size={tamanho === "grande" ? 22 : 18} strokeWidth={2.25} aria-hidden className="shrink-0" />
       {rotulo}
     </span>

@@ -18,6 +18,7 @@ import { ouvirFotosDaBarra, publicarOSCheia } from "@/lib/fotos/barra";
 import { aquecerConexao } from "@/lib/fotos/enviar";
 import { adicionarArquivos, aoConfirmarFoto, definirTipo, descartar, iniciarFila, tentarDeNovo, type ItemFila } from "@/lib/fotos/fila";
 import { BUCKET_FOTOS, LIMITE_FOTOS_OS, VALIDADE_URL_FOTO_S } from "@/lib/fotos/regras";
+import { useRenovarUrlsAssinadas } from "@/lib/fotos/usar-renovar-urls";
 import { createClient } from "@/lib/supabase/client";
 import { AjudaCamera } from "./ajuda-camera";
 import { FolhaTipoFoto } from "./folha-tipo-foto";
@@ -37,9 +38,6 @@ export type FotoDaGrade = {
   /** Regra do banco para quem consulta (apagar e editar tipo/legenda usam a mesma). */
   podeApagar: boolean;
 };
-
-/** Renova as URLs assinadas 2 min antes de vencer (valem 15 min). */
-const RENOVAR_MS = (VALIDADE_URL_FOTO_S - 120) * 1000;
 
 const ehCategoria = (c: string | null | undefined): c is CategoriaFoto => (CATEGORIAS_FOTO as readonly string[]).includes(c ?? "");
 
@@ -159,19 +157,9 @@ export function FotosOS({
 
   useEffect(() => aoConfirmarFoto((o) => o === osId && void recarregar()), [osId, recarregar]);
 
-  // URL assinada vencendo com a tela aberta: renova sozinha (e ao voltar para a aba).
-  useEffect(() => {
-    const falta = Math.max(5_000, assinadas + RENOVAR_MS - Date.now());
-    const t = setTimeout(() => void recarregar(), falta);
-    const aoVoltar = () => {
-      if (document.visibilityState === "visible" && Date.now() - assinadas > RENOVAR_MS) void recarregar();
-    };
-    document.addEventListener("visibilitychange", aoVoltar);
-    return () => {
-      clearTimeout(t);
-      document.removeEventListener("visibilitychange", aoVoltar);
-    };
-  }, [assinadas, recarregar]);
+  // URL assinada vencendo com a tela aberta: renova sozinha 2 min antes, ao voltar para a aba e
+  // quando a internet volta; se falhar, tenta de novo a cada 1 min (F8-P2).
+  useRenovarUrlsAssinadas(assinadas, recarregar);
 
   // ------------------------------------------------ contagem e limite de 40
   const idsServidor = new Set(lista.map((f) => f.id));
@@ -374,7 +362,8 @@ export function FotosOS({
 
       {podeEnviar && (
         <div className="flex flex-col gap-2">
-          <div className="flex gap-2">
+          {/* flex-wrap: com texto a 200% os dois botões empilham em vez de alargar a página (F8-P2). */}
+          <div className="flex flex-wrap gap-2">
             <label
               htmlFor={idCamera}
               aria-disabled={desabilitado}

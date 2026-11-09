@@ -68,6 +68,7 @@ export function CartaoAvaria({
   aoTentarDeNovo?: () => void;
   leitura?: boolean;
 }) {
+  // URL que falhou (não o id): a URL renovada pelo servidor tenta carregar de novo (F8-P2).
   const [falhouImagem, setFalhouImagem] = useState<string | null>(null);
   const lado = ROTULO_LADO_AVARIA[avaria.lado];
   const descricao = avaria.descricao?.trim();
@@ -76,7 +77,7 @@ export function CartaoAvaria({
   const fila = estadoDaAvaria(avaria.fotos);
   const infoFila = fila ? ESTADO_FILA[fila.estado] : undefined;
   const pct = fila?.estado === "enviando" ? Math.max(0, Math.min(100, Math.round(fila.progresso ?? 0))) : null;
-  const semImagem = !primeira?.src || falhouImagem === primeira.id;
+  const semImagem = !primeira?.src || falhouImagem === primeira.src;
   const IconeFila = infoFila?.icone;
 
   const textoFila = infoFila ? `${infoFila.texto}${pct !== null ? ` ${pct}%` : ""}` : "";
@@ -94,7 +95,7 @@ export function CartaoAvaria({
             src={primeira.src ?? undefined}
             alt=""
             draggable={false}
-            onError={() => setFalhouImagem(primeira.id)}
+            onError={() => setFalhouImagem(primeira.src ?? null)}
             className="h-full w-full object-cover"
           />
         )}

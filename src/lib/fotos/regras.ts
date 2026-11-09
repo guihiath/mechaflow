@@ -7,6 +7,9 @@ export const LIMITE_FOTOS_OS = 40;
 /** Validade da URL assinada das fotos: 15 min (ARQUITETURA F3.1-P5). */
 export const VALIDADE_URL_FOTO_S = 900;
 
+/** Quando renovar as URLs assinadas com a tela aberta: 2 min antes de vencer (F3-B5, F8-P2). */
+export const RENOVAR_URL_FOTO_MS = (VALIDADE_URL_FOTO_S - 120) * 1000;
+
 /**
  * Quem envia foto (ARQUITETURA F3.4; o banco confere de novo): dono e atendente
  * em qualquer OS da oficina, inclusive entregue/cancelada; mecânico só na OS dele

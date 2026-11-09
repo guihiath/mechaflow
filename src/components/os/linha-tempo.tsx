@@ -44,7 +44,7 @@ export function LinhaTempo({
               <span aria-hidden className="absolute top-4 -left-[5px] size-2 rounded-full bg-borda" />
               {e.tipo === "status" ? (
                 <span className="flex flex-wrap items-center gap-2">
-                  <BadgeStatus status={e.status} />
+                  <BadgeStatus status={e.status} quebravel />
                 </span>
               ) : (
                 <span className="flex items-start gap-2 text-base font-bold">

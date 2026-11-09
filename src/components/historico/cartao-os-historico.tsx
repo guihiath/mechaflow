@@ -22,6 +22,7 @@ import {
   type TipoVistoria,
 } from "@/lib/formato";
 import { ROTULO_FORMA_PAGAMENTO, textoUnidade, type FormaPagamento } from "@/lib/os";
+import { useRenovarUrlsAssinadas } from "@/lib/fotos/usar-renovar-urls";
 import { INFO_STATUS, type StatusOS } from "@/lib/os-status";
 import { formatarDataCurta, formatarDataLonga, textoContagemHistorico } from "@/lib/painel";
 
@@ -105,7 +106,8 @@ export type DetalheOSHistorico = {
   eventos?: EventoOS[];
 };
 
-type EstadoDetalhe = { tipo: "fechado" } | { tipo: "carregando" } | { tipo: "erro" } | { tipo: "pronto"; dados: DetalheOSHistorico };
+/** `em` = quando o detalhe chegou (as URLs assinadas das fotos valem 15 min a partir daí). */
+type EstadoDetalhe = { tipo: "fechado" } | { tipo: "carregando" } | { tipo: "erro" } | { tipo: "pronto"; dados: DetalheOSHistorico; em: number };
 
 /**
  * Cartão de OS do histórico da placa (DESIGN §14.6 e §14.7, `CartaoOSHistorico`). Tocar expande no
@@ -141,11 +143,23 @@ export function CartaoOSHistorico({
   async function carregar() {
     setDetalhe({ tipo: "carregando" });
     try {
-      setDetalhe({ tipo: "pronto", dados: await carregarDetalhe(os.id) });
+      setDetalhe({ tipo: "pronto", dados: await carregarDetalhe(os.id), em: Date.now() });
     } catch {
       setDetalhe({ tipo: "erro" });
     }
   }
+
+  // Cartão aberto por muito tempo: busca o detalhe de novo (fotos assinadas outra vez) sem trocar a
+  // tela; se falhar, fica o que já estava e tenta de novo depois (F8-P2).
+  async function renovar() {
+    try {
+      const dados = await carregarDetalhe(os.id);
+      setDetalhe((d) => (d.tipo === "pronto" ? { tipo: "pronto", dados, em: Date.now() } : d));
+    } catch {
+      // mantém o detalhe atual
+    }
+  }
+  useRenovarUrlsAssinadas(aberto && detalhe.tipo === "pronto" ? detalhe.em : null, renovar);
 
   function alternar() {
     const abrir = !aberto;
