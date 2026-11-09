@@ -242,16 +242,16 @@ async function emCada({ grupo, papel, sessao, texto200 = false, temas = ["claro"
         await pronto(page);
         if (texto200) await page.addStyleTag({ content: TEXTO_200 }).catch(() => {});
       };
-      const tirar = async (tela, { inteira = true, topo = false, desc = "" } = {}) => {
+      const tirar = async (tela, { inteira = true, topo = false, desc = "", papel: quem = papel } = {}) => {
         const t = texto200 ? `${tela}-texto200` : tela;
-        const base = `${t}_${papel}_${nav.nome}_${tema}`;
+        const base = `${t}_${quem}_${nav.nome}_${tema}`;
         try {
           const vp = page.viewportSize();
           const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
           const reg = (arquivo, recorte) =>
             feitas.push({ arquivo, desc: `${desc}${recorte}`, aparelho: nav.nome, tema, texto: texto200 ? "200 %" : "100 %", largura: vp.width, scrollWidth, url: new URL(page.url()).pathname });
           if (topo) {
-            const b2 = `${t}-topo_${papel}_${nav.nome}_${tema}`;
+            const b2 = `${t}-topo_${quem}_${nav.nome}_${tema}`;
             await page.screenshot({ path: join(SAIDA, `${b2}.png`) });
             reg(`${b2}.png`, " (área visível)");
           }
@@ -509,6 +509,74 @@ async function ajuda() {
   }
 }
 
+/**
+ * F8-B5 (I3): caminho feliz da senha do funcionário, com a SUPABASE_SECRET_KEY no servidor (não neste
+ * script). Oficina própria ("… senha"), para não derrubar a sessão do mecânico dos outros grupos: o
+ * "Salvar senha nova" encerra as outras sessões. Em cada navegador × tema × texto: o dono gera o link na
+ * Equipe; a mesma aba sai da conta do dono, abre o link, toca "Continuar", cria a senha e vê o destino.
+ * Cada link vale uma vez e gerar outro cancela o anterior, então tudo acontece em sequência na mesma aba.
+ */
+async function senha() {
+  if (SO && !SO.test("senha") && !SO.test("senha-200")) return;
+  const rodada = E.rodada;
+  const d = await criarConta("dono.cap8senha", rodada);
+  const of = await d.sb.rpc("criar_oficina", { p_nome_oficina: `Oficina Captura F8 senha ${rodada.slice(-4)}`, p_nome_dono: "Dono Captura", p_versao_termos: TERMOS, p_telefone: "(41) 97777-5555" });
+  if (of.error) throw new Error(`criar_oficina senha: ${msg(of)}`);
+  const c = await d.sb.rpc("criar_convite", { p_papel: "mecanico" }).single();
+  const m = await criarConta("mecanico.cap8senha", rodada);
+  const ac = await m.sb.rpc("aceitar_convite", { p_token: c.data?.token, p_nome: "Mecânico Senha", p_versao_termos: TERMOS });
+  if (c.error || ac.error) throw new Error(`convite senha: ${msg(c)}/${msg(ac)}`);
+  const sDono = await sessao(d);
+  for (const t200 of [false, true]) {
+    await emCada({ grupo: `senha${t200 ? "-200" : ""}`, papel: "dono", sessao: sDono, texto200: t200 }, async ({ page, ir, tirar, chave }) => {
+      const estilo = async () => {
+        await pronto(page);
+        if (t200) await page.addStyleTag({ content: TEXTO_200 }).catch(() => {});
+        await page.waitForTimeout(300);
+      };
+      // 1. Dono gera o link na Equipe
+      await ir("/equipe");
+      await page.getByRole("button", { name: "Gerar link de senha para Mecânico Senha" }).click();
+      const titulo = page.getByRole("heading", { name: /Link de senha de Mecânico Senha/ });
+      await titulo.waitFor({ timeout: 20000 });
+      await titulo.scrollIntoViewIfNeeded();
+      await page.waitForTimeout(400);
+      const link = (await page.locator("p.font-mono").first().innerText()).trim();
+      if (!link.includes("/auth/confirmar?")) throw new Error(`link inesperado: ${link.replace(/token_hash=[^&]+/, "token_hash=…")}`);
+      await tirar("equipe-link-senha-gerado", { inteira: !t200, topo: true, desc: "Equipe: caixa \"Link de senha de …\" com Enviar pelo WhatsApp, Copiar link e Fechar (link real)" });
+      if (chave === "chromium") {
+        await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: APP_URL }).catch(() => {});
+        await page.getByRole("button", { name: "Copiar link" }).click();
+        await page.getByText(/Link copiado. Cole na conversa/).waitFor();
+        await page.getByText(/Link copiado. Cole na conversa/).scrollIntoViewIfNeeded();
+        await tirar("equipe-link-senha-copiado", { inteira: false, topo: true, desc: "Equipe: depois de \"Copiar link\"" });
+      }
+      // 2. Sai da conta do dono (só nesta aba) e abre o link como o mecânico abriria no WhatsApp
+      await page.context().clearCookies();
+      await page.goto(link, { waitUntil: "domcontentloaded" });
+      await estilo();
+      await page.getByRole("button", { name: /Continuar/ }).waitFor();
+      await tirar("auth-confirmar-link-valido", { papel: "mecanico", inteira: false, topo: true, desc: "`/auth/confirmar` com link real e válido, antes do Continuar" });
+      // 3. Continuar troca o token pela sessão de recuperação e vai para /redefinir-senha
+      await page.getByRole("button", { name: /Continuar/ }).click();
+      await page.waitForURL((u) => u.pathname.startsWith("/redefinir-senha"), { timeout: 25000 });
+      await estilo();
+      await page.getByLabel("Senha nova", { exact: true }).waitFor();
+      await tirar("redefinir-senha-recuperacao", { papel: "mecanico", inteira: false, topo: true, desc: "`/redefinir-senha` com a sessão de recuperação (depois do Continuar)" });
+      // 4. Salva a senha nova e mostra para onde o mecânico vai
+      const nova = `Mf-${randomBytes(12).toString("base64url")}`;
+      await page.getByLabel("Senha nova", { exact: true }).fill(nova);
+      await page.getByLabel("Repita a senha nova", { exact: true }).fill(nova);
+      await page.getByRole("button", { name: "Salvar senha nova" }).click();
+      await page.waitForURL((u) => !u.pathname.startsWith("/redefinir-senha") && u.pathname !== "/entrar", { timeout: 30000 });
+      await estilo();
+      const destino = new URL(page.url()).pathname;
+      if (chave === "chromium" && !t200) nota(`Senha do funcionário: depois de "Salvar senha nova" o mecânico chega em ${destino}`);
+      await tirar("senha-nova-salva-destino", { papel: "mecanico", topo: true, inteira: !t200, desc: `Mecânico logo depois de "Salvar senha nova" (${destino})` });
+    });
+  }
+}
+
 async function vitrine() {
   await emCada({ grupo: "vitrine", papel: "sem-login" }, async ({ ir, tirar }) => {
     await ir("/dev/fase8");
@@ -535,6 +603,7 @@ async function main() {
   }
   await ajuda();
   if (VARIANTE === "sem") await vitrine();
+  if (VARIANTE === "sem") await senha();
 }
 
 try {
