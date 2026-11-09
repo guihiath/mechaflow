@@ -12,7 +12,9 @@
  *  - página pública do orçamento: noindex, no-store, no-referrer e nenhum cookie;
  *  - PWA: manifest, ícones e sw.js;
  *  - anon sem leitura em nenhuma tabela ou view de `public` (lista tirada de database.types.ts);
- *  - nenhum `sb_secret_` nas páginas.
+ *  - nenhum `sb_secret_` nas páginas;
+ *  - /termos e /privacidade sem o marcador de lacuna "[texto do advogado" (REVISAO-FASE8 I1):
+ *    falha em vez de publicar molde. Não esconda o marcador: preencha o texto (F8-C2/F8-B4).
  *
  * Uso (PowerShell):
  *   $env:CONFERIR_SUPABASE_URL="https://<ref-producao>.supabase.co"
@@ -84,6 +86,10 @@ async function get(caminho, base = APP) {
 }
 const det = (r) => `status ${r.status}${r.local ? ` -> ${r.local}` : ""}`;
 const noindex = (r) => /noindex/i.test(r.h.get("x-robots-tag") ?? "");
+// Marcador de lacuna de components/legal/textos.tsx (`TextoAdvogado` e as células "[texto do advogado]").
+// Procura só o começo, porque o `TextoAdvogado` com complemento vira "[texto do advogado<!-- -->: …]".
+const MARCADOR_LACUNA = "[texto do advogado";
+const contarLacunas = (html) => html.split(MARCADOR_LACUNA).length - 1;
 const temFaixaTeste = (html) => html.includes("#F5B800 0 10px") || />\s*TESTE\s*</.test(html);
 
 // ------------------------------------------------------------------ app
@@ -98,6 +104,10 @@ for (const c of publicas) {
   if (r.corpo.includes("sb_secret_")) falhas.push("sb_secret_ no HTML");
   if (r.h.get("set-cookie")?.includes("sb-")) falhas.push("cookie do Supabase sem login");
   checar(`${c} 200, sem faixa TESTE, com noindex`, falhas.length === 0, falhas.join("; "));
+  if (c === "/termos" || c === "/privacidade") {
+    const n = contarLacunas(r.corpo);
+    checar(`${c} sem lacuna "${MARCADOR_LACUNA}]"`, r.status === 200 && n === 0, n ? `${n} marcador(es) no HTML: preencher o texto legal antes do deploy` : det(r));
+  }
 }
 
 titulo("Rotas privadas sem login");
