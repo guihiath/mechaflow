@@ -77,7 +77,7 @@ export function DocumentoLegal({
 
         <div className="flex flex-col gap-1">
           <h1 className="text-3xl">{titulo}</h1>
-          <p className="text-lg text-texto-suave">Versão {versao}</p>
+          <p className="text-lg text-texto-suave">Versão <span className="whitespace-nowrap">{versao}</span></p>
           <p className="text-lg text-texto-suave">Atualizada em {dataBr(versao)}</p>
         </div>
 

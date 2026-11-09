@@ -184,7 +184,7 @@ export function CartaoPrimeirosPassos({
                       <Circle size={24} strokeWidth={2.25} aria-hidden className="mt-0.5 shrink-0 text-texto-suave" />
                     )}
                     <span className="flex min-w-0 flex-1 flex-col">
-                      <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                      <span className="flex flex-col items-start gap-1 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-3">
                         <span className="text-lg font-bold">{passo.titulo}</span>
                         {feito && <Etiqueta tom="sucesso">Feito</Etiqueta>}
                       </span>
