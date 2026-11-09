@@ -16,6 +16,15 @@ export function AvisoPrivacidade({ oficina, telefone }: { oficina: string; telef
         resposta, o nome informado, a data e a hora, o IP e o navegador, como comprovante. O IP e o navegador ficam
         guardados por {PRAZO_GUARDA_REDE}. Para falar sobre seus dados, chame a oficina{contato ? `: ${contato}.` : "."}
       </p>
+      {/* DESIGN §15.3: só o link; o texto do aviso é do F8-C2. Outra aba, para não perder o orçamento. */}
+      <a
+        href="/privacidade"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex min-h-toque items-center text-sm font-bold text-info-texto underline underline-offset-4"
+      >
+        Ver a política de privacidade completa
+      </a>
     </section>
   );
 }

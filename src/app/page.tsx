@@ -1,31 +1,20 @@
-import Image from "next/image";
-import { BotaoLink } from "@/components/ui/botao";
-import { APP_NAME, APP_TAGLINE } from "@/lib/brand";
+import type { Metadata } from "next";
+import { PaginaInicial } from "@/components/publico/pagina-inicial";
+import { EH_PRODUCAO } from "@/lib/brand";
+import { linkWhatsAppSuporte, MENSAGEM_SUPORTE_PUBLICO } from "@/lib/suporte";
 
+export const metadata: Metadata = {
+  title: { absolute: "MechaFlow · Ordens de serviço para oficina diesel" },
+  description:
+    "Ordem de serviço, vistoria com fotos, orçamento por link no WhatsApp e contas a receber para oficina diesel. Pelo celular, mesmo com internet fraca.",
+  // Fase 8A: cadastro aberto sem divulgar (DESIGN §15.2.4). Na 8B, a página de vendas passa a index.
+  robots: { index: false, follow: false },
+};
+
+/**
+ * Página inicial pública (DESIGN §15.2). Quem tem sessão nunca chega aqui:
+ * src/lib/supabase/proxy.ts desvia "/" para "/entrar" com Cache-Control private, no-store (F5-E-3).
+ */
 export default function Home() {
-  return (
-    <main className="flex flex-1 flex-col px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-[max(2rem,env(safe-area-inset-top))]">
-      <div className="flex w-full max-w-[560px] flex-1 flex-col justify-center gap-3">
-        <Image
-          src="/icons/icon.svg"
-          alt=""
-          width={72}
-          height={72}
-          priority
-          className="mb-3 rounded-lg"
-        />
-        <h1 className="text-4xl">{APP_NAME}</h1>
-        <p className="text-lg text-texto-suave">{APP_TAGLINE}</p>
-      </div>
-
-      <div className="flex w-full max-w-[560px] flex-col gap-3">
-        <BotaoLink href="/cadastro" variante="secundario">
-          Criar conta da oficina
-        </BotaoLink>
-        <BotaoLink href="/login" variante="primario">
-          Entrar
-        </BotaoLink>
-      </div>
-    </main>
-  );
+  return <PaginaInicial whatsapp={linkWhatsAppSuporte(MENSAGEM_SUPORTE_PUBLICO)} teste={!EH_PRODUCAO} />;
 }

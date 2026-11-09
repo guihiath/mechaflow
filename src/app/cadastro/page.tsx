@@ -3,7 +3,11 @@ import Link from "next/link";
 import { TelaSimples } from "@/components/layout/tela-simples";
 import { FormOficina } from "@/components/auth/form-oficina";
 
-export const metadata: Metadata = { title: "Criar conta da oficina" };
+export const metadata: Metadata = {
+  title: "Criar conta da oficina",
+  // Fase 8A: cadastro aberto sem divulgar (DESIGN §15.2.4).
+  robots: { index: false, follow: false },
+};
 
 export default function CadastroPage() {
   return (

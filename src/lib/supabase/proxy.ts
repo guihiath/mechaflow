@@ -8,7 +8,7 @@ import { CABECALHO_CAMINHO, ehOrcamentoPublico } from "@/lib/caminho";
  * Prefixos publicos (sem login). Todo o resto exige sessao.
  * "/" e exato; os demais valem para a rota e as filhas.
  */
-const ROTAS_PUBLICAS = ["/login", "/cadastro", "/convite", "/termos", "/auth", "/esqueci-senha", "/redefinir-senha", "/orcamento"];
+const ROTAS_PUBLICAS = ["/login", "/cadastro", "/convite", "/termos", "/privacidade", "/auth", "/esqueci-senha", "/redefinir-senha", "/orcamento"];
 
 export function rotaPublica(pathname: string) {
   if (pathname === "/") return true;
