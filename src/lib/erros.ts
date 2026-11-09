@@ -112,6 +112,9 @@ const MENSAGENS_AUTH: [RegExp, string][] = [
   [/invalid login credentials/i, "E-mail ou senha incorretos."],
   [/email not confirmed/i, "Confirme seu e-mail antes de entrar (veja sua caixa de entrada)."],
   [/user already registered|already been registered/i, "Este e-mail já tem conta. Use “Entrar”."],
+  // Proteção contra senha vazada (HIBP, ARQUITETURA 15.4): vem como weak_password, mas não é tamanho.
+  // Fica antes da regra de "weak", que é a do tamanho mínimo.
+  [/known to be weak|easy to guess|pwned|leaked|breach/i, "Essa senha aparece em vazamentos conhecidos. Escolha outra."],
   [/password should be at least|password.*(short|weak)/i, "A senha precisa ter pelo menos 8 caracteres."],
   [/email address .* is invalid|invalid email|unable to validate email/i, "E-mail inválido. Confira o que foi digitado."],
   [/rate limit|too many requests|security purposes/i, "Muitas tentativas seguidas. Espere um minuto e tente de novo."],

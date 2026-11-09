@@ -48,6 +48,7 @@ import { crc32, deflateSync } from "node:zlib";
 import { createClient } from "@supabase/supabase-js";
 import { createServerClient } from "@supabase/ssr";
 import { PDFArray, PDFDict, PDFDocument, PDFName, PDFRawStream, decodePDFRawStream } from "pdf-lib";
+import { exigirStaging } from "./so-staging.mjs";
 
 // ------------------------------------------------------------------ env
 const env = Object.fromEntries(
@@ -59,7 +60,7 @@ const env = Object.fromEntries(
 const URL_SB = env.NEXT_PUBLIC_SUPABASE_URL;
 const CHAVE = env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 if (!URL_SB || !CHAVE) throw new Error("Falta NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY no .env.local");
-if (!URL_SB.includes("qjzhzyzmifashtvffxdx")) throw new Error("Este teste so roda no projeto STAGING.");
+exigirStaging({ nome: "testar-staging", url: URL_SB, chave: CHAVE, envArquivo: env, appUrl: process.env.APP_URL });
 
 // TESTE_EMAIL_BASE=fulano@gmail.com gera fulano+rotulo.rodada@gmail.com (com a confirmacao
 // desligada nenhum e-mail e enviado). Alternativa: TESTE_EMAIL_DOMINIO=dominio-com-mx.com
@@ -80,6 +81,27 @@ function checar(nome, ok, detalhe = "") {
   else falhou++;
   console.log(`${ok ? "PASSOU" : "FALHOU"}  ${nome}${detalhe ? `  (${detalhe})` : ""}`);
 }
+/**
+ * Varias condicoes numa checagem so; se falhar, a mensagem diz QUAIS falharam (e, para texto
+ * proibido, o trecho do HTML onde ele apareceu). `condicoes` = lista de [rotulo, ok].
+ */
+function checarTodas(nome, condicoes, detalhe = "") {
+  const falhas = condicoes.filter(([, ok]) => !ok).map(([rotulo]) => rotulo);
+  checar(nome, falhas.length === 0, [detalhe, falhas.length ? `falhou: ${falhas.join("; ")}` : ""].filter(Boolean).join(" | "));
+}
+const trechoDe = (html, i, n) => JSON.stringify(html.slice(Math.max(0, i - 50), i + n + 50));
+/** [rotulo, ok] para "o HTML NAO contem `termo`" (string ou RegExp). */
+function semTermo(html, termo) {
+  const re = termo instanceof RegExp ? termo : null;
+  const i = re ? html.search(re) : html.indexOf(termo);
+  const nome = re ? String(re) : `'${termo}'`;
+  return [i < 0 ? `sem ${nome}` : `sem ${nome} (achou: ${trechoDe(html, i, re ? (html.match(re)?.[0].length ?? 1) : termo.length)})`, i < 0];
+}
+/** [rotulo, ok] para "o HTML contem `termo`". */
+const comTermo = (html, termo) => [`com '${termo}'`, html.includes(termo)];
+/** As condicoes padrao de "pagina do mecanico sem valor": 200, sem R$ e sem 'centavos'. */
+const semValorMec = (pg) => [[`status 200 (veio ${pg.status}${pg.local ? ` -> ${pg.local}` : ""})`, pg.status === 200], semTermo(pg.html, "R$"), semTermo(pg.html, /centavos/i)];
+
 const novoCliente = () => createClient(URL_SB, CHAVE, { auth: { persistSession: false, autoRefreshToken: false } });
 const senha = () => `Mf-${randomBytes(12).toString("base64url")}`;
 
@@ -257,7 +279,7 @@ async function testesCompletos() {
     const catDono = await pagina("/catalogo?aba=pecas", ckDono);
     checar("app dono: /catalogo mostra preco e custo", catDono.status === 200 && catDono.html.includes("R$") && catDono.html.includes("custo"), `status ${catDono.status}`);
     const catMec = await pagina("/catalogo?aba=pecas", ckMec);
-    checar("app mecanico: /catalogo sem nenhum R$", catMec.status === 200 && catMec.html.includes("Filtro de óleo") && !catMec.html.includes("R$"), `status ${catMec.status}`);
+    checarTodas("app mecanico: /catalogo sem nenhum R$", [semValorMec(catMec)[0], comTermo(catMec.html, "Filtro de óleo"), semTermo(catMec.html, "R$")]);
     const cliMecPg = await pagina("/clientes", ckMec);
     checar("app mecanico: /clientes manda para /minhas-os", cliMecPg.html.includes("/minhas-os") || cliMecPg.local?.includes("/minhas-os"), `status ${cliMecPg.status}`);
     const placaPg = await pagina("/placa?placa=abc-1d23", ckMec);
@@ -521,19 +543,20 @@ async function testesFase2({ donoA, mec, at, donoB, ofA, ofB, vei, serv, peca })
     console.log(`\n== Fase 2: paginas do app (${APP_URL}) ==`);
     const [ckDono, ckMec, ckAt] = await Promise.all([cookiesDaSessao(donoA.session), cookiesDaSessao(mec.session), cookiesDaSessao(at.session)]);
     const detMec = await pagina(`/os/${osA}`, ckMec);
-    checar("app mecanico: /os/[id] sem nenhum R$ nem 'centavos' no HTML/payload", detMec.status === 200 && detMec.html.includes("DEF2G34") && !detMec.html.includes("R$") && !/centavos/i.test(detMec.html), `status ${detMec.status}`);
+    checarTodas("app mecanico: /os/[id] sem nenhum R$ nem 'centavos' no HTML/payload", [...semValorMec(detMec), comTermo(detMec.html, "DEF2G34")]);
     for (const [rotulo, id, livre] of [["cancelamento", osMecCanc, "123,45"], ["recusa", osMecRec, "2.800"]]) {
       const pg = await pagina(`/os/${id}`, ckMec);
-      checar(
-        `app mecanico: /os/[id] cancelada por ${rotulo} sem o texto livre do motivo (nem R$)`,
-        pg.status === 200 && pg.html.includes("Cancelada") && !pg.html.includes("R$") && !pg.html.includes(livre),
-        `status ${pg.status}`,
-      );
+      checarTodas(`app mecanico: /os/[id] cancelada por ${rotulo} sem o texto livre do motivo (nem R$)`, [
+        semValorMec(pg)[0],
+        comTermo(pg.html, "Cancelada"),
+        semTermo(pg.html, "R$"),
+        semTermo(pg.html, livre),
+      ]);
     }
     const pgDonoCanc = await pagina(`/os/${osMecCanc}`, ckDono);
     checar("app dono: ve o motivo livre do cancelamento", pgDonoCanc.status === 200 && pgDonoCanc.html.includes("123,45"), `status ${pgDonoCanc.status}`);
     const minhas = await pagina("/minhas-os?entregues=1", ckMec);
-    checar("app mecanico: /minhas-os mostra a OS e nenhum R$", minhas.status === 200 && minhas.html.includes("DEF2G34") && !minhas.html.includes("R$"), `status ${minhas.status}`);
+    checarTodas("app mecanico: /minhas-os mostra a OS e nenhum R$", [semValorMec(minhas)[0], comTermo(minhas.html, "DEF2G34"), semTermo(minhas.html, "R$")]);
     const listaMec = await pagina("/os", ckMec);
     checar("app mecanico: /os manda para /minhas-os", listaMec.html.includes("/minhas-os") || Boolean(listaMec.local?.includes("/minhas-os")), `status ${listaMec.status}`);
     const detDono = await pagina(`/os/${osA}`, ckDono);
@@ -609,7 +632,9 @@ async function testesFase3({ donoA, mec, at, donoB, ofA, vei, serv, peca, pend }
   const idMec = mec.session.user.id;
   const respostasMec = []; // tudo que o mecanico recebeu nesta fase: nenhuma pode ter valor
   const guardaMec = (r) => (respostasMec.push(r?.data ?? null), r);
-  const OBS = "Cliente paga R$ 999,00 no pix; ligar 11 95555-4444";
+  // Marcador que nao aparece por acaso: "95555" sozinho ja casou com trecho de id/token (falha intermitente).
+  const MARCA_OBS = `OBS-SIGILO-F3-${RODADA}`;
+  const OBS = `Cliente paga R$ 999,00 no pix; ligar 11 95555-4444; ${MARCA_OBS}`;
 
   console.log("\n== Fase 3: segundo mecanico (para os testes de 'outro mecanico') ==");
   const convM2 = await donoA.sb.rpc("criar_convite", { p_papel: "mecanico", p_nome_sugerido: "Mecânico Dois" }).single();
@@ -634,9 +659,16 @@ async function testesFase3({ donoA, mec, at, donoB, ofA, vei, serv, peca, pend }
   const obsMecOs = await mec.sb.from("ordens_servico").select("*").eq("id", osM);
   const obsMecCom = await mec.sb.from("os_comercial").select("*");
   const textoMec = JSON.stringify([obsMecVw.data, obsMecOs.data, obsMecCom.data]);
-  checar(
+  checarTodas(
     "mecanico: o texto da observacao nao vem em ordens_servico, vw_os nem os_comercial",
-    (obsMecOs.data ?? []).length === 1 && !("observacoes" in (obsMecOs.data?.[0] ?? {})) && (obsMecCom.data ?? []).length === 0 && !textoMec.includes("95555") && !textoMec.includes("999,00"),
+    [
+      [`ordens_servico com 1 linha (veio ${(obsMecOs.data ?? []).length})`, (obsMecOs.data ?? []).length === 1],
+      ["ordens_servico sem a coluna observacoes", !("observacoes" in (obsMecOs.data?.[0] ?? {}))],
+      [`os_comercial vazio (veio ${(obsMecCom.data ?? []).length})`, (obsMecCom.data ?? []).length === 0],
+      semTermo(textoMec, MARCA_OBS),
+      semTermo(textoMec, "95555-4444"),
+      semTermo(textoMec, "999,00"),
+    ],
     msg(obsMecOs),
   );
   const obsMecUpd = await mec.sb.from("os_comercial").update({ observacoes: "mecanico escreveu" }).eq("os_id", osM).select("os_id");
@@ -813,11 +845,13 @@ async function testesFase3({ donoA, mec, at, donoB, ofA, vei, serv, peca, pend }
   if (APP_URL) {
     const [ckMec, ckDono] = await Promise.all([cookiesDaSessao(mec.session), cookiesDaSessao(donoA.session)]);
     const detMec = await pagina(`/os/${osM}`, ckMec);
-    checar(
-      "app mecanico: /os/[id] com itens lancados por ele, sem 'R$' nem 'centavos' no HTML/payload",
-      detMec.status === 200 && detMec.html.includes("Abraçadeira") && detMec.html.includes("Você lançou") && !detMec.html.includes("R$") && !/centavos/i.test(detMec.html) && !detMec.html.includes("95555"),
-      `status ${detMec.status}`,
-    );
+    checarTodas("app mecanico: /os/[id] com itens lancados por ele, sem 'R$' nem 'centavos' no HTML/payload", [
+      ...semValorMec(detMec),
+      comTermo(detMec.html, "Abraçadeira"),
+      comTermo(detMec.html, "Você lançou"),
+      semTermo(detMec.html, MARCA_OBS),
+      semTermo(detMec.html, "95555-4444"),
+    ]);
     const detDono = await pagina(`/os/${osM}`, ckDono);
     checar("app dono: /os/[id] mostra 'Lançado por' e 'Após a aprovação'", detDono.status === 200 && detDono.html.includes("Lançado por") && /Após a aprovação/i.test(detDono.html), `status ${detDono.status}`);
     const semPrecoPg = await pagina("/os?status=sem_preco", ckDono);
@@ -1056,9 +1090,9 @@ async function testesFase3({ donoA, mec, at, donoB, ofA, vei, serv, peca, pend }
   if (APP_URL) {
     const ckMec = await cookiesDaSessao(mec.session);
     const minhas = await pagina("/minhas-os?entregues=1", ckMec);
-    checar("app mecanico: /minhas-os sem R$ nem 'centavos' com as OS da Fase 3", minhas.status === 200 && !minhas.html.includes("R$") && !/centavos/i.test(minhas.html), `status ${minhas.status}`);
+    checarTodas("app mecanico: /minhas-os sem R$ nem 'centavos' com as OS da Fase 3", semValorMec(minhas));
     const detF = await pagina(`/os/${osF}`, ckMec);
-    checar("app mecanico: /os/[id] com fotos sem R$ nem 'centavos'", detF.status === 200 && !detF.html.includes("R$") && !/centavos/i.test(detF.html), `status ${detF.status}`);
+    checarTodas("app mecanico: /os/[id] com fotos sem R$ nem 'centavos'", semValorMec(detF));
   }
   return { mec2 };
 }
@@ -1729,7 +1763,7 @@ async function testesFase4({ donoA, mec, mec2, at, donoB, ofA, ofB, vei }) {
       ["/minhas-os", "/minhas-os?entregues=1", "ABC1D23"],
     ]) {
       const pg = await pagina(cam, ckMec);
-      checar(`app mecanico: ${rot} sem 'R$' nem 'centavos' no HTML/payload`, pg.status === 200 && pg.html.includes(marca) && !pg.html.includes("R$") && !/centavos/i.test(pg.html), `status ${pg.status}${pg.local ? ` -> ${pg.local}` : ""}${pg.status === 200 && !pg.html.includes(marca) ? ` sem '${marca}'` : ""}`);
+      checarTodas(`app mecanico: ${rot} sem 'R$' nem 'centavos' no HTML/payload`, [...semValorMec(pg), comTermo(pg.html, marca)]);
     }
   }
 }
@@ -3331,7 +3365,6 @@ async function testesFase7Paginas(c) {
 
   // ---------------------------------------------------------------- paginas
   console.log(`\n== Fase 7: paginas por papel (${APP_URL}) ==`);
-  const semValor = (html) => !html.includes("R$") && !/centavos/i.test(html);
   const marcas = [reais(TOTAL_O1), reais(F7.SERV_CAT), reais(F7.AVULSO), CLI.telefone, telFormatado(CLI.telefone), CLI.documento, OBS, CANC];
   for (const [rot, cam, ckX, deve, naoDeve] of [
     ["mecanico: /placa", `/placa?placa=${P}`, ckMec, P, []],
@@ -3340,8 +3373,11 @@ async function testesFase7Paginas(c) {
     ["mecanico: /minhas-os", "/minhas-os", ckMec, P, []],
   ]) {
     const pg = await pagina(cam, ckX);
-    const vaz = [...marcas, ...naoDeve].filter((m) => pg.html.includes(m));
-    checar(`app ${rot} sem 'R$' nem 'centavos' no HTML/payload, sem telefone, observacao ou valor`, pg.status === 200 && pg.html.includes(deve) && semValor(pg.html) && vaz.length === 0, `status ${pg.status}${pg.local ? ` -> ${pg.local}` : ""} ${vaz.join(", ")}${pg.status === 200 && !pg.html.includes(deve) ? ` sem '${deve}'` : ""}`);
+    checarTodas(`app ${rot} sem 'R$' nem 'centavos' no HTML/payload, sem telefone, observacao ou valor`, [
+      ...semValorMec(pg),
+      comTermo(pg.html, deve),
+      ...[...marcas, ...naoDeve].map((m) => semTermo(pg.html, m)),
+    ]);
   }
   const hDonoPg = await pagina(`/placa/${P}`, ckDono);
   checar("app dono: historico da placa mostra as OS com valor", hDonoPg.status === 200 && hDonoPg.html.includes(reais(TOTAL_O1)), `status ${hDonoPg.status}`);

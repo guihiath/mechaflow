@@ -38,6 +38,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createClient } from "@supabase/supabase-js";
 import { createServerClient } from "@supabase/ssr";
+import { exigirStaging } from "./so-staging.mjs";
 
 // ------------------------------------------------------------------ env
 const env = Object.fromEntries(
@@ -49,8 +50,8 @@ const env = Object.fromEntries(
 );
 const URL_SB = env.NEXT_PUBLIC_SUPABASE_URL;
 const CHAVE = env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-if (!URL_SB?.includes("qjzhzyzmifashtvffxdx")) throw new Error("Este script só roda no projeto STAGING.");
 const APP_URL = (process.env.APP_URL ?? "https://mechaflow-git-staging-guihiaths-projects.vercel.app").replace(/\/$/, "");
+exigirStaging({ nome: "capturas-fase7", url: URL_SB, chave: CHAVE, envArquivo: env, appUrl: APP_URL });
 if (!/staging|localhost|127\.0\.0\.1/.test(APP_URL))
   throw new Error("APP_URL precisa ser o staging ou um servidor local.");
 const SAIDA = resolve(process.env.CAPTURA_SAIDA ?? fileURLToPath(new URL("../../docs/capturas-fase7", import.meta.url)));

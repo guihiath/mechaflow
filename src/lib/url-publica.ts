@@ -10,6 +10,8 @@ export function urlPublicaApp(): string | null {
   if (!valor) return null;
   try {
     const url = new URL(valor);
+    // Em produção, só https: link http para o cliente (ou para a senha do funcionário) não serve.
+    if (process.env.NEXT_PUBLIC_AMBIENTE === "producao") return url.protocol === "https:" ? url.origin : null;
     return url.protocol === "https:" || url.protocol === "http:" ? url.origin : null;
   } catch {
     return null;

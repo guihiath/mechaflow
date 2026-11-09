@@ -30,6 +30,9 @@ const nextConfig: NextConfig = {
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "X-Frame-Options", value: "DENY" },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          // 8A: cadastro aberto, sem divulgar (PLANO 21.12-7, DESIGN 15.2.4). Nenhuma página entra no
+          // Google. Pelo cabeçalho, e não por robots.txt, para o robô ler o noindex. Sai na página de vendas (8B).
+          { key: "X-Robots-Tag", value: "noindex, nofollow" },
         ],
       },
       {

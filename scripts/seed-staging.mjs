@@ -28,8 +28,7 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
-
-const REF_STAGING = "qjzhzyzmifashtvffxdx";
+import { exigirStaging } from "./so-staging.mjs";
 
 // ------------------------------------------------------------------ saida
 // A senha fica aqui so para ser usada no login e removida de qualquer mensagem de erro.
@@ -58,18 +57,6 @@ function lerEnvLocal() {
   );
 }
 
-/** A chave publishable e publica por natureza; a secret passaria por cima da RLS. */
-function chaveEhSecreta(chave) {
-  if (chave.startsWith("sb_secret_")) return true;
-  const corpo = chave.split(".")[1];
-  if (!corpo) return false;
-  try {
-    return JSON.parse(Buffer.from(corpo, "base64url").toString("utf8")).role === "service_role";
-  } catch {
-    return false;
-  }
-}
-
 function lerConfiguracao() {
   const arquivo = lerEnvLocal();
   const ler = (nome) => process.env[nome]?.trim() || arquivo[nome] || "";
@@ -95,18 +82,8 @@ function lerConfiguracao() {
   }
   SENHA = senha;
 
-  let host = "";
-  try {
-    host = new URL(url).hostname;
-  } catch {
-    throw new Error("NEXT_PUBLIC_SUPABASE_URL não é um endereço válido. Nada foi criado.");
-  }
-  if (host !== `${REF_STAGING}.supabase.co`) {
-    throw new Error(`Este seed só roda no projeto STAGING (${REF_STAGING}). O endereço configurado é outro: ${host}. Nada foi criado.`);
-  }
-  if (chaveEhSecreta(chave)) {
-    throw new Error("A chave configurada é secret/service_role. Este seed só usa a chave publishable. Nada foi criado.");
-  }
+  // Host exato do staging, nunca produção nem chave secreta (scripts/so-staging.mjs, ARQUITETURA 15.11).
+  exigirStaging({ nome: "seed-staging", url, chave, envArquivo: arquivo });
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(base)) {
     throw new Error("SEED_EMAIL_BASE precisa ser um e-mail, como fulano@gmail.com. Nada foi criado.");
   }
