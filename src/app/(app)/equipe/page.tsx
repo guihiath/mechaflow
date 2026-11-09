@@ -10,6 +10,7 @@ import { formatarDataHora, ROTULO_PAPEL } from "@/lib/formato";
 import { createClient } from "@/lib/supabase/server";
 import { AcoesMembro } from "./acoes-membro";
 import { Convidar } from "./convidar";
+import { LinkSenha } from "./link-senha";
 
 export const metadata: Metadata = { title: "Equipe" };
 
@@ -88,6 +89,8 @@ async function Conteudo() {
                       {!m.ativo && <Etiqueta tom="erro">Desativado</Etiqueta>}
                     </div>
                   </div>
+                  {/* F8-B5 (I2): ação frequente fora de "Gerenciar acesso"; a página já exige dono e a Server Action confere de novo. */}
+                  {!souEu && m.ativo && m.papel !== "dono" && <LinkSenha id={m.id} nome={m.nome} />}
                   {!souEu && <AcoesMembro id={m.id} nome={m.nome} papel={m.papel} ativo={m.ativo} />}
                 </Cartao>
               </li>

@@ -476,20 +476,13 @@ async function ajuda() {
       await page.waitForTimeout(1500);
       // Equipe: "Gerar link de senha" (sem a chave secreta no servidor local: o erro que o app mostra)
       await ir("/equipe");
-      // Abre os "Gerenciar acesso" que ainda estiverem fechados (às vezes a hidratação engole o 1º toque).
-      for (let tentativa = 0; tentativa < 3; tentativa++) {
-        const fechados = page.locator("details:not([open]) > summary", { hasText: "Gerenciar acesso" });
-        for (let n = await fechados.count(); n > 0; n--) {
-          await fechados.first().click();
-          await page.waitForTimeout(250);
-        }
-        await page.waitForTimeout(500);
-        if (await page.getByText(/Mecânico Captura esqueceu a senha/).isVisible()) break;
-      }
-      const bloco = page.locator("div.flex.flex-col.gap-2", { has: page.getByText(/Mecânico Captura esqueceu a senha/) });
+      // F8-B5 (I2): o fantasma "Esqueceu a senha? Gerar link" fica no próprio cartão, sem abrir "Gerenciar acesso".
+      const botaoSenha = page.getByRole("button", { name: "Gerar link de senha para Mecânico Captura" });
+      await botaoSenha.waitFor();
+      const bloco = page.locator("div.flex.flex-col.gap-2", { has: botaoSenha });
       await bloco.scrollIntoViewIfNeeded();
-      await tirar("equipe-gerar-link-senha", { inteira: !t200, topo: true, desc: "Equipe com \"Gerenciar acesso\" aberto: \"Gerar link de senha\"" });
-      await bloco.getByRole("button", { name: "Gerar link de senha" }).click();
+      await tirar("equipe-gerar-link-senha", { inteira: !t200, topo: true, desc: "Equipe: fantasma \"Esqueceu a senha? Gerar link\" no cartão do mecânico" });
+      await botaoSenha.click();
       await page.waitForFunction(() => !document.body.innerText.includes("Gerando…"), null, { timeout: 20000 }).catch(() => {});
       await page.waitForTimeout(600);
       await bloco.scrollIntoViewIfNeeded();

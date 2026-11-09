@@ -7,7 +7,6 @@ import { BotaoEnviar, CaixaMensagem } from "@/components/ui/formulario";
 import { atualizarMembro } from "@/acoes/equipe";
 import type { Papel } from "@/lib/contexto";
 import { ROTULO_PAPEL } from "@/lib/formato";
-import { LinkSenha } from "./link-senha";
 
 export function AcoesMembro({ id, nome, papel, ativo }: { id: string; nome: string; papel: Papel; ativo: boolean }) {
   const [novoPapel, setNovoPapel] = useState<Papel>(papel);
@@ -81,7 +80,6 @@ export function AcoesMembro({ id, nome, papel, ativo }: { id: string; nome: stri
             {ok && <CaixaMensagem tipo="sucesso">{ok}</CaixaMensagem>}
           </div>
         )}
-        {ativo && papel !== "dono" && <LinkSenha id={id} nome={nome} />}
         {ativo ? (
           <ConfirmarAcao
             acao={() => atualizarMembro(id, { ativo: false })}

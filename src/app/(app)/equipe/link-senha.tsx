@@ -2,10 +2,13 @@
 
 import { useState, useTransition } from "react";
 import { Check, Copy, KeyRound, MessageCircle } from "lucide-react";
-import { Botao, classesBotao } from "@/components/ui/botao";
-import { BotaoEnviar, CaixaMensagem } from "@/components/ui/formulario";
+import { Botao, classesBotao, classesFantasma } from "@/components/ui/botao";
+import { CaixaMensagem } from "@/components/ui/formulario";
 import { gerarLinkSenhaMembro } from "@/acoes/equipe";
 import { formatarDataHora, linkWhatsApp } from "@/lib/formato";
+
+/** Fantasma sem a cor padrão, para trocar a cor sem disputa de classes. */
+const fantasmaSemCor = classesFantasma.replace(" text-texto ", " ");
 
 type Gerado = { link: string; validoAte: string; nome: string; telefone: string };
 
@@ -52,7 +55,7 @@ export function LinkSenha({ id, nome }: { id: string; nome: string }) {
       `(vale até ${valido}, uma vez só). Abra, toque em Continuar e crie a senha:\n${gerado.link}`;
     const whatsapp = linkWhatsApp(gerado.telefone, mensagem) ?? `https://wa.me/?text=${encodeURIComponent(mensagem)}`;
     return (
-      <div className="flex flex-col gap-3 rounded-lg border-2 border-grafite bg-superficie p-4">
+      <div className="mt-3 flex flex-col gap-3 rounded-lg border-2 border-grafite bg-superficie p-4">
         <h3 className="text-xl">Link de senha de {gerado.nome}</h3>
         <ul className="flex list-disc flex-col gap-1 pl-5 text-base">
           <li>Vale por 1 hora (até {valido}) e funciona uma vez só.</li>
@@ -84,12 +87,17 @@ export function LinkSenha({ id, nome }: { id: string; nome: string }) {
   }
 
   return (
-    <div className="flex flex-col gap-2">
-      <p className="flex items-center gap-2 text-base text-texto-suave">
-        <KeyRound size={20} aria-hidden />
-        {nome} esqueceu a senha? Gere um link e mande pelo WhatsApp.
-      </p>
-      <BotaoEnviar type="button" variante="secundario" enviando={enviando} rotulo="Gerar link de senha" rotuloEnviando="Gerando…" onClick={gerar} />
+    <div className="mt-3 flex flex-col gap-2">
+      <button
+        type="button"
+        onClick={gerar}
+        disabled={enviando}
+        aria-label={`Gerar link de senha para ${nome}`}
+        className={`${fantasmaSemCor} self-start text-info-texto disabled:opacity-60`}
+      >
+        <KeyRound size="1.25em" strokeWidth={2.25} aria-hidden className="shrink-0" />
+        {enviando ? "Gerando…" : "Esqueceu a senha? Gerar link"}
+      </button>
       {erro && <CaixaMensagem tipo="erro">{erro}</CaixaMensagem>}
     </div>
   );
