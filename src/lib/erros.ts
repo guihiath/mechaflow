@@ -105,6 +105,10 @@ const MENSAGENS: Record<string, string> = {
   recorte_invalido: "Não foi possível abrir esta lista. Volte ao painel e toque de novo.",
   os_cancelada_sem_pdf: "OS cancelada não gera PDF para o cliente.",
   pagamento_ja_registrado: "O pagamento desta OS já foi registrado por outra pessoa. A lista foi atualizada.",
+  // Fase 8A — o dono gera o link de senha do funcionário (docs/ARQUITETURA.md, 15.12)
+  membro_desativado: "Este funcionário está desativado. Reative antes de gerar o link.",
+  aguarde_para_gerar: "Espere um minuto e gere o link de novo.",
+  link_senha_indisponivel: "Não foi possível gerar o link agora. Tente de novo em instantes.",
 };
 
 /** Mensagens do Supabase Auth (signUp / signIn), que vêm em inglês. */

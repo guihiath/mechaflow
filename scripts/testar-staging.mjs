@@ -43,7 +43,8 @@
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
-import { pathToFileURL } from "node:url";
+import { join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { crc32, deflateSync } from "node:zlib";
 import { createClient } from "@supabase/supabase-js";
 import { createServerClient } from "@supabase/ssr";
@@ -293,6 +294,7 @@ async function testesCompletos() {
   await testesFase4({ donoA, mec, mec2, at, donoB, ofA: ofA.data, ofB: ofB.data, vei: vei.data });
   await testesFase6({ donoA, mec, at, donoB, ofA: ofA.data, ofB: ofB.data });
   await testesFase7({ donoA, mec, mec2, at, donoB, ofA: ofA.data, ofB: ofB.data });
+  await testesF8P3({ donoA, mec, mec2, at, donoB });
 
   console.log("\n== Desativar mecanico ==");
   const desat = await donoA.sb.rpc("atualizar_membro", { p_perfil_id: mec.session.user.id, p_ativo: false });
@@ -3420,6 +3422,172 @@ async function testesFase7PagamentoNaTela({ ck, donoA, O3, totO3 }) {
     !r.error && !v.error && depois === antes - totO3 && pgAntes.html.includes(reais(antes)) && pgDepois.html.includes(reais(depois)) && !pgDepois.html.includes(reais(antes)) && pgVolta.html.includes(reais(antes)),
     `${msg(r)}/${msg(v)} ${reais(antes)} -> ${reais(depois)}`,
   );
+}
+
+// ------------------------------------------------------------------ F8-P3: link de senha do funcionario
+/**
+ * Server Action chamada como o navegador chama (POST com Next-Action). O id vem do manifesto do
+ * build local (.next), entao so funciona com APP_URL apontando para um `next start` desta pasta.
+ */
+function idDaAcao(arquivo, nome) {
+  try {
+    const m = JSON.parse(readFileSync(new URL("../.next/server/server-reference-manifest.json", import.meta.url), "utf8"));
+    const achou = Object.entries(m.node ?? {}).find(([, v]) => v.filename === arquivo && v.exportedName === nome);
+    return achou?.[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+async function chamarAcao(caminho, id, args, cookie) {
+  const r = await fetch(`${APP_URL}${caminho}`, {
+    method: "POST",
+    redirect: "manual",
+    headers: { "Next-Action": id, Origin: APP_URL, "Content-Type": "text/plain;charset=UTF-8", Accept: "text/x-component", ...(cookie ? { cookie } : {}) },
+    body: JSON.stringify(args),
+  });
+  const t = await r.text();
+  return {
+    status: r.status,
+    codigo: t.match(/"mensagem":"([a-z_]+)"/)?.[1] ?? null,
+    erro: t.match(/"erro":"([^"]*)"/)?.[1] ?? null,
+    link: t.match(/"link":"([^"]+)"/)?.[1] ?? null,
+    ok: /"ok":true/.test(t),
+  };
+}
+/** POST do "Continuar" como formulario sem JavaScript; devolve status, destino e os cookies novos. */
+async function continuarLink(link, idConfirmar) {
+  const u = new URL(link);
+  const corpo = new FormData();
+  corpo.set(`$ACTION_ID_${idConfirmar}`, "");
+  for (const k of ["token_hash", "type", "next"]) corpo.set(k, u.searchParams.get(k) ?? "");
+  const r = await fetch(`${APP_URL}${u.pathname}${u.search}`, { method: "POST", redirect: "manual", headers: { Origin: APP_URL }, body: corpo });
+  await r.arrayBuffer();
+  return { status: r.status, local: r.headers.get("location"), cookies: r.headers.getSetCookie() };
+}
+
+async function testesF8P3({ donoA, mec, mec2, at, donoB }) {
+  console.log("\n== F8-P3: o dono gera o link de senha do funcionario ==");
+  // Regra pura (sem rede), direto do codigo do app (Node le o .ts sem os tipos).
+  const { podeGerarLinkSenha, montarLinkSenha } = await import(pathToFileURL(fileURLToPath(new URL("../src/lib/link-senha.ts", import.meta.url))).href);
+  const eu = { usuario_id: "a" };
+  checarTodas("podeGerarLinkSenha: si mesmo, outro dono, desativado e o caso valido", [
+    ["si mesmo", podeGerarLinkSenha(eu, { id: "a", papel: "mecanico", ativo: true }) === "nao_pode_alterar_a_si_mesmo"],
+    ["outro dono", podeGerarLinkSenha(eu, { id: "b", papel: "dono", ativo: true }) === "papel_invalido"],
+    ["desativado", podeGerarLinkSenha(eu, { id: "b", papel: "atendente", ativo: false }) === "membro_desativado"],
+    ["mecanico ativo", podeGerarLinkSenha(eu, { id: "b", papel: "mecanico", ativo: true }) === null],
+  ]);
+  const lk = new URL(montarLinkSenha("https://mechaflow.com.br", "abc123"));
+  checar("link aponta para /auth/confirmar com token_hash, type=recovery e next=/redefinir-senha",
+    lk.pathname === "/auth/confirmar" && lk.searchParams.get("token_hash") === "abc123" && lk.searchParams.get("type") === "recovery" && lk.searchParams.get("next") === "/redefinir-senha", lk.href);
+
+  if (!APP_URL) return console.log("PULADO  F8-P3 pelas paginas: defina APP_URL (next start local desta pasta)");
+  const idGerar = idDaAcao("src/acoes/equipe.ts", "gerarLinkSenhaMembro");
+  const idConfirmar = idDaAcao("src/app/auth/confirmar/acoes.ts", "confirmarLink");
+  if (!idGerar || !idConfirmar) return console.log("PULADO  F8-P3 pelas acoes: sem .next/server/server-reference-manifest.json (rode npm run build nesta pasta)");
+
+  // Nada de chave secreta no pacote do navegador. O supabase-js tem o texto "sb_secret_" (confere o
+  // prefixo da chave), entao a busca e por uma chave de verdade: o prefixo seguido do valor.
+  const estaticos = [];
+  const varrer = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) varrer(p);
+      else if (/\.(js|css|html|json)$/.test(e.name) && /sb_secret_[A-Za-z0-9_-]{16,}|SUPABASE_SECRET_KEY/.test(readFileSync(p, "utf8"))) estaticos.push(p);
+    }
+  };
+  varrer(fileURLToPath(new URL("../.next/static", import.meta.url)));
+  checar("build: nenhuma chave 'sb_secret_...' nem 'SUPABASE_SECRET_KEY' em .next/static", estaticos.length === 0, estaticos.slice(0, 3).join(", "));
+
+  // Pagina "Continuar": o GET nao troca o token.
+  const conf = await fetch(`${APP_URL}/auth/confirmar?token_hash=inventado&type=recovery&next=/redefinir-senha`, { redirect: "manual" });
+  const confHtml = await conf.text();
+  checarTodas("/auth/confirmar: GET mostra o botao, sem cookie, com no-store, noindex e no-referrer", [
+    [`status 200 (veio ${conf.status})`, conf.status === 200],
+    comTermo(confHtml, "Continuar para criar a senha nova"),
+    ["sem Set-Cookie", conf.headers.getSetCookie().length === 0],
+    ["Cache-Control no-store", /no-store/.test(conf.headers.get("cache-control") ?? "")],
+    ["X-Robots-Tag noindex", /noindex/.test(conf.headers.get("x-robots-tag") ?? "")],
+    ["Referrer-Policy no-referrer", conf.headers.get("referrer-policy") === "no-referrer"],
+  ]);
+  const inventado = await continuarLink(`${APP_URL}/auth/confirmar?token_hash=inventado&type=recovery&next=/redefinir-senha`, idConfirmar);
+  checar("/auth/confirmar: Continuar com token inventado volta com 'venceu ou ja foi usado', sem sessao",
+    inventado.status === 303 && inventado.local?.includes("erro=link") && !inventado.cookies.some((c) => c.startsWith("sb-")), `${inventado.status} -> ${inventado.local}`);
+  const pgErro = await pagina("/auth/confirmar?erro=link", null);
+  checar("/auth/confirmar?erro=link mostra 'Este link venceu ou já foi usado. Peça outro.'", pgErro.html.includes("Este link venceu ou já foi usado. Peça outro."), `status ${pgErro.status}`);
+
+  // Autorizacao (passos 1 a 5), antes de qualquer uso da chave secreta.
+  const [ckDonoA, ckDonoB, ckAt, ckMec] = await Promise.all([donoA, donoB, at, mec].map((c) => cookiesDaSessao(c.session)));
+  const idMec = mec.session.user.id;
+  const idMec2 = mec2.session.user.id;
+  const casos = [
+    ["atendente A para o mecanico A", ckAt, idMec, "acesso_negado"],
+    ["mecanico A para o mecanico 2", ckMec, idMec2, "acesso_negado"],
+    ["dono A para si mesmo", ckDonoA, donoA.session.user.id, "nao_pode_alterar_a_si_mesmo"],
+    ["dono A com id que nao e uuid", ckDonoA, "nao-e-uuid", "membro_nao_encontrado"],
+    ["dono A com uuid inventado", ckDonoA, uuid(), "membro_nao_encontrado"],
+    ["dono B para o mecanico A (outra oficina)", ckDonoB, idMec, "membro_nao_encontrado"],
+  ];
+  for (const [rot, ck, alvo, esperado] of casos) {
+    const r = await chamarAcao("/equipe", idGerar, [alvo], ck);
+    checar(`gerarLinkSenhaMembro: ${rot} -> ${esperado}, sem link`, r.codigo === esperado && !r.link && !r.ok, `status ${r.status} codigo ${r.codigo}`);
+  }
+  // Outro dono e desativado: mecanico 2 vira dono, volta; depois e desativado, volta.
+  const virouDono = await donoA.sb.rpc("atualizar_membro", { p_perfil_id: idMec2, p_papel: "dono" });
+  const rDono = await chamarAcao("/equipe", idGerar, [idMec2], ckDonoA);
+  const voltou = await donoA.sb.rpc("atualizar_membro", { p_perfil_id: idMec2, p_papel: "mecanico" });
+  checar("gerarLinkSenhaMembro: dono A para outro dono -> papel_invalido", !virouDono.error && !voltou.error && rDono.codigo === "papel_invalido" && !rDono.link, `${msg(virouDono)}/${msg(voltou)} codigo ${rDono.codigo}`);
+  const desat = await donoA.sb.rpc("atualizar_membro", { p_perfil_id: idMec2, p_ativo: false });
+  const rDesat = await chamarAcao("/equipe", idGerar, [idMec2], ckDonoA);
+  const reat = await donoA.sb.rpc("atualizar_membro", { p_perfil_id: idMec2, p_ativo: true });
+  checar("gerarLinkSenhaMembro: dono A para desativado -> membro_desativado", !desat.error && !reat.error && rDesat.codigo === "membro_desativado" && !rDesat.link, `${msg(desat)}/${msg(reat)} codigo ${rDesat.codigo}`);
+
+  // Caso valido: precisa da SUPABASE_SECRET_KEY do STAGING no ambiente do `next start`.
+  const r1 = await chamarAcao("/equipe", idGerar, [idMec], ckDonoA);
+  if (!r1.ok && r1.codigo === "link_senha_indisponivel") {
+    checar("gerarLinkSenhaMembro sem a chave secreta: erro controlado, sem link e sem quebrar", !r1.link && r1.status === 200, `status ${r1.status}`);
+    console.log("AVISO   F8-P3 PULADO: o servidor esta sem SUPABASE_SECRET_KEY (a do STAGING). Ponha a chave no .env.local, rode `next start` de novo e repita para testar o link de ponta a ponta.");
+    return;
+  }
+  checar("gerarLinkSenhaMembro: dono A para o mecanico A devolve o link", r1.ok && Boolean(r1.link), `status ${r1.status} codigo ${r1.codigo}`);
+  if (!r1.link) return;
+  const l1 = new URL(r1.link);
+  checar("link: /auth/confirmar com token_hash e type=recovery, nunca o action_link do Supabase", l1.pathname === "/auth/confirmar" && Boolean(l1.searchParams.get("token_hash")) && l1.searchParams.get("type") === "recovery" && !r1.link.includes("/auth/v1/verify"), l1.pathname);
+
+  const r2 = await chamarAcao("/equipe", idGerar, [idMec], ckDonoA);
+  // Prévia do WhatsApp: GET no link nao gasta o token.
+  const previa = await fetch(r2.link ?? "", { redirect: "manual" });
+  await previa.arrayBuffer();
+  const antigo = await continuarLink(r1.link, idConfirmar);
+  checar("gerar de novo cancela o primeiro link", r2.ok && antigo.status === 303 && antigo.local?.includes("erro=link"), `${antigo.status} -> ${antigo.local}`);
+  const usado = await continuarLink(r2.link, idConfirmar);
+  checar("depois de um GET (previa), o Continuar do link novo abre /redefinir-senha com sessao", previa.status === 200 && usado.status === 303 && usado.local === "/redefinir-senha" && usado.cookies.some((c) => c.startsWith("sb-")), `${usado.status} -> ${usado.local}`);
+  const deNovo = await continuarLink(r2.link, idConfirmar);
+  checar("o mesmo link duas vezes: a segunda da 'venceu ou ja foi usado'", deNovo.status === 303 && deNovo.local?.includes("erro=link"), `${deNovo.status} -> ${deNovo.local}`);
+
+  // Senha nova com a sessao do link, como a tela faz; derruba as outras sessoes.
+  const jar = new Map(usado.cookies.map((c) => c.split(";")[0]).map((c) => [c.slice(0, c.indexOf("=")), c.slice(c.indexOf("=") + 1)]));
+  const sbLink = createServerClient(URL_SB, CHAVE, {
+    cookies: { getAll: () => [...jar].map(([name, value]) => ({ name, value })), setAll: (l) => l.forEach(({ name, value }) => jar.set(name, value)) },
+  });
+  const nova = senha();
+  const upd = await sbLink.auth.updateUser({ password: nova });
+  const sair = await sbLink.auth.signOut({ scope: "others" });
+  const entraNova = await novoCliente().auth.signInWithPassword({ email: mec.email, password: nova });
+  const entraVelha = await novoCliente().auth.signInWithPassword({ email: mec.email, password: mec.pw });
+  const sessaoVelha = await mec.sb.auth.refreshSession();
+  checarTodas("mecanico: entra com a senha nova; a antiga nao entra; a sessao antiga caiu", [
+    [`updateUser (${msg(upd)})`, !upd.error],
+    [`signOut others (${sair.error?.message ?? "ok"})`, !sair.error],
+    ["entra com a nova", Boolean(entraNova.data?.session)],
+    ["a antiga nao entra", Boolean(entraVelha.error)],
+    ["refresh da sessao antiga falha", Boolean(sessaoVelha.error)],
+  ]);
+  // O resto da rodada continua com o mecanico logado de novo.
+  if (entraNova.data?.session) {
+    mec.pw = nova;
+    mec.session = entraNova.data.session;
+    await mec.sb.auth.setSession({ access_token: entraNova.data.session.access_token, refresh_token: entraNova.data.session.refresh_token });
+  }
 }
 
 /** So a Fase 7 (TESTE_SO_FASE7=1): 2 oficinas e 5 contas desta rodada. */

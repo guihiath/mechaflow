@@ -3,7 +3,7 @@
 import { useRef, useState, type FormEvent } from "react";
 import { CampoSenha } from "@/components/ui/campo";
 import { BotaoEnviar, CaixaMensagem, focarPrimeiroErro } from "@/components/ui/formulario";
-import { irParaDestino, validarSenha } from "@/components/auth/navegar";
+import { validarSenha } from "@/components/auth/navegar";
 import { traduzirErro } from "@/lib/erros";
 import { createClient } from "@/lib/supabase/client";
 
@@ -38,14 +38,17 @@ export function FormRedefinirSenha({ email }: { email: string | null }) {
       const { error } = await supabase.auth.updateUser({ password: senha });
       if (error) {
         if (/session|jwt|expired/i.test(error.message)) {
-          throw new Error("Este link venceu. Peça um link novo em “Esqueci minha senha”.");
+          throw new Error("Este link venceu. Peça um link novo ao dono da oficina ou em “Esqueci minha senha”.");
         }
         if (/different from the old|same password/i.test(error.message)) {
           throw new Error("A senha nova tem que ser diferente da antiga.");
         }
         throw error;
       }
-      await irParaDestino(supabase);
+      // Derruba as outras sessões abertas com a senha antiga (ARQUITETURA 15.5). Se falhar, a senha já
+      // mudou: segue para o app do mesmo jeito.
+      await supabase.auth.signOut({ scope: "others" }).catch(() => null);
+      window.location.replace("/entrar");
     } catch (err) {
       const msg = (err as { message?: string }).message ?? "";
       setErro(/^(Este link|A senha nova)/.test(msg) ? msg : traduzirErro(err as { message?: string }));

@@ -5,6 +5,9 @@ import { contextoParaAcao } from "@/lib/dal";
 import { erroCampos, temErros, texto, type EstadoAcao } from "@/lib/acao";
 import { traduzirErro } from "@/lib/erros";
 import { createClient } from "@/lib/supabase/server";
+import { criarClienteAdmin } from "@/lib/supabase/admin";
+import { montarLinkSenha, podeGerarLinkSenha, VALIDADE_LINK_SENHA_MS } from "@/lib/link-senha";
+import { urlPublicaApp } from "@/lib/url-publica";
 import type { Database } from "@/lib/supabase/database.types";
 
 type Papel = Database["public"]["Enums"]["papel_usuario"];
@@ -61,4 +64,72 @@ export async function atualizarMembro(
   if (error) return { erro: traduzirErro(error) };
   refresh();
   return { ok: true };
+}
+
+/**
+ * F8-P3 (ARQUITETURA 15.12): o dono gera o link para o funcionário criar uma senha nova, sem e-mail.
+ * O link só existe nesta resposta e na tela: nunca vai para log, console nem banco.
+ */
+export async function gerarLinkSenhaMembro(perfilId: string): Promise<EstadoAcao> {
+  // Os códigos são os de 15.12 (vão em `mensagem`, para o teste); dois textos são próprios desta
+  // tela, porque os gerais falam de convite e de "acesso".
+  const TEXTO: Record<string, string> = {
+    nao_pode_alterar_a_si_mesmo: "Para a sua própria senha, use “Esqueci minha senha” na tela de entrar.",
+    papel_invalido: "Outro dono troca a senha pelo próprio e-mail, em “Esqueci minha senha”.",
+  };
+  const erro = (codigo: string): EstadoAcao => ({ erro: TEXTO[codigo] ?? traduzirErro({ message: codigo }), mensagem: codigo });
+
+  // 1. Logado, ativo, termos aceitos e dono.
+  const ctx = await contextoParaAcao(["dono"]);
+  if (!ctx) return erro("acesso_negado");
+  // 2. Id válido.
+  if (typeof perfilId !== "string" || !UUID.test(perfilId)) return erro("membro_nao_encontrado");
+  // 3. Não pode ser o próprio dono.
+  if (perfilId === ctx.usuario_id) return erro("nao_pode_alterar_a_si_mesmo");
+
+  // 4. Alvo lido com o cliente do usuário: a RLS só mostra a própria oficina, então o dono de outra
+  // oficina recebe a mesma resposta de um id inventado.
+  const supabase = await createClient();
+  const { data: alvo, error } = await supabase
+    .from("perfis")
+    .select("id, nome, telefone, papel, ativo")
+    .eq("id", perfilId)
+    .maybeSingle();
+  if (error) return erro("link_senha_indisponivel");
+  if (!alvo) return erro("membro_nao_encontrado");
+  // 5. Outro dono ou desativado.
+  const recusa = podeGerarLinkSenha({ usuario_id: ctx.usuario_id }, alvo);
+  if (recusa) return erro(recusa);
+
+  const base = urlPublicaApp();
+  if (!base) return { erro: "O endereço do link não está configurado (URL_PUBLICA_APP). Nada foi gerado." };
+  const admin = criarClienteAdmin();
+  if (!admin) return erro("link_senha_indisponivel");
+
+  // 6. E-mail do Auth (não a cópia de perfis.email).
+  const conta = await admin.auth.admin.getUserById(perfilId);
+  const email = conta.data.user?.email;
+  if (conta.error || !email) return erro(conta.error && limiteDeEnvio(conta.error) ? "aguarde_para_gerar" : "link_senha_indisponivel");
+
+  // 7. Não manda e-mail; usa o hashed_token (nunca o action_link, que a prévia do WhatsApp gasta).
+  const gerado = await admin.auth.admin.generateLink({ type: "recovery", email });
+  const tokenHash = gerado.data?.properties?.hashed_token;
+  // 8.
+  if (gerado.error || !tokenHash) return erro(gerado.error && limiteDeEnvio(gerado.error) ? "aguarde_para_gerar" : "link_senha_indisponivel");
+
+  console.info(`link de senha gerado para o perfil ${perfilId} pela oficina ${ctx.oficina_id}`);
+  // 9.
+  return {
+    ok: true,
+    dados: {
+      link: montarLinkSenha(base, tokenHash),
+      validoAte: new Date(Date.now() + VALIDADE_LINK_SENHA_MS).toISOString(),
+      nome: alvo.nome,
+      telefone: alvo.telefone ?? "",
+    },
+  };
+}
+
+function limiteDeEnvio(e: { status?: number; code?: string; message?: string }) {
+  return e.status === 429 || e.code === "over_email_send_rate_limit" || /rate limit/i.test(e.message ?? "");
 }

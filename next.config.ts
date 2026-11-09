@@ -45,6 +45,15 @@ const nextConfig: NextConfig = {
         ],
       },
       {
+        // Link de senha (e-mail e o que o dono gera, ARQUITETURA 15.5): o token vai na URL.
+        source: "/auth/confirmar",
+        headers: [
+          { key: "X-Robots-Tag", value: "noindex, nofollow" },
+          { key: "Referrer-Policy", value: "no-referrer" },
+          { key: "Cache-Control", value: "no-store" },
+        ],
+      },
+      {
         source: "/sw.js",
         headers: [
           { key: "Content-Type", value: "application/javascript; charset=utf-8" },

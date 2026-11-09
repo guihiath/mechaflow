@@ -10,8 +10,9 @@ import { FormRedefinirSenha } from "./form-redefinir-senha";
 export const metadata: Metadata = { title: "Criar senha nova", robots: { index: false } };
 
 /**
- * Chega aqui pelo link do e-mail (via /auth/callback, que troca o codigo pela sessao de recuperacao).
- * Sem sessao = link vencido ou aberto em outro aparelho.
+ * Chega aqui pelo link do e-mail ou pelo link que o dono gera na Equipe (F8-P3), depois do "Continuar"
+ * de /auth/confirmar (ou do /auth/callback, nos links antigos), que troca o token pela sessao de
+ * recuperacao. Serve a qualquer papel. Sem sessao = link vencido ou ja usado.
  */
 export default function RedefinirSenhaPage() {
   return (
@@ -30,7 +31,7 @@ async function Conteudo() {
     return (
       <>
         <CaixaMensagem tipo="erro">
-          Este link venceu ou foi aberto em outro aparelho. Peça um link novo e abra no mesmo celular.
+          Este link venceu ou já foi usado. Funcionário: peça um link novo ao dono da oficina. Dono: peça um link novo abaixo.
         </CaixaMensagem>
         <BotaoLink href="/esqueci-senha">Pedir link novo</BotaoLink>
       </>
