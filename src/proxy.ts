@@ -1,8 +1,19 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { atualizarSessao } from "@/lib/supabase/proxy";
 
-/** Domínio único da produção (ARQUITETURA 15.8.2). */
-const DOMINIO_PRODUCAO = "mechaflow.com.br";
+/**
+ * Domínio único da produção (ARQUITETURA 15.8.2): o host de URL_PUBLICA_APP.
+ * Enquanto não houver domínio próprio, URL_PUBLICA_APP aponta para mechaflow-seven.vercel.app;
+ * quando o domínio existir, basta trocar a variável (o link do orçamento sai dela também).
+ */
+function dominioProducao(): string {
+  try {
+    return new URL(process.env.URL_PUBLICA_APP ?? "").host.toLowerCase();
+  } catch {
+    return "mechaflow.com.br";
+  }
+}
+const DOMINIO_PRODUCAO = dominioProducao();
 const EH_PRODUCAO = process.env.NEXT_PUBLIC_AMBIENTE === "producao";
 
 /** Rotas só de teste: em produção dão 404 para todos, com ou sem login. */
