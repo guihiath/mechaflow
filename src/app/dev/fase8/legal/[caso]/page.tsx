@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { BlocoDefinicoes } from "@/components/legal/bloco-definicoes";
 import { classesLinkLegal, DocumentoLegal, type SecaoLegal } from "@/components/legal/documento-legal";
-import { CONTATO_ENCARREGADO_RASCUNHO, SECOES_PRIVACIDADE, secoesTermos } from "@/components/legal/textos";
+import { CONTATO_ENCARREGADO, SECOES_PRIVACIDADE, secoesTermos } from "@/components/legal/textos";
 import { EH_PRODUCAO } from "@/lib/brand";
 import { linkWhatsAppSuporte } from "@/lib/suporte";
 import { TERMOS_VERSAO } from "@/lib/termos";
@@ -91,7 +91,7 @@ export default async function VitrineLegal({ params }: { params: Promise<{ caso:
             </a>
           </p>
         ) : (
-          CONTATO_ENCARREGADO_RASCUNHO
+          CONTATO_ENCARREGADO
         )
       }
       whatsapp={whatsapp}
